@@ -16,6 +16,7 @@ Prefer configuration.
 
 ## Strong typing
 Use type hints everywhere.
+Never write code with unresolved imports or missing type information.
 Run mypy.
 
 ## Testability
@@ -50,3 +51,11 @@ where every caller has to check for None, we'd rather design our pipeline so tha
 
 ## When a decision becomes an architectural decisions
 If a discussion ends with "we've decided to do X", we ask ourselves: "Will someone wonder why in six months?" If the answer is yes, it deserves an ADR.
+
+## Every file we add should satisfy this checklist before we move on:
+- ruff check
+- black
+- mypy
+- pytest
+- Readable without comments
+- One clear responsibility

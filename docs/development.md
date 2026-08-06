@@ -73,3 +73,42 @@ For every implementation we'll review:
 - Consistency with our architecture
 
 If something can be improved, we'll improve it immediately instead of accumulating technical debt.
+
+## Before every commit/merge, ask yourself these four questions:
+
+- Does it compile?
+- Does it pass tests?
+- Would I understand this in six months?
+- Would I approve this if it came from someone else?
+
+If the answer to any of them is "no," we improve it before committing.
+
+It's a simple checklist, but it's remarkably effective at maintaining quality.
+
+## Coding Standards
+- Import order (standard library → third-party → local)
+- One responsibility per class
+- Immutable configuration models
+- Logical field ordering (not alphabetical)
+- Every public class has a concise docstring
+- Every feature must include unit tests
+- Use Conventional Commits
+
+## Order inside a class
+I'd like every class to follow the same order.
+```
+class AudioSettings(BaseConfigurationModel):
+    """Configuration for audio capture."""
+
+    fields
+
+    properties
+
+    validators
+```
+
+## Fields order inside class
+Logical grouping instead of alphabetical order
+
+## Path, future reference
+If multiple filesystem paths are added, extract a dedicated `PathResolver` component instead of expanding `ConfigurationLoader`.
