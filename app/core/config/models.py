@@ -14,7 +14,7 @@ from app.core.config.enums import (
 )
 
 
-class BaseSettingsModel(BaseModel):
+class BaseConfigurationModel(BaseModel):
     """Base class for all configuration models."""
 
     model_config = ConfigDict(
@@ -24,43 +24,43 @@ class BaseSettingsModel(BaseModel):
     )
 
 
-class ApplicationSettings(BaseSettingsModel):
+class ApplicationSettings(BaseConfigurationModel):
     name: str
     environment: ApplicationEnvironment
 
 
-class ApiSettings(BaseSettingsModel):
+class ApiSettings(BaseConfigurationModel):
     host: str
     port: Annotated[int, Field(ge=1, le=65535)]
 
 
-class LoggingSettings(BaseSettingsModel):
+class LoggingSettings(BaseConfigurationModel):
     level: LogLevel
 
 
-class AudioSettings(BaseSettingsModel):
+class AudioSettings(BaseConfigurationModel):
     sample_rate: Annotated[int, Field(ge=8_000, le=192_000)]
     channels: Annotated[int, Field(ge=1, le=2)]
     chunk_seconds: Annotated[int, Field(ge=1, le=30)]
 
 
-class VadSettings(BaseSettingsModel):
+class VadSettings(BaseConfigurationModel):
     enabled: bool
     speech_threshold: Annotated[float, Field(ge=0.0, le=1.0)]
     min_silence_duration_ms: Annotated[int, Field(ge=0)]
 
 
-class WhisperSettings(BaseSettingsModel):
+class WhisperSettings(BaseConfigurationModel):
     model: WhisperModel
     device: WhisperDevice
     compute_type: WhisperComputeType
 
 
-class DatabaseSettings(BaseSettingsModel):
+class DatabaseSettings(BaseConfigurationModel):
     path: Path
 
 
-class Settings(BaseSettingsModel):
+class Settings(BaseConfigurationModel):
     application: ApplicationSettings
     api: ApiSettings
     logging: LoggingSettings
@@ -94,7 +94,7 @@ __all__ = [
     "ApplicationSettings",
     "ApiSettings",
     "AudioSettings",
-    "BaseSettingsModel",
+    "BaseConfigurationModel",
     "DatabaseSettings",
     "LoggingSettings",
     "Settings",
