@@ -62,6 +62,8 @@ audio-transcription-service/
 │   ├── roadmap.md
 │   ├── testing.md
 │   ├── observability.md
+|   ├── engineering-principles.md
+│   ├── development.md
 │   └── decisions/
 │
 ├── scripts/
