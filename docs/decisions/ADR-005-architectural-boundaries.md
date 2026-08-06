@@ -1,4 +1,4 @@
-# ADR-003 — Architectural Boundaries
+# ADR-005 — Architectural Boundaries
 ## Decision
 Use abstractions only at architectural boundaries.
 
