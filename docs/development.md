@@ -29,10 +29,10 @@ We now have a very clear process:
 
 - We discuss a feature.
 - We agree on the design.
-- I tell you whether:
+- Decide whether:
     1. 🟢 No ADR needed — implementation detail.
     2. 📘 ADR recommended — architectural decision.
-- If needed, you create/update the ADR.
+- If needed, create/update the ADR.
 - We implement.
 - We test.
 - We update the relevant documentation (if needed).
