@@ -1,5 +1,4 @@
 [project]
-[project]
 name = "audio-transcription-service"
 version = "0.1.0"
 description = "Production-oriented local speech-to-text service."
@@ -8,7 +7,13 @@ requires-python = ">=3.14,<3.15"
 authors = [
     { name = "Alexandru Noroc", email = "kradores10@gmail.com" }
 ]
-dependencies = []
+dependencies = [
+    "fastapi>=0.141.1",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.2",
+    "pyyaml>=6.0.3",
+    "uvicorn>=0.52.1",
+]
 
 [project.scripts]
 audio-transcription-service = "audio_transcription_service:main"

@@ -1,3 +1,14 @@
+## HOW TO START
+```
+git clone <repo>
+```
+```
+cd audio-transcription-service
+```
+```
+uv sync
+```
+
 ## Definition of Done (DoD)
 Before we consider a task complete, we should be able to answer "yes" to something like:
 - Requirements implemented
@@ -37,3 +48,28 @@ We now have a very clear process:
 - We test.
 - We update the relevant documentation (if needed).
 - We commit.
+
+## About the code itself
+
+From this point onward, present code like a senior engineer opening a pull request:
+
+- specify the file being implemented.
+- explain why the code is written that way.
+- point out any trade-offs.
+- suggest improvements if I see them.
+- recommend tests before moving on.
+
+## Code Review Checklist
+
+For every implementation we'll review:
+
+- Correctness
+- Readability
+- Maintainability
+- Testability
+- Type safety
+- Performance (when relevant)
+- Future extensibility
+- Consistency with our architecture
+
+If something can be improved, we'll improve it immediately instead of accumulating technical debt.

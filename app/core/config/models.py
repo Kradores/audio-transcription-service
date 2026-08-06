@@ -10,7 +10,7 @@ from app.core.config.enums import (
     LogLevel,
     WhisperComputeType,
     WhisperDevice,
-    WhisperModelSize,
+    WhisperModel,
 )
 
 
@@ -20,6 +20,7 @@ class BaseSettingsModel(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        validate_assignment=False
     )
 
 
@@ -50,7 +51,7 @@ class VadSettings(BaseSettingsModel):
 
 
 class WhisperSettings(BaseSettingsModel):
-    model: WhisperModelSize
+    model: WhisperModel
     device: WhisperDevice
     compute_type: WhisperComputeType
 
