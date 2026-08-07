@@ -123,3 +123,16 @@ Instead of asking "How should we design this?", we'll ask:
 - Dependencies are passed through constructors.
 
 This is one of the cleanest habits you can develop, and it will pay off enormously once we start wiring in Whisper, VAD, storage, and the API.
+
+## For future subsystems, Definition of Done
+- Architecture agreed
+- ADR written (if needed)
+- Public API designed
+- Implementation complete
+- Unit tests complete
+- Integration tests (if applicable)
+- Documentation updated
+- Ruff passes
+- MyPy passes
+- Pytest passes
+- Ready to merge
