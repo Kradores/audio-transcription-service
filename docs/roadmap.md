@@ -23,7 +23,7 @@ Sprint 1
 |     3 | Remove (or intentionally use) the unused configuration fixture files             | Done       |
 |     4 | Implement the logging subsystem                                                  | Done       |
 |     5 | Expand `Application` into the application lifecycle owner (`start()` / `stop()`) | Done       |
-|     6 | Implement the composition root                                                   | Next       |
+|     6 | Implement the composition root                                                   | Done       |
 |     7 | Implement `main.py` and `__main__.py`                                            | PR-008     |
 |     8 | Add startup integration tests                                                    | Validation |
 |     9 | Verify `uv run python -m app` from a clean checkout                              | Sprint DoD |
