@@ -1,4 +1,4 @@
-# ADR-010: Typed Configuration System
+# ADR-011: Typed Configuration System
 
 ## Status
 Approved

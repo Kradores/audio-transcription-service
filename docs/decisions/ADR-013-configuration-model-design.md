@@ -1,4 +1,4 @@
-# ADR-012: Configuration Model Design
+# ADR-013: Configuration Model Design
 
 ## Decision
 - Nested immutable Pydantic models.

@@ -1,4 +1,4 @@
-# ADR-011: Default Configuration Source
+# ADR-012: Default Configuration Source
 
 ## Status
 Accepted
