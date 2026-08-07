@@ -112,3 +112,7 @@ Logical grouping instead of alphabetical order
 
 ## Path, future reference
 If multiple filesystem paths are added, extract a dedicated `PathResolver` component instead of expanding `ConfigurationLoader`.
+
+## Implementation-driven development
+Instead of asking "How should we design this?", we'll ask:
+"Is this implementation the simplest one that satisfies our architecture?"
