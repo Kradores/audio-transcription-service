@@ -18,3 +18,27 @@ We now have:
 - `pytest` — 37/37 passed
 - `ruff check .` — passed
 - `mypy .` — passed
+
+
+## Sprint 2 status
+
+We have successfully completed:
+
+1. Configuration
+    - Production config/config.yaml
+    - config/config.example.yaml
+    - Removed unused fixtures
+    - Default configuration integration test
+    - 37 tests passing
+    - Ruff + mypy green
+
+2. Logging
+    - ADR-017 accepted
+    - app/core/logging.py
+    - Standard-library logging
+    - Configurable log level
+    - Console output
+    - Consistent structured format
+    - No duplicate handlers
+    - 4 dedicated logging tests
+    - Full quality gate green

@@ -17,3 +17,6 @@ class Application:
         """Return the application configuration."""
 
         return self._settings
+
+    def start(self) -> None:
+        """Start the application."""

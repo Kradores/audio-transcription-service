@@ -10,7 +10,7 @@ Sprint 1
 ✅ Configuration loader
 ✅ Tests
 ✅ Quality gates
-⬜ Configuration files
+✅ Configuration files
 ⬜ Application bootstrap
 ```
 
@@ -18,12 +18,12 @@ Sprint 1
 
 | Order | Task                                                                             | Status     |
 | ----: | -------------------------------------------------------------------------------- | ---------- |
-|     1 | Populate `config/config.yaml`                                                    | Next       |
-|     2 | Populate `config/config.example.yaml`                                            | Next       |
-|     3 | Remove (or intentionally use) the unused configuration fixture files             | Cleanup    |
-|     4 | Implement the logging subsystem                                                  | PR-009     |
-|     5 | Expand `Application` into the application lifecycle owner (`start()` / `stop()`) | PR-006     |
-|     6 | Implement the composition root                                                   | PR-007     |
+|     1 | Populate `config/config.yaml`                                                    | Done       |
+|     2 | Populate `config/config.example.yaml`                                            | Done       |
+|     3 | Remove (or intentionally use) the unused configuration fixture files             | Done       |
+|     4 | Implement the logging subsystem                                                  | Done       |
+|     5 | Expand `Application` into the application lifecycle owner (`start()` / `stop()`) | Done       |
+|     6 | Implement the composition root                                                   | Next       |
 |     7 | Implement `main.py` and `__main__.py`                                            | PR-008     |
 |     8 | Add startup integration tests                                                    | Validation |
 |     9 | Verify `uv run python -m app` from a clean checkout                              | Sprint DoD |

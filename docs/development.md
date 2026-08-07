@@ -136,3 +136,14 @@ This is one of the cleanest habits you can develop, and it will pay off enormous
 - MyPy passes
 - Pytest passes
 - Ready to merge
+
+## Note
+`Application` = runtime application object / owner of long-lived services
+`composition.py` = composition function/module that constructs the object graph
+```
+composition.py
+    constructs everything
+          ↓
+Application
+    owns everything
+```
