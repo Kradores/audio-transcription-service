@@ -14,29 +14,29 @@ Sprint 1
 ⬜ Application bootstrap
 ```
 
-## Sprint 2 - Application Bootstrap
+## Sprint 2 - Application Bootstrap Plan
 
-Our objective is not to transcribe audio.
+| Order | Task                                                                             | Status     |
+| ----: | -------------------------------------------------------------------------------- | ---------- |
+|     1 | Populate `config/config.yaml`                                                    | Next       |
+|     2 | Populate `config/config.example.yaml`                                            | Next       |
+|     3 | Remove (or intentionally use) the unused configuration fixture files             | Cleanup    |
+|     4 | Implement the logging subsystem                                                  | PR-009     |
+|     5 | Expand `Application` into the application lifecycle owner (`start()` / `stop()`) | PR-006     |
+|     6 | Implement the composition root                                                   | PR-007     |
+|     7 | Implement `main.py` and `__main__.py`                                            | PR-008     |
+|     8 | Add startup integration tests                                                    | Validation |
+|     9 | Verify `uv run python -m app` from a clean checkout                              | Sprint DoD |
 
-Our objective is:
-- Start the application successfully.
-
-Everything else builds on that.
-I'd break it into four small PRs.
-```
-PR-006
-Application object
-
-PR-007
-Composition root
-
-PR-008
-Startup
-
-PR-009
-Logging
-```
-Each PR should remain independently reviewable.
+### Why this order works
+Each step builds on the previous one:
+- Configuration provides valid input to the application.
+- Logging gives visibility into startup and shutdown.
+- Application defines the application's lifetime.
+- Composition Root wires everything together in one place.
+- Entry points (`main.py` / `__main__.py`) become very thin, which is exactly what ADR-016 intends.
+- Integration tests verify the complete startup path rather than isolated pieces.
+By the end of Sprint 2, the application should have a stable skeleton that future subsystems can plug into without revisiting the startup architecture.
 
 ## My expectation for the end of Sprint 2
 

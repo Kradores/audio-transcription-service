@@ -1,0 +1,28 @@
+application:
+  name: audio-transcription-service
+  environment: development
+
+api:
+  host: 127.0.0.1
+  port: 8000
+
+logging:
+  level: INFO
+
+audio:
+  sample_rate: 16000
+  channels: 1
+  chunk_seconds: 3
+
+vad:
+  enabled: true
+  speech_threshold: 0.5
+  min_silence_duration_ms: 300
+
+whisper:
+  model: small
+  device: cpu
+  compute_type: int8
+
+database:
+  path: transcripts.db

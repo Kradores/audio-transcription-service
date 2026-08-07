@@ -1,4 +1,5 @@
 from __future__ import annotations
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -59,7 +60,7 @@ def test_whisper_settings_accepts_valid_values() -> None:
 
 def test_database_settings_accepts_valid_values() -> None:
     settings = SettingsBuilder().build()
-    assert settings.database.path == "data/transcripts.db"
+    assert settings.database.path == Path("data/transcripts.db")
 
 
 def test_settings_accepts_valid_values() -> None:
@@ -69,7 +70,7 @@ def test_settings_accepts_valid_values() -> None:
     assert settings.audio.sample_rate == 16_000
     assert settings.vad.speech_threshold == 0.5
     assert settings.whisper.model is WhisperModel.SMALL
-    assert settings.database.path == "data/transcripts.db"
+    assert settings.database.path == Path("data/transcripts.db")
 
 
 @pytest.mark.parametrize(
@@ -103,7 +104,7 @@ def test_api_settings_rejects_invalid_ports(port: int) -> None:
         (8_000, 2, 30),
         (192_000, 1, 30),
         (192_000, 2, 1),
-    ]
+    ],
 )
 def test_audio_settings_accepts_boundary_values(
     sample_rate: int, channels: int, chunk_seconds: int
@@ -129,7 +130,7 @@ def test_audio_settings_accepts_boundary_values(
         (193_000, 2, 30),
         (192_000, 3, 30),
         (192_000, 2, 99),
-    ]
+    ],
 )
 def test_audio_settings_rejects_invalid_values(
     sample_rate: int, channels: int, chunk_seconds: int
