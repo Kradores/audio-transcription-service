@@ -15,8 +15,12 @@ dependencies = [
     "uvicorn>=0.52.1",
 ]
 
+[tool.uv.build-backend]
+module-name = "app"
+module-root = ""
+
 [project.scripts]
-audio-transcription-service = "audio_transcription_service:main"
+audio-transcription-service = "app:main"
 
 [build-system]
 requires = ["uv_build>=0.12.2,<0.13.0"]
@@ -24,18 +28,18 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "black",
     "httpx",
     "mypy",
     "pytest",
     "pytest-cov",
     "ruff",
+    "types-pyyaml>=6.0.12.20260724",
 ]
 
 [tool.ruff]
 
 line-length = 100
-target-version = ["py314"]
+target-version = "py314"
 
 [tool.ruff.lint]
 
@@ -48,11 +52,6 @@ select = [
     "SIM",
 ]
 
-[tool.black]
-
-line-length = 100
-target-version = ["py314"]
-
 [tool.mypy]
 python_version = "3.14"
 warn_return_any = true
@@ -60,6 +59,7 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 no_implicit_optional = true
 check_untyped_defs = true
+explicit_package_bases = true
 
 
 [tool.pytest.ini_options]
