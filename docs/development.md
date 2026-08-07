@@ -116,3 +116,10 @@ If multiple filesystem paths are added, extract a dedicated `PathResolver` compo
 ## Implementation-driven development
 Instead of asking "How should we design this?", we'll ask:
 "Is this implementation the simplest one that satisfies our architecture?"
+
+## Composition Root Rule
+- Objects are created only in the composition root.
+- Business classes never instantiate other business classes directly.
+- Dependencies are passed through constructors.
+
+This is one of the cleanest habits you can develop, and it will pay off enormously once we start wiring in Whisper, VAD, storage, and the API.
