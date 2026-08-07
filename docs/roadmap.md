@@ -24,9 +24,9 @@ Sprint 1
 |     4 | Implement the logging subsystem                                                  | Done       |
 |     5 | Expand `Application` into the application lifecycle owner (`start()` / `stop()`) | Done       |
 |     6 | Implement the composition root                                                   | Done       |
-|     7 | Implement `main.py` and `__main__.py`                                            | PR-008     |
-|     8 | Add startup integration tests                                                    | Validation |
-|     9 | Verify `uv run python -m app` from a clean checkout                              | Sprint DoD |
+|     7 | Implement `main.py` and `__main__.py`                                            | Done       |
+|     8 | Add startup integration tests                                                    | Done       |
+|     9 | Verify `uv run python -m app` from a clean checkout                              | Done       |
 
 ### Why this order works
 Each step builds on the previous one:
@@ -52,3 +52,12 @@ should:
 - and leave the quality pipeline completely green.
 
 Once we reach that point, we can start on the part everyone is excited about—designing the audio capture pipeline. The difference is that we'll be building it on a foundation that's already proven itself.
+
+## Sprint 2 ends with:
+- configuration loading from YAML ✅
+- immutable validated settings ✅
+- logging ✅
+- composition root ✅
+- application object ✅
+- executable startup ✅
+- environment overrides (ADR-008) ⏸️ deferred until deployment environments actually require them
