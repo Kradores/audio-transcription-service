@@ -4,16 +4,18 @@ I don't want tests to just verify behavior - I want them to describe the compone
 ## Test structure
 ```
 tests/
+├── integration/
+    └── core/
+        └── config/
+            └── test_default_configuration.py
 └── unit/
     └── core/
+        ├── test_logging.py
         └── config/
             ├── builders.py
             ├── helpers.py
             ├── test_loader.py
-            ├── test_models.py
-            └── fixtures/
-                ├── valid_config.yaml
-                └── invalid_yaml.yaml
+            └── test_models.py
 ```
 
 ## Test philosophy
