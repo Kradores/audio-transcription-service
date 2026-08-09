@@ -42,3 +42,38 @@ We have successfully completed:
     - No duplicate handlers
     - 4 dedicated logging tests
     - Full quality gate green
+
+
+## As of 2026-08-10 - current status:
+Sprint 2
+    ✅ configuration
+    ✅ logging
+    ✅ composition
+    ✅ application lifecycle
+    ✅ startup
+
+Architecture
+    ✅ ADR-018 Audio Capture
+    ✅ ADR-019 Recovery
+    ✅ ADR-020 Ownership
+    ✅ ADR-021 Normalization
+    ✅ ADR-022 Lifecycle
+    ✅ ADR-023 VAD / buffering semantics
+    ✅ ADR-024 VAD contract
+    ✅ ADR-025 Segment assembler
+
+Contract slice
+    ✅ AudioFormat
+    ✅ AudioFrame
+    ✅ ProcessingAudioFrame
+    ✅ SpeechStart
+    ✅ SpeechEnd
+    ✅ SpeechSegment
+    ✅ Audio configuration restructuring
+    ✅ segment audio ownership
+
+Verification
+    ✅ 67 tests
+    ✅ Ruff
+    ✅ Ruff format
+    ✅ mypy
