@@ -137,7 +137,7 @@ This is one of the cleanest habits you can develop, and it will pay off enormous
 - Pytest passes
 - Ready to merge
 
-## Note
+## Notes
 `Application` = runtime application object / owner of long-lived services
 `composition.py` = composition function/module that constructs the object graph
 ```
@@ -146,4 +146,107 @@ composition.py
           ↓
 Application
     owns everything
+```
+---
+I recommend PyAudioWPatch as the concrete capture backend for Sprint 3.
+
+We should not expose PyAudioWPatch types outside the infrastructure/adapter layer. Our application should depend on our own `AudioCapture` boundary.
+
+## proposed AudioFrame
+Conceptually:
+```
+AudioFrame
+├── samples: numpy.ndarray[int16]
+├── sample_rate: int
+├── channels: int
+├── timestamp: float
+└── duration: float
+```
+
+with these invariants:
+```
+samples
+    owned by AudioFrame
+    PCM signed 16-bit
+    native capture sample rate
+    native channel count
+
+timestamp
+    monotonic seconds since capture started
+
+duration
+    seconds represented by this frame
+
+frame duration
+    normally exactly 20 ms
+```
+
+## What device are we actually capturing?
+Capture the Windows default render/output device through its WASAPI loopback endpoint.
+```
+Windows default output
+        │
+        ▼
+WASAPI render endpoint
+        │
+        ▼
+corresponding loopback endpoint
+        │
+        ▼
+AudioCapture
+```
+This also handles a common use case naturally:
+```
+Laptop speakers
+      ↓
+Bluetooth headphones
+      ↓
+USB headset
+```
+
+## What happens when the default device changes?
+Windows changes:
+```
+Default output:
+Speakers → Bluetooth Headphones
+```
+Our desired behavior is:
+```
+old stream
+    │
+    ▼
+device change detected
+    │
+    ▼
+stop old stream
+    │
+    ▼
+discover new default output
+    │
+    ▼
+open corresponding loopback
+    │
+    ▼
+resume frames
+```
+
+## The implementation sequence for audio
+```
+Contracts
+    ↓
+Capture adapter
+    ↓
+Capture queue/lifecycle
+    ↓
+Normalizer
+    ↓
+Silero adapter
+    ↓
+SpeechSegmentAssembler
+    ↓
+Pipeline composition
+    ↓
+Hardware-independent tests
+    ↓
+Real Windows integration
 ```

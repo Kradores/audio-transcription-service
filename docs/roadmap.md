@@ -61,3 +61,15 @@ Once we reach that point, we can start on the part everyone is excited about—d
 - application object ✅
 - executable startup ✅
 - environment overrides (ADR-008) ⏸️ deferred until deployment environments actually require them
+
+## Sprint 3 - Audio
+```
+Phase 1
+ ├── Audio Capture
+ ├── VAD
+ ├── Whisper
+ └── Storage
+```
+
+Audio Capture Architecture — designed
+Audio Capture Pipeline — next

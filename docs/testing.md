@@ -88,3 +88,62 @@ This has several benefits:
 - Mirrors production usage (configuration is parsed from dictionaries).
 - Avoids fighting the type checker.
 - Makes tests more expressive for invalid input scenarios.
+
+## audio testing strategy
+```
+AudioCapture
+    ├── contract/unit tests
+    └── Windows integration tests
+
+AudioNormalizer
+    └── deterministic unit tests
+
+SileroVADAdapter
+    ├── adapter contract tests
+    └── model integration tests where practical
+
+SpeechSegmentAssembler
+    └── deterministic state-machine tests
+```
+
+And specifically test:
+- 200 ms pre-roll
+- 200 ms post-roll
+- speech resuming during post-roll
+- ~3 s target
+- 5 s hard split
+- 10/15 s experimental configurations
+- no overlap
+- frame ownership
+- capture interruption
+- shutdown discard
+- maximum-duration invariant
+
+### Unit tests
+No Windows audio hardware required.
+
+Use a deterministic fake implementation that generates known frames.
+
+Test:
+- frame ordering
+- timestamps
+- lifecycle
+- cancellation
+- bounded queue
+- overflow behavior
+- frame drops
+- consumer behavior
+
+### Integration tests
+Run on Windows where appropriate.
+
+Test the actual PyAudioWPatch adapter:
+
+- device discovery
+- loopback opening
+- actual frame acquisition
+- format reporting
+- startup/shutdown
+- potentially device recovery
+
+This keeps CI/test architecture clean.
