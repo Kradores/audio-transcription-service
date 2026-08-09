@@ -38,11 +38,18 @@ def test_logging_settings_accepts_valid_values() -> None:
     assert settings.logging.level is LogLevel.INFO
 
 
-def test_audio_settings_accepts_valid_values() -> None:
+def test_audio_processing_settings_accepts_valid_values() -> None:
     settings = SettingsBuilder().build()
-    assert settings.audio.sample_rate == 16_000
-    assert settings.audio.channels == 1
-    assert settings.audio.chunk_seconds == 5
+    assert settings.audio.processing.sample_rate == 16_000
+    assert settings.audio.processing.channels == 1
+
+
+def test_audio_segmentation_settings_accepts_valid_values() -> None:
+    settings = SettingsBuilder().build()
+    assert settings.audio.segmentation.pre_roll_ms == 200
+    assert settings.audio.segmentation.post_roll_ms == 200
+    assert settings.audio.segmentation.target_duration_seconds == 3
+    assert settings.audio.segmentation.max_duration_seconds == 5
 
 
 def test_vad_settings_accepts_valid_values() -> None:
@@ -68,7 +75,7 @@ def test_settings_accepts_valid_values() -> None:
     settings = SettingsBuilder().build()
     assert settings.application.name == "Audio Transcription Service"
     assert settings.api.port == 8080
-    assert settings.audio.sample_rate == 16_000
+    assert settings.audio.processing.sample_rate == 16_000
     assert settings.vad.speech_threshold == 0.5
     assert settings.whisper.model is WhisperModel.SMALL
     assert settings.database.path == Path("data/transcripts.db")
@@ -99,49 +106,83 @@ def test_api_settings_rejects_invalid_ports(port: int) -> None:
 
 
 @pytest.mark.parametrize(
-    "sample_rate, channels, chunk_seconds",
+    "sample_rate, channels",
     [
-        (8_000, 1, 1),
-        (8_000, 2, 30),
-        (192_000, 1, 30),
-        (192_000, 2, 1),
+        (8_000, 1),
+        (8_000, 2),
+        (192_000, 1),
+        (192_000, 2),
     ],
 )
-def test_audio_settings_accepts_boundary_values(
-    sample_rate: int, channels: int, chunk_seconds: int
-) -> None:
-    settings = (
-        SettingsBuilder()
-        .with_sample_rate(sample_rate)
-        .with_channels(channels)
-        .with_chunk_seconds(chunk_seconds)
-        .build()
-    )
-    assert settings.audio.sample_rate == sample_rate
-    assert settings.audio.channels == channels
-    assert settings.audio.chunk_seconds == chunk_seconds
+def test_audio_processing_settings_accepts_boundary_values(sample_rate: int, channels: int) -> None:
+    settings = SettingsBuilder().with_sample_rate(sample_rate).with_channels(channels).build()
+    assert settings.audio.processing.sample_rate == sample_rate
+    assert settings.audio.processing.channels == channels
 
 
 @pytest.mark.parametrize(
-    "sample_rate, channels, chunk_seconds",
+    "pre_roll_ms, post_roll_ms, target_duration_seconds, max_duration_seconds",
     [
-        (7_900, 1, 1),
-        (8_000, 0, 1),
-        (8_000, 1, 0),
-        (193_000, 2, 30),
-        (192_000, 3, 30),
-        (192_000, 2, 99),
+        (0, 0, 1, 2),
+        (1000, 1000, 10, 20),
     ],
 )
-def test_audio_settings_rejects_invalid_values(
-    sample_rate: int, channels: int, chunk_seconds: int
+def test_audio_segmentation_settings_accepts_boundary_values(
+    pre_roll_ms: int,
+    post_roll_ms: int,
+    target_duration_seconds: int,
+    max_duration_seconds: int,
+) -> None:
+    settings = (
+        SettingsBuilder()
+        .with_pre_roll_ms(pre_roll_ms)
+        .with_post_roll_ms(post_roll_ms)
+        .with_target_duration_seconds(target_duration_seconds)
+        .with_max_duration_seconds(max_duration_seconds)
+        .build()
+    )
+    assert settings.audio.segmentation.pre_roll_ms == pre_roll_ms
+    assert settings.audio.segmentation.post_roll_ms == post_roll_ms
+    assert settings.audio.segmentation.target_duration_seconds == target_duration_seconds
+    assert settings.audio.segmentation.max_duration_seconds == max_duration_seconds
+
+
+@pytest.mark.parametrize(
+    "sample_rate, channels",
+    [
+        (7_900, 1),
+        (8_000, 0),
+        (193_000, 2),
+        (192_000, 3),
+    ],
+)
+def test_audio_processing_settings_rejects_invalid_values(sample_rate: int, channels: int) -> None:
+    with pytest.raises(ValidationError):
+        (SettingsBuilder().with_sample_rate(sample_rate).with_channels(channels).build())
+
+
+@pytest.mark.parametrize(
+    "pre_roll_ms, post_roll_ms, target_duration_seconds, max_duration_seconds",
+    [
+        (-1, 0, 1, 2),
+        (0, -1, 1, 2),
+        (0, 0, 0, 2),
+        (0, 0, 1, 0),
+    ],
+)
+def test_audio_segmentation_settings_rejects_invalid_values(
+    pre_roll_ms: int,
+    post_roll_ms: int,
+    target_duration_seconds: int,
+    max_duration_seconds: int,
 ) -> None:
     with pytest.raises(ValidationError):
         (
             SettingsBuilder()
-            .with_sample_rate(sample_rate)
-            .with_channels(channels)
-            .with_chunk_seconds(chunk_seconds)
+            .with_pre_roll_ms(pre_roll_ms)
+            .with_post_roll_ms(post_roll_ms)
+            .with_target_duration_seconds(target_duration_seconds)
+            .with_max_duration_seconds(max_duration_seconds)
             .build()
         )
 

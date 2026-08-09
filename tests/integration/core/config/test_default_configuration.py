@@ -16,9 +16,10 @@ def test_default_configuration_loads_successfully() -> None:
     assert settings.application.environment.value == "development"
     assert settings.api.host == "127.0.0.1"
     assert settings.api.port == 8000
-    assert settings.audio.sample_rate == 16_000
-    assert settings.audio.channels == 1
-    assert settings.audio.chunk_seconds == 3
+    assert settings.audio.processing.sample_rate == 16_000
+    assert settings.audio.processing.channels == 1
+    assert settings.audio.segmentation.target_duration_seconds == 3
+    assert settings.audio.segmentation.max_duration_seconds == 5
     assert settings.vad.enabled is True
     assert settings.vad.speech_threshold == 0.5
     assert settings.vad.min_silence_duration_ms == 300

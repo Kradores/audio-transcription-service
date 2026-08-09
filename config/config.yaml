@@ -10,9 +10,15 @@ logging:
   level: INFO
 
 audio:
-  sample_rate: 16000
-  channels: 1
-  chunk_seconds: 3
+  processing:
+    sample_rate: 16000
+    channels: 1
+
+  segmentation:
+    pre_roll_ms: 200
+    post_roll_ms: 200
+    target_duration_seconds: 3
+    max_duration_seconds: 5
 
 vad:
   enabled: true

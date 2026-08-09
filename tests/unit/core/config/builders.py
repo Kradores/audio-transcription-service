@@ -23,9 +23,16 @@ def valid_configuration_document() -> dict[str, Any]:
             "level": "INFO",
         },
         "audio": {
-            "sample_rate": 16_000,
-            "channels": 1,
-            "chunk_seconds": 5,
+            "processing": {
+                "sample_rate": 16_000,
+                "channels": 1,
+            },
+            "segmentation": {
+                "pre_roll_ms": 200,
+                "post_roll_ms": 200,
+                "target_duration_seconds": 3,
+                "max_duration_seconds": 5,
+            },
         },
         "vad": {
             "enabled": True,
@@ -64,15 +71,27 @@ class SettingsBuilder:
         return self
 
     def with_sample_rate(self, sample_rate: int) -> SettingsBuilder:
-        self._document["audio"]["sample_rate"] = sample_rate
+        self._document["audio"]["processing"]["sample_rate"] = sample_rate
         return self
 
     def with_channels(self, channels: int) -> SettingsBuilder:
-        self._document["audio"]["channels"] = channels
+        self._document["audio"]["processing"]["channels"] = channels
         return self
 
-    def with_chunk_seconds(self, seconds: int) -> SettingsBuilder:
-        self._document["audio"]["chunk_seconds"] = seconds
+    def with_target_duration_seconds(self, seconds: int) -> SettingsBuilder:
+        self._document["audio"]["segmentation"]["target_duration_seconds"] = seconds
+        return self
+
+    def with_max_duration_seconds(self, seconds: int) -> SettingsBuilder:
+        self._document["audio"]["segmentation"]["max_duration_seconds"] = seconds
+        return self
+
+    def with_pre_roll_ms(self, milliseconds: int) -> SettingsBuilder:
+        self._document["audio"]["segmentation"]["pre_roll_ms"] = milliseconds
+        return self
+
+    def with_post_roll_ms(self, milliseconds: int) -> SettingsBuilder:
+        self._document["audio"]["segmentation"]["post_roll_ms"] = milliseconds
         return self
 
     def with_speech_threshold(self, threshold: float) -> SettingsBuilder:

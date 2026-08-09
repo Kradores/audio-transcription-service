@@ -52,12 +52,21 @@ class LoggingSettings(BaseConfigurationModel):
     level: LogLevel
 
 
-class AudioSettings(BaseConfigurationModel):
-    """Configuration for audio capture."""
-
+class AudioProcessingSettings(BaseConfigurationModel):
     sample_rate: Annotated[int, Field(ge=8_000, le=192_000)]
     channels: Annotated[int, Field(ge=1, le=2)]
-    chunk_seconds: Annotated[int, Field(ge=1, le=30)]
+
+
+class AudioSegmentationSettings(BaseConfigurationModel):
+    pre_roll_ms: Annotated[int, Field(ge=0)]
+    post_roll_ms: Annotated[int, Field(ge=0)]
+    target_duration_seconds: Annotated[int, Field(ge=1, le=30)]
+    max_duration_seconds: Annotated[int, Field(ge=1, le=30)]
+
+
+class AudioSettings(BaseConfigurationModel):
+    processing: AudioProcessingSettings
+    segmentation: AudioSegmentationSettings
 
 
 class VadSettings(BaseConfigurationModel):
