@@ -198,14 +198,14 @@ class PyAudioCapture(AudioCapture):
     async def stop(self) -> None:
         stream = self._stream
 
-        if stream is None:
-            return
+        if stream is not None:
+            self._stream = None
 
-        self._stream = None
+            stream.stop_stream()
+            stream.close()
+            self._audio.terminate()
 
-        stream.stop_stream()
-        stream.close()
-        self._audio.terminate()
+        await self._transport.stop()
 
     def frames(self) -> AsyncIterator[AudioFrame]:
         return self._transport.frames()

@@ -65,5 +65,3 @@ async def test_application_stop_stops_audio_capture() -> None:
     await application.stop()
 
     capture.stop.assert_awaited_once()
-
-

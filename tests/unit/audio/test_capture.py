@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from unittest.mock import MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import numpy as np
 import pyaudiowpatch
@@ -31,7 +31,7 @@ class FakeAudioCapture:
         self._transport = AudioFrameTransport(capacity=4)
         self._started = False
 
-    def start(self) -> None:
+    async def start(self) -> None:
         if self._started:
             return
 
@@ -54,7 +54,7 @@ class FakeAudioCapture:
 @pytest.mark.anyio
 async def test_capture_streams_frames() -> None:
     capture = FakeAudioCapture()
-    capture.start()
+    await capture.start()
 
     frame = create_frame(1.0)
     consumer = asyncio.create_task(consume_one(capture))
@@ -68,18 +68,6 @@ async def test_capture_streams_frames() -> None:
     finally:
         await capture.stop()
         await consumer
-
-
-@pytest.mark.anyio
-async def test_stop_terminates_capture_stream() -> None:
-    capture = FakeAudioCapture()
-    capture.start()
-
-    consumer = asyncio.create_task(consume_stream(capture))
-
-    await capture.stop()
-
-    await asyncio.wait_for(consumer, timeout=1.0)
 
 
 def test_get_default_returns_loopback_device() -> None:
@@ -182,6 +170,7 @@ async def test_start_opens_default_wasapi_loopback_stream(
 
     fake_device_provider = MagicMock()
     fake_transport = MagicMock()
+    fake_transport.stop = AsyncMock()
 
     capture = PyAudioCapture(
         audio=audio,
@@ -232,6 +221,7 @@ async def test_start_uses_loopback_device_format(
 
     fake_device_provider = MagicMock()
     fake_transport = MagicMock()
+    fake_transport.stop = AsyncMock()
 
     capture = PyAudioCapture(
         audio=audio,
@@ -376,3 +366,26 @@ async def test_callback_frame_is_received_by_async_consumer() -> None:
     finally:
         await transport.stop()
         await consumer
+
+
+@pytest.mark.anyio
+async def test_stop_terminates_capture_stream() -> None:
+    transport = QueuedAudioCapture(max_queue_size=4)
+    capture = PyAudioCapture(
+        audio=MagicMock(),
+        device_provider=MagicMock(),
+        transport=transport,
+    )
+
+    await transport.start()
+
+    consumer = asyncio.create_task(consume_stream(capture))
+
+    try:
+        await capture.stop()
+
+        await asyncio.wait_for(consumer, timeout=1.0)
+    finally:
+        if not consumer.done():
+            consumer.cancel()
+            await consumer

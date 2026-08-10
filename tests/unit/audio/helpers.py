@@ -2,7 +2,8 @@ import asyncio
 
 import numpy as np
 
-from app.audio.contracts import AudioCapture, AudioFormat, AudioFrame
+from app.audio.contracts import AudioFormat, AudioFrame
+from app.audio.protocols import AudioCapture
 
 AUDIO_FORMAT = AudioFormat(
     sample_rate=48_000,
@@ -26,9 +27,13 @@ async def consume_one(capture: AudioCapture) -> AudioFrame:
     raise AssertionError("Capture stream ended before a frame was received")
 
 
-async def consume_stream(capture: AudioCapture) -> None:
-    async for _ in capture.frames():
-        pass
+async def consume_stream(capture: AudioCapture) -> list[AudioFrame]:
+    frames: list[AudioFrame] = []
+
+    async for frame in capture.frames():
+        frames.append(frame)
+
+    return frames
 
 
 async def wait_for_consumed_frame(
