@@ -1,0 +1,29 @@
+import numpy as np
+
+from app.audio.contracts import AudioCapture, AudioFormat, AudioFrame
+
+AUDIO_FORMAT = AudioFormat(
+    sample_rate=48_000,
+    channels=1,
+    sample_type="int16",
+)
+
+
+def create_frame(timestamp: float) -> AudioFrame:
+    return AudioFrame(
+        audio=np.zeros((480, 1), dtype=np.int16),
+        timestamp=timestamp,
+        format=AUDIO_FORMAT,
+    )
+
+
+async def consume_one(capture: AudioCapture) -> AudioFrame:
+    async for frame in capture.frames():
+        return frame
+
+    raise AssertionError("Capture stream ended before a frame was received")
+
+
+async def consume_stream(capture: AudioCapture) -> None:
+    async for _ in capture.frames():
+        pass

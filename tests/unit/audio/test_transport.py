@@ -1,24 +1,10 @@
 import asyncio
 
-import numpy as np
 import pytest
 
-from app.audio.contracts import AudioFormat, AudioFrame
+from app.audio.contracts import AudioFrame
 from app.audio.transport import AudioFrameTransport
-
-AUDIO_FORMAT = AudioFormat(
-    sample_rate=48_000,
-    channels=1,
-    sample_type="int16",
-)
-
-
-def create_frame(timestamp: float) -> AudioFrame:
-    return AudioFrame(
-        audio=np.zeros((480, 1), dtype=np.int16),
-        timestamp=timestamp,
-        format=AUDIO_FORMAT,
-    )
+from tests.unit.audio.helpers import create_frame
 
 
 def test_transport_rejects_invalid_capacity() -> None:

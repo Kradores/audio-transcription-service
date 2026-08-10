@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
@@ -33,6 +34,19 @@ class AudioFormat:
 
         if self.sample_type not in ("int16", "float32"):
             raise ValueError("sample_type must be either 'int16' or 'float32'")
+
+
+class AudioCapture(Protocol):
+    """Application-facing abstraction for continuous audio capture."""
+
+    def start(self) -> None:
+        """Start capturing audio."""
+
+    def frames(self) -> AsyncIterator[AudioFrame]:
+        """Return an asynchronous stream of captured audio frames."""
+
+    async def stop(self) -> None:
+        """Stop capturing audio."""
 
 
 @dataclass(frozen=True, slots=True)
