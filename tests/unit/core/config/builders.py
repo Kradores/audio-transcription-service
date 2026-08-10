@@ -23,6 +23,9 @@ def valid_configuration_document() -> dict[str, Any]:
             "level": "INFO",
         },
         "audio": {
+            "capture": {
+                "queue_capacity": 100,
+            },
             "processing": {
                 "sample_rate": 16_000,
                 "channels": 1,
@@ -76,6 +79,10 @@ class SettingsBuilder:
 
     def with_channels(self, channels: int) -> SettingsBuilder:
         self._document["audio"]["processing"]["channels"] = channels
+        return self
+
+    def with_queue_capacity(self, capacity: int) -> SettingsBuilder:
+        self._document["audio"]["capture"]["queue_capacity"] = capacity
         return self
 
     def with_target_duration_seconds(self, seconds: int) -> SettingsBuilder:

@@ -10,6 +10,9 @@ logging:
   level: INFO
 
 audio:
+  capture:
+    queue_capacity: 100
+
   processing:
     sample_rate: 16000
     channels: 1

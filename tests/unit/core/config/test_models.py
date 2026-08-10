@@ -38,6 +38,11 @@ def test_logging_settings_accepts_valid_values() -> None:
     assert settings.logging.level is LogLevel.INFO
 
 
+def test_audio_capture_settings_accepts_valid_values() -> None:
+    settings = SettingsBuilder().build()
+    assert settings.audio.capture.queue_capacity == 100
+
+
 def test_audio_processing_settings_accepts_valid_values() -> None:
     settings = SettingsBuilder().build()
     assert settings.audio.processing.sample_rate == 16_000
@@ -106,6 +111,18 @@ def test_api_settings_rejects_invalid_ports(port: int) -> None:
 
 
 @pytest.mark.parametrize(
+    "queue_capacity",
+    [
+        1,
+        10_000,
+    ],
+)
+def test_audio_capture_settings_accepts_boundary_values(queue_capacity: int) -> None:
+    settings = SettingsBuilder().with_queue_capacity(queue_capacity).build()
+    assert settings.audio.capture.queue_capacity == queue_capacity
+
+
+@pytest.mark.parametrize(
     "sample_rate, channels",
     [
         (8_000, 1),
@@ -145,6 +162,18 @@ def test_audio_segmentation_settings_accepts_boundary_values(
     assert settings.audio.segmentation.post_roll_ms == post_roll_ms
     assert settings.audio.segmentation.target_duration_seconds == target_duration_seconds
     assert settings.audio.segmentation.max_duration_seconds == max_duration_seconds
+
+
+@pytest.mark.parametrize(
+    "queue_capacity",
+    [
+        0,
+        10_001,
+    ],
+)
+def test_audio_capture_settings_rejects_invalid_values(queue_capacity: int) -> None:
+    with pytest.raises(ValidationError):
+        SettingsBuilder().with_queue_capacity(queue_capacity).build()
 
 
 @pytest.mark.parametrize(
