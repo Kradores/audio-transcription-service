@@ -27,5 +27,10 @@ class Application:
 
         return self._capture
 
-    def start(self) -> None:
+    async def start(self) -> None:
         """Start the application."""
+        await self._capture.start()
+
+    async def stop(self) -> None:
+        """Stop the application."""
+        await self._capture.stop()
