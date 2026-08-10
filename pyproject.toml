@@ -10,6 +10,7 @@ authors = [
 dependencies = [
     "fastapi>=0.141.1",
     "numpy>=2.3.0",
+    "pyaudiowpatch>=0.2.12.8",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.2",
     "pyyaml>=6.0.3",
@@ -54,6 +55,7 @@ select = [
 ]
 
 [tool.mypy]
+mypy_path = ["typings"]
 python_version = "3.14"
 warn_return_any = true
 warn_unused_configs = true

@@ -1,3 +1,5 @@
+import asyncio
+
 import numpy as np
 
 from app.audio.contracts import AudioCapture, AudioFormat, AudioFrame
@@ -27,3 +29,10 @@ async def consume_one(capture: AudioCapture) -> AudioFrame:
 async def consume_stream(capture: AudioCapture) -> None:
     async for _ in capture.frames():
         pass
+
+
+async def wait_for_consumed_frame(
+    consumed: list[AudioFrame],
+) -> None:
+    while not consumed:
+        await asyncio.sleep(0)
