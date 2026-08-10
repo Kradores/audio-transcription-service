@@ -8,10 +8,10 @@ class AudioCapture(Protocol):
     """Application-facing abstraction for continuous audio capture."""
 
     async def start(self) -> None:
-        """Start capturing audio."""
+        """Start audio capture."""
 
     def frames(self) -> AsyncIterator[AudioFrame]:
         """Return an asynchronous stream of captured audio frames."""
 
     async def stop(self) -> None:
-        """Stop capturing audio."""
+        """Stop audio capture."""
