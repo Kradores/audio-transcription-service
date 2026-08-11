@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.audio.protocols import AudioCapture
+from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.core.config.models import Settings
 
 
@@ -11,9 +11,11 @@ class Application:
         self,
         settings: Settings,
         capture: AudioCapture,
+        normalizer: AudioNormalizer,
     ) -> None:
         self._settings = settings
         self._capture = capture
+        self._normalizer = normalizer
 
     @property
     def settings(self) -> Settings:
@@ -26,6 +28,12 @@ class Application:
         """Return the audio capture instance."""
 
         return self._capture
+
+    @property
+    def normalizer(self) -> AudioNormalizer:
+        """Return the audio normalizer instance."""
+
+        return self._normalizer
 
     async def start(self) -> None:
         """Start the application."""
