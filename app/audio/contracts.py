@@ -11,9 +11,7 @@ type Int16Audio = NDArray[np.int16]
 
 type AudioSampleType = Literal["int16", "float32"]
 
-PROCESSING_SAMPLE_RATE = 16_000
-PROCESSING_CHANNELS = 1
-PROCESSING_FRAME_SAMPLES = 320
+PROCESSING_FRAME_DURATION_SECONDS = 0.020
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,10 +57,11 @@ class AudioFrame:
 
 @dataclass(frozen=True, slots=True)
 class ProcessingAudioFrame:
-    """Exactly 20 ms of normalized audio consumed by the VAD."""
+    """Exactly 20 ms of normalized audio."""
 
     audio: Float32Audio
     timestamp: float
+    format: AudioFormat
 
     def __post_init__(self) -> None:
         if self.timestamp < 0:
@@ -71,11 +70,20 @@ class ProcessingAudioFrame:
         if self.audio.ndim != 2:
             raise ValueError("audio must have shape (samples, channels)")
 
-        if self.audio.shape != (
-            PROCESSING_FRAME_SAMPLES,
-            PROCESSING_CHANNELS,
-        ):
-            raise ValueError("processing audio must contain exactly 20 ms of mono audio")
+        if self.audio.shape[1] != self.format.channels:
+            raise ValueError("audio channel count must match format.channels")
+
+        if self.format.sample_type != "float32":
+            raise ValueError("processing audio must use float32 samples")
+
+        expected_samples = round(
+            self.format.sample_rate * PROCESSING_FRAME_DURATION_SECONDS,
+        )
+
+        if self.audio.shape[0] != expected_samples:
+            raise ValueError(
+                "processing audio must contain exactly 20 ms of audio",
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,17 +127,8 @@ class SpeechSegment:
         if self.audio.ndim != 2:
             raise ValueError("audio must have shape (samples, channels)")
 
-        if self.audio.shape[1] != PROCESSING_CHANNELS:
+        if self.audio.shape[1] != self.format.channels:
             raise ValueError("speech segments must contain mono audio")
-
-        if self.format.sample_rate != PROCESSING_SAMPLE_RATE:
-            raise ValueError("speech segments must use a 16 kHz sample rate")
-
-        if self.format.channels != PROCESSING_CHANNELS:
-            raise ValueError("speech segments must use mono audio")
-
-        if self.format.sample_type != "float32":
-            raise ValueError("speech segments must use float32 samples")
 
         expected_duration = self.audio.shape[0] / self.format.sample_rate
 

@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator
 from typing import Protocol
 
-from app.audio.contracts import AudioFrame
+from app.audio.contracts import AudioFrame, ProcessingAudioFrame
 
 
 class AudioCapture(Protocol):
@@ -15,3 +15,16 @@ class AudioCapture(Protocol):
 
     async def stop(self) -> None:
         """Stop audio capture."""
+
+
+class AudioNormalizer(Protocol):
+    """Application-facing abstraction for stateful audio normalization."""
+
+    def process(
+        self,
+        frame: AudioFrame,
+    ) -> tuple[ProcessingAudioFrame, ...]:
+        """Normalize a captured frame and emit complete processing frames."""
+
+    def flush(self) -> None:
+        """Discard any incomplete trailing audio."""

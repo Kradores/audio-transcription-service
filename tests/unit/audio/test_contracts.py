@@ -1,7 +1,10 @@
+from unittest.mock import MagicMock
+
 import numpy as np
 import pytest
 
 from app.audio.contracts import (
+    PROCESSING_FRAME_DURATION_SECONDS,
     AudioFormat,
     AudioFrame,
     AudioSampleType,
@@ -64,14 +67,23 @@ def test_audio_frame_requires_matching_channel_count() -> None:
 
 
 def test_processing_audio_frame_requires_exactly_20_ms() -> None:
-    audio = np.zeros((320, 1), dtype=np.float32)
+    format = AudioFormat(
+        sample_rate=16_000,
+        channels=1,
+        sample_type="float32",
+    )
+    processing_frame_samples = round(
+        format.sample_rate * PROCESSING_FRAME_DURATION_SECONDS,
+    )
+    audio = np.zeros((processing_frame_samples, format.channels), dtype=np.float32)
 
     frame = ProcessingAudioFrame(
         audio=audio,
         timestamp=1.0,
+        format=format,
     )
 
-    assert frame.audio.shape == (320, 1)
+    assert frame.audio.shape == (processing_frame_samples, format.channels)
 
 
 @pytest.mark.parametrize("samples", [319, 321, 640])
@@ -79,20 +91,14 @@ def test_processing_audio_frame_rejects_wrong_frame_size(samples: int) -> None:
     audio = np.zeros((samples, 1), dtype=np.float32)
 
     with pytest.raises(ValueError):
-        ProcessingAudioFrame(
-            audio=audio,
-            timestamp=1.0,
-        )
+        ProcessingAudioFrame(audio=audio, timestamp=1.0, format=MagicMock())
 
 
 def test_processing_audio_frame_requires_mono_audio() -> None:
     audio = np.zeros((320, 2), dtype=np.float32)
 
     with pytest.raises(ValueError):
-        ProcessingAudioFrame(
-            audio=audio,
-            timestamp=1.0,
-        )
+        ProcessingAudioFrame(audio=audio, timestamp=1.0, format=MagicMock())
 
 
 @pytest.mark.parametrize("event_type", [SpeechStart, SpeechEnd])
@@ -142,9 +148,5 @@ def test_speech_segment_requires_16_khz_mono_audio() -> None:
             audio=audio,
             timestamp=10.0,
             duration=1.0,
-            format=AudioFormat(
-                sample_rate=48_000,
-                channels=1,
-                sample_type="float32",
-            ),
+            format=MagicMock(),
         )
