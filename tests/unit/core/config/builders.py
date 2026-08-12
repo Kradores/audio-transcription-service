@@ -117,6 +117,10 @@ class SettingsBuilder:
         self._document["database"]["path"] = str(path)
         return self
 
+    def with_vad_enabled(self, enabled: bool) -> SettingsBuilder:
+        self._document["vad"]["enabled"] = enabled
+        return self
+
 
 __all__ = [
     "SettingsBuilder",
