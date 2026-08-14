@@ -1,24 +1,35 @@
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import numpy as np
 import pytest
 
 from app.application import Application
 from app.audio.contracts import AudioFormat, AudioFrame
-from app.composition import create_application, create_transcriber, create_vad
+from app.composition import (
+    create_application,
+    create_normalizer,
+    create_speech_pipeline,
+    create_transcriber,
+    create_vad,
+)
 from app.transcription.faster_whisper import FasterWhisperTranscriber
 from app.vad.silero import SileroVADAdapter
 from tests.unit.core.config.builders import SettingsBuilder, valid_configuration_document
 from tests.unit.core.config.helpers import write_configuration
 
 
+@patch("app.composition.create_vad")
 def test_create_application_loads_configuration(
+    create_vad: MagicMock,
     tmp_path: Path,
 ) -> None:
     # Arrange
     document = valid_configuration_document()
     config_path = write_configuration(tmp_path, document)
+
+    vad = MagicMock()
+    create_vad.return_value = vad
 
     # Act
     application = create_application(config_path)
@@ -28,12 +39,17 @@ def test_create_application_loads_configuration(
     assert application.settings.application.name == "Audio Transcription Service"
 
 
+@patch("app.composition.create_vad")
 def test_create_application_passes_loaded_settings_to_application(
+    create_vad: MagicMock,
     tmp_path: Path,
 ) -> None:
     # Arrange
     document = valid_configuration_document()
     config_path = write_configuration(tmp_path, document)
+
+    vad = MagicMock()
+    create_vad.return_value = vad
 
     # Act
     application = create_application(config_path)
@@ -42,18 +58,14 @@ def test_create_application_passes_loaded_settings_to_application(
     assert application.settings.database.path == (tmp_path / "data" / "transcripts.db").resolve()
 
 
-def test_create_application_wires_configured_processing_sample_rate_to_normalizer(
-    tmp_path: Path,
-) -> None:
+def test_create_normalizer_wires_configured_processing_sample_rate() -> None:
     # Arrange
-    document = valid_configuration_document()
-    document["audio"]["processing"]["sample_rate"] = 48_000
-    config_path = write_configuration(tmp_path, document)
+    settings = SettingsBuilder().with_sample_rate(48_000).build()
 
     # Act
-    application = create_application(config_path)
+    normalizer = create_normalizer(settings.audio.processing)
 
-    output = application.normalizer.process(
+    output = normalizer.process(
         AudioFrame(
             audio=np.zeros((960, 1), dtype=np.int16),
             timestamp=10.0,
@@ -196,21 +208,79 @@ def test_create_transcriber_passes_configured_whisper_settings() -> None:
     )
 
 
+@patch("app.composition.create_vad")
+@patch("app.composition.create_transcriber")
 def test_create_application_wires_transcriber(
+    create_transcriber: MagicMock,
+    create_vad: MagicMock,
     tmp_path: Path,
 ) -> None:
     # Arrange
     document = valid_configuration_document()
     config_path = write_configuration(tmp_path, document)
 
+    vad = MagicMock()
     transcriber = MagicMock()
 
-    with patch(
-        "app.composition.create_transcriber",
-        return_value=transcriber,
-    ):
-        # Act
-        application = create_application(config_path)
+    create_vad.return_value = vad
+    create_transcriber.return_value = transcriber
+
+    # Act
+    application = create_application(config_path)
 
     # Assert
     assert application.transcriber is transcriber
+
+
+@patch("app.composition.create_vad")
+@patch("app.composition.create_speech_pipeline")
+def test_create_application_wires_speech_pipeline(
+    create_speech_pipeline: MagicMock,
+    create_vad: MagicMock,
+    tmp_path: Path,
+) -> None:
+    # Arrange
+    document = valid_configuration_document()
+    config_path = write_configuration(tmp_path, document)
+
+    vad = MagicMock()
+    pipeline = MagicMock()
+
+    create_vad.return_value = vad
+    create_speech_pipeline.return_value = pipeline
+    
+    # Act
+    application = create_application(config_path)
+
+    # Assert
+    assert application.pipeline is pipeline
+
+
+def test_create_speech_pipeline_passes_dependencies_to_pipeline() -> None:
+    capture = MagicMock()
+    normalizer = MagicMock()
+    vad = MagicMock()
+    assembler = MagicMock()
+    transcriber = MagicMock()
+
+    with patch(
+        "app.composition.SpeechPipeline",
+    ) as pipeline_type:
+        result = create_speech_pipeline(
+            capture=capture,
+            normalizer=normalizer,
+            vad=vad,
+            assembler=assembler,
+            transcriber=transcriber,
+        )
+
+    assert result is pipeline_type.return_value
+
+    pipeline_type.assert_called_once_with(
+        capture=capture,
+        normalizer=normalizer,
+        vad=vad,
+        assembler=assembler,
+        transcriber=transcriber,
+        on_result=ANY,
+    )

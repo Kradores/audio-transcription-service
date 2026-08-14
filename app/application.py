@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.core.config.models import Settings
+from app.services.speech_pipeline import SpeechPipeline
 from app.transcription.protocols import Transcriber
 
 
@@ -14,11 +15,13 @@ class Application:
         capture: AudioCapture,
         normalizer: AudioNormalizer,
         transcriber: Transcriber,
+        pipeline: SpeechPipeline,
     ) -> None:
         self._settings = settings
         self._capture = capture
         self._normalizer = normalizer
         self._transcriber = transcriber
+        self._pipeline = pipeline
 
     @property
     def transcriber(self) -> Transcriber:
@@ -44,10 +47,18 @@ class Application:
 
         return self._normalizer
 
+    @property
+    def pipeline(self) -> SpeechPipeline:
+        """Return the speech processing pipeline."""
+
+        return self._pipeline
+
     async def start(self) -> None:
         """Start the application."""
-        await self._capture.start()
+
+        await self._pipeline.start()
 
     async def stop(self) -> None:
         """Stop the application."""
-        await self._capture.stop()
+
+        await self._pipeline.stop()

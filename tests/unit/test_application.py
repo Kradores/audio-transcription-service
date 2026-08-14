@@ -21,6 +21,7 @@ def test_application_exposes_provided_settings() -> None:
         capture=capture,
         normalizer=normalizer,
         transcriber=transcriber,
+        pipeline=AsyncMock(),
     )
 
     # Assert
@@ -40,6 +41,7 @@ def test_application_exposes_provided_audio_capture() -> None:
         capture=capture,
         normalizer=normalizer,
         transcriber=transcriber,
+        pipeline=AsyncMock(),
     )
 
     # Assert
@@ -59,6 +61,7 @@ def test_application_exposes_provided_audio_normalizer() -> None:
         capture=capture,
         normalizer=normalizer,
         transcriber=transcriber,
+        pipeline=AsyncMock(),
     )
 
     # Assert
@@ -66,39 +69,36 @@ def test_application_exposes_provided_audio_normalizer() -> None:
 
 
 @pytest.mark.anyio
-async def test_application_start_starts_audio_capture() -> None:
+async def test_start_starts_pipeline() -> None:
     settings = SettingsBuilder().build()
-    capture = AsyncMock(spec=AudioCapture)
-    normalizer = MagicMock(spec=AudioNormalizer)
-    transcriber = MagicMock(spec=Transcriber)
+    pipeline = AsyncMock()
 
-    # Act
     application = Application(
         settings=settings,
-        capture=capture,
-        normalizer=normalizer,
-        transcriber=transcriber,
+        capture=MagicMock(),
+        normalizer=MagicMock(),
+        transcriber=MagicMock(),
+        pipeline=pipeline,
     )
 
     await application.start()
 
-    capture.start.assert_awaited_once()
+    pipeline.start.assert_awaited_once()
 
 
 @pytest.mark.anyio
-async def test_application_stop_stops_audio_capture() -> None:
+async def test_stop_stops_pipeline() -> None:
     settings = SettingsBuilder().build()
-    capture = AsyncMock(spec=AudioCapture)
-    normalizer = MagicMock(spec=AudioNormalizer)
-    transcriber = MagicMock(spec=Transcriber)
+    pipeline = AsyncMock()
 
     application = Application(
         settings=settings,
-        capture=capture,
-        normalizer=normalizer,
-        transcriber=transcriber,
+        capture=MagicMock(),
+        normalizer=MagicMock(),
+        transcriber=MagicMock(),
+        pipeline=pipeline,
     )
 
     await application.stop()
 
-    capture.stop.assert_awaited_once()
+    pipeline.stop.assert_awaited_once()

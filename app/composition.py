@@ -13,11 +13,14 @@ from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.audio.resampler import SoXRResamplerFactory
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
-from app.core.config.models import AudioProcessingSettings, Settings
+from app.core.config.models import AudioProcessingSettings, AudioSegmentationSettings, Settings
 from app.core.logging import configure_logging
+from app.services.speech_pipeline import SpeechPipeline
+from app.transcription.contracts import TranscriptionResult
 from app.transcription.faster_whisper import FasterWhisperTranscriber
 from app.transcription.protocols import Transcriber
-from app.vad.protocols import AudioVad
+from app.vad.assembler import SpeechSegmentAssemblerImpl
+from app.vad.protocols import AudioVad, SpeechSegmentAssembler
 from app.vad.silero import SileroVADAdapter
 
 
@@ -28,17 +31,34 @@ def create_application(
 
     settings = ConfigurationLoader(config_path).load()
 
+    configure_logging(settings.logging)
+
     capture = create_capture(settings.audio.capture.queue_capacity)
     normalizer = create_normalizer(settings.audio.processing)
+    vad = create_vad(settings)
     transcriber = create_transcriber(settings)
 
-    configure_logging(settings.logging)
+    if vad is None:
+        raise ValueError("Speech pipeline requires VAD to be enabled")
+
+    assembler = SpeechSegmentAssemblerImpl(
+        settings=settings.audio.segmentation,
+    )
+
+    pipeline = create_speech_pipeline(
+        capture=capture,
+        normalizer=normalizer,
+        vad=vad,
+        assembler=assembler,
+        transcriber=transcriber,
+    )
 
     return Application(
         settings=settings,
         capture=capture,
         normalizer=normalizer,
         transcriber=transcriber,
+        pipeline=pipeline,
     )
 
 
@@ -103,3 +123,31 @@ def create_transcriber(settings: Settings) -> Transcriber:
     model = create_whisper_model(settings)
 
     return FasterWhisperTranscriber(model)
+
+
+def create_speech_assembler(settings: AudioSegmentationSettings) -> SpeechSegmentAssembler:
+    return SpeechSegmentAssemblerImpl(
+        settings=settings,
+    )
+
+
+def create_speech_pipeline(
+    capture: AudioCapture,
+    normalizer: AudioNormalizer,
+    vad: AudioVad,
+    assembler: SpeechSegmentAssembler,
+    transcriber: Transcriber,
+) -> SpeechPipeline:
+    """Create the application speech-processing pipeline."""
+
+    def sink(_: TranscriptionResult) -> None:
+        """into the void"""
+
+    return SpeechPipeline(
+        capture=capture,
+        normalizer=normalizer,
+        vad=vad,
+        assembler=assembler,
+        transcriber=transcriber,
+        on_result=sink,
+    )
