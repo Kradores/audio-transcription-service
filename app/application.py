@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.core.config.models import Settings
+from app.transcription.protocols import Transcriber
 
 
 class Application:
@@ -12,10 +13,18 @@ class Application:
         settings: Settings,
         capture: AudioCapture,
         normalizer: AudioNormalizer,
+        transcriber: Transcriber,
     ) -> None:
         self._settings = settings
         self._capture = capture
         self._normalizer = normalizer
+        self._transcriber = transcriber
+
+    @property
+    def transcriber(self) -> Transcriber:
+        """Return the application transcription service."""
+
+        return self._transcriber
 
     @property
     def settings(self) -> Settings:

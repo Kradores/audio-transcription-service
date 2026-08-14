@@ -6,7 +6,8 @@ import pytest
 
 from app.application import Application
 from app.audio.contracts import AudioFormat, AudioFrame
-from app.composition import create_application, create_vad
+from app.composition import create_application, create_transcriber, create_vad
+from app.transcription.faster_whisper import FasterWhisperTranscriber
 from app.vad.silero import SileroVADAdapter
 from tests.unit.core.config.builders import SettingsBuilder, valid_configuration_document
 from tests.unit.core.config.helpers import write_configuration
@@ -146,3 +147,70 @@ def test_create_vad_rejects_incompatible_processing_sample_rate() -> None:
         create_vad(settings)
 
     load_model.assert_not_called()
+
+
+def test_create_transcriber_creates_configured_faster_whisper_transcriber() -> None:
+    # Arrange
+    settings = SettingsBuilder().build()
+    model = MagicMock()
+
+    with patch(
+        "app.composition.WhisperModel",
+        return_value=model,
+    ) as whisper_model:
+        # Act
+        transcriber = create_transcriber(settings)
+
+    # Assert
+    whisper_model.assert_called_once_with(
+        "small",
+        device="cpu",
+        compute_type="int8",
+    )
+    assert isinstance(transcriber, FasterWhisperTranscriber)
+
+
+def test_create_transcriber_passes_configured_whisper_settings() -> None:
+    # Arrange
+    settings = (
+        SettingsBuilder()
+        .with_whisper_model("medium")
+        .with_whisper_device("cuda")
+        .with_whisper_compute_type("float16")
+        .build()
+    )
+    model = MagicMock()
+
+    with patch(
+        "app.composition.WhisperModel",
+        return_value=model,
+    ) as whisper_model:
+        # Act
+        create_transcriber(settings)
+
+    # Assert
+    whisper_model.assert_called_once_with(
+        "medium",
+        device="cuda",
+        compute_type="float16",
+    )
+
+
+def test_create_application_wires_transcriber(
+    tmp_path: Path,
+) -> None:
+    # Arrange
+    document = valid_configuration_document()
+    config_path = write_configuration(tmp_path, document)
+
+    transcriber = MagicMock()
+
+    with patch(
+        "app.composition.create_transcriber",
+        return_value=transcriber,
+    ):
+        # Act
+        application = create_application(config_path)
+
+    # Assert
+    assert application.transcriber is transcriber

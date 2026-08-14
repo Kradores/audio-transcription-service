@@ -121,6 +121,18 @@ class SettingsBuilder:
         self._document["vad"]["enabled"] = enabled
         return self
 
+    def with_whisper_model(self, model: str) -> SettingsBuilder:
+        self._document["whisper"]["model"] = model
+        return self
+
+    def with_whisper_device(self, device: str) -> SettingsBuilder:
+        self._document["whisper"]["device"] = device
+        return self
+
+    def with_whisper_compute_type(self, compute_type: str) -> SettingsBuilder:
+        self._document["whisper"]["compute_type"] = compute_type
+        return self
+
 
 __all__ = [
     "SettingsBuilder",
