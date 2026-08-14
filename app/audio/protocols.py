@@ -5,8 +5,6 @@ from app.audio.contracts import (
     AudioFrame,
     Float32Audio,
     ProcessingAudioFrame,
-    SpeechEnd,
-    SpeechStart,
 )
 
 
@@ -59,16 +57,3 @@ class AudioResamplerFactory(Protocol):
         channels: int,
     ) -> AudioResampler:
         """Create a streaming resampler for the requested rates."""
-
-
-class AudioVad(Protocol):
-    """Application-facing abstraction for stateful voice activity detection."""
-
-    def process(
-        self,
-        frame: ProcessingAudioFrame,
-    ) -> tuple[SpeechStart | SpeechEnd, ...]:
-        """Process one audio frame and emit any speech state transitions."""
-
-    def reset(self) -> None:
-        """Reset VAD state."""

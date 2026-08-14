@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from app.audio.contracts import (
-    PROCESSING_FRAME_DURATION_SECONDS,
     AudioFormat,
     AudioFrame,
     AudioSampleType,
@@ -13,6 +12,7 @@ from app.audio.contracts import (
     SpeechSegment,
     SpeechStart,
 )
+from app.core.config.constants import PROCESSING_FRAME_DURATION_SECONDS
 
 
 def test_audio_format_accepts_valid_values() -> None:

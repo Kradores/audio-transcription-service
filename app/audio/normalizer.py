@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 
 from app.audio.contracts import (
-    PROCESSING_FRAME_DURATION_SECONDS,
     AudioFormat,
     AudioFrame,
     Float32Audio,
@@ -11,6 +10,7 @@ from app.audio.contracts import (
     ProcessingAudioFrame,
 )
 from app.audio.protocols import AudioResampler, AudioResamplerFactory
+from app.core.config.constants import PROCESSING_FRAME_DURATION_SECONDS
 from app.core.config.models import AudioProcessingSettings
 
 

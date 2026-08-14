@@ -3,3 +3,5 @@ from __future__ import annotations
 from pathlib import Path
 
 DEFAULT_CONFIGURATION_PATH = Path("config/config.yaml")
+PROCESSING_FRAME_DURATION_SECONDS = 0.020
+PROCESSING_FRAME_DURATION_MS = int(PROCESSING_FRAME_DURATION_SECONDS * 1000)

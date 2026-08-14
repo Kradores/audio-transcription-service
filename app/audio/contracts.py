@@ -6,12 +6,12 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 
+from app.core.config.constants import PROCESSING_FRAME_DURATION_SECONDS
+
 type Float32Audio = NDArray[np.float32]
 type Int16Audio = NDArray[np.int16]
 
 type AudioSampleType = Literal["int16", "float32"]
-
-PROCESSING_FRAME_DURATION_SECONDS = 0.020
 
 
 @dataclass(frozen=True, slots=True)
