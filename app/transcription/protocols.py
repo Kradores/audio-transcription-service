@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Protocol
 
 import numpy as np
 
 from app.audio.contracts import SpeechSegment
 from app.transcription.contracts import TranscriptionResult
+
+type TranscriptionResultHandler = Callable[[TranscriptionResult], None]
 
 
 class WhisperSegmentProtocol(Protocol):

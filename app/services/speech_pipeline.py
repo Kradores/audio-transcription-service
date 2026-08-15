@@ -3,12 +3,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Callable
 
 from app.audio.contracts import ProcessingAudioFrame
 from app.audio.protocols import AudioCapture, AudioNormalizer
-from app.transcription.contracts import TranscriptionResult
-from app.transcription.protocols import Transcriber
+from app.transcription.protocols import Transcriber, TranscriptionResultHandler
 from app.vad.protocols import AudioVad, SpeechSegmentAssembler
 
 logger = logging.getLogger(__name__)
@@ -24,7 +22,7 @@ class SpeechPipeline:
         vad: AudioVad,
         assembler: SpeechSegmentAssembler,
         transcriber: Transcriber,
-        on_result: Callable[[TranscriptionResult], None],
+        on_result: TranscriptionResultHandler,
     ) -> None:
         self._capture = capture
         self._normalizer = normalizer

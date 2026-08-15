@@ -140,7 +140,7 @@ def create_speech_pipeline(
 ) -> SpeechPipeline:
     """Create the application speech-processing pipeline."""
 
-    def sink(_: TranscriptionResult) -> None:
+    def handler(_: TranscriptionResult) -> None:
         """into the void"""
 
     return SpeechPipeline(
@@ -149,5 +149,5 @@ def create_speech_pipeline(
         vad=vad,
         assembler=assembler,
         transcriber=transcriber,
-        on_result=sink,
+        on_result=handler,
     )

@@ -248,7 +248,7 @@ def test_create_application_wires_speech_pipeline(
 
     create_vad.return_value = vad
     create_speech_pipeline.return_value = pipeline
-    
+
     # Act
     application = create_application(config_path)
 
