@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pyaudiowpatch
@@ -16,7 +17,9 @@ from app.core.config.loader import ConfigurationLoader
 from app.core.config.models import AudioProcessingSettings, AudioSegmentationSettings, Settings
 from app.core.logging import configure_logging
 from app.services.speech_pipeline import SpeechPipeline
-from app.transcription.contracts import TranscriptionResult
+from app.storage.protocols import TranscriptRecorder
+from app.storage.recorder import TranscriptRecorderImpl
+from app.storage.sqlite import SQLiteTranscriptRepository
 from app.transcription.faster_whisper import FasterWhisperTranscriber
 from app.transcription.protocols import Transcriber
 from app.vad.assembler import SpeechSegmentAssemblerImpl
@@ -45,12 +48,23 @@ def create_application(
         settings=settings.audio.segmentation,
     )
 
+    database_path = settings.database.path
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+
+    database = sqlite3.connect(database_path)
+
+    repository = SQLiteTranscriptRepository(database)
+    repository.initialize()
+
+    recorder = TranscriptRecorderImpl(repository)
+
     pipeline = create_speech_pipeline(
         capture=capture,
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
         transcriber=transcriber,
+        recorder=recorder,
     )
 
     return Application(
@@ -59,6 +73,8 @@ def create_application(
         normalizer=normalizer,
         transcriber=transcriber,
         pipeline=pipeline,
+        database=database,
+        recorder=recorder,
     )
 
 
@@ -132,16 +148,15 @@ def create_speech_assembler(settings: AudioSegmentationSettings) -> SpeechSegmen
 
 
 def create_speech_pipeline(
+    *,
     capture: AudioCapture,
     normalizer: AudioNormalizer,
     vad: AudioVad,
     assembler: SpeechSegmentAssembler,
     transcriber: Transcriber,
+    recorder: TranscriptRecorder,
 ) -> SpeechPipeline:
     """Create the application speech-processing pipeline."""
-
-    def handler(_: TranscriptionResult) -> None:
-        """into the void"""
 
     return SpeechPipeline(
         capture=capture,
@@ -149,5 +164,5 @@ def create_speech_pipeline(
         vad=vad,
         assembler=assembler,
         transcriber=transcriber,
-        on_result=handler,
+        on_result=recorder.record,
     )

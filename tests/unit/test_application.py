@@ -1,3 +1,4 @@
+import sqlite3
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -22,6 +23,8 @@ def test_application_exposes_provided_settings() -> None:
         normalizer=normalizer,
         transcriber=transcriber,
         pipeline=AsyncMock(),
+        database=MagicMock(spec=sqlite3.Connection),
+        recorder=MagicMock(),
     )
 
     # Assert
@@ -42,6 +45,8 @@ def test_application_exposes_provided_audio_capture() -> None:
         normalizer=normalizer,
         transcriber=transcriber,
         pipeline=AsyncMock(),
+        database=MagicMock(spec=sqlite3.Connection),
+        recorder=MagicMock(),
     )
 
     # Assert
@@ -62,6 +67,8 @@ def test_application_exposes_provided_audio_normalizer() -> None:
         normalizer=normalizer,
         transcriber=transcriber,
         pipeline=AsyncMock(),
+        database=MagicMock(spec=sqlite3.Connection),
+        recorder=MagicMock(),
     )
 
     # Assert
@@ -79,6 +86,8 @@ async def test_start_starts_pipeline() -> None:
         normalizer=MagicMock(),
         transcriber=MagicMock(),
         pipeline=pipeline,
+        database=MagicMock(spec=sqlite3.Connection),
+        recorder=MagicMock(),
     )
 
     await application.start()
@@ -97,8 +106,65 @@ async def test_stop_stops_pipeline() -> None:
         normalizer=MagicMock(),
         transcriber=MagicMock(),
         pipeline=pipeline,
+        database=MagicMock(spec=sqlite3.Connection),
+        recorder=MagicMock(),
     )
 
     await application.stop()
 
     pipeline.stop.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_stop_closes_database() -> None:
+    settings = SettingsBuilder().build()
+    pipeline = AsyncMock()
+    database = MagicMock(spec=sqlite3.Connection)
+
+    application = Application(
+        settings=settings,
+        capture=MagicMock(),
+        normalizer=MagicMock(),
+        transcriber=MagicMock(),
+        pipeline=pipeline,
+        database=database,
+        recorder=MagicMock(),
+    )
+
+    await application.stop()
+
+    pipeline.stop.assert_awaited_once()
+    database.close.assert_called_once_with()
+
+
+@pytest.mark.anyio
+async def test_stop_stops_pipeline_before_closing_database() -> None:
+    settings = SettingsBuilder().build()
+    events: list[str] = []
+
+    pipeline = AsyncMock()
+
+    async def stop_pipeline() -> None:
+        events.append("pipeline-stop")
+
+    pipeline.stop.side_effect = stop_pipeline
+
+    database = MagicMock(spec=sqlite3.Connection)
+    database.close.side_effect = lambda: events.append("database-close")
+
+    application = Application(
+        settings=settings,
+        capture=MagicMock(),
+        normalizer=MagicMock(),
+        transcriber=MagicMock(),
+        pipeline=pipeline,
+        database=database,
+        recorder=MagicMock(),
+    )
+
+    await application.stop()
+
+    assert events == [
+        "pipeline-stop",
+        "database-close",
+    ]

@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -256,22 +256,22 @@ def test_create_application_wires_speech_pipeline(
     assert application.pipeline is pipeline
 
 
-def test_create_speech_pipeline_passes_dependencies_to_pipeline() -> None:
+def test_create_speech_pipeline_wires_recorder() -> None:
     capture = MagicMock()
     normalizer = MagicMock()
     vad = MagicMock()
     assembler = MagicMock()
     transcriber = MagicMock()
+    recorder = MagicMock()
 
-    with patch(
-        "app.composition.SpeechPipeline",
-    ) as pipeline_type:
+    with patch("app.composition.SpeechPipeline") as pipeline_type:
         result = create_speech_pipeline(
             capture=capture,
             normalizer=normalizer,
             vad=vad,
             assembler=assembler,
             transcriber=transcriber,
+            recorder=recorder,
         )
 
     assert result is pipeline_type.return_value
@@ -282,5 +282,5 @@ def test_create_speech_pipeline_passes_dependencies_to_pipeline() -> None:
         vad=vad,
         assembler=assembler,
         transcriber=transcriber,
-        on_result=ANY,
+        on_result=recorder.record,
     )
