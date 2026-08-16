@@ -44,7 +44,7 @@ def create_application(
     if vad is None:
         raise ValueError("Speech pipeline requires VAD to be enabled")
 
-    assembler = SpeechSegmentAssemblerImpl(
+    assembler = create_speech_assembler(
         settings=settings.audio.segmentation,
     )
 

@@ -6,6 +6,7 @@ import pytest
 
 from app.application import Application
 from app.audio.contracts import AudioFormat, AudioFrame
+from app.audio.protocols import AudioCapture
 from app.composition import (
     create_application,
     create_normalizer,
@@ -13,7 +14,11 @@ from app.composition import (
     create_transcriber,
     create_vad,
 )
+from app.services.speech_pipeline import SpeechPipeline
+from app.storage.recorder import TranscriptRecorderImpl
 from app.transcription.faster_whisper import FasterWhisperTranscriber
+from app.transcription.protocols import Transcriber
+from app.vad.protocols import AudioVad
 from app.vad.silero import SileroVADAdapter
 from tests.unit.core.config.builders import SettingsBuilder, valid_configuration_document
 from tests.unit.core.config.helpers import write_configuration
@@ -284,3 +289,31 @@ def test_create_speech_pipeline_wires_recorder() -> None:
         transcriber=transcriber,
         on_result=recorder.record,
     )
+
+
+def test_create_application_builds_production_persistence_graph(
+    tmp_path: Path,
+) -> None:
+    # Arrange
+    document = valid_configuration_document()
+    document["database"]["path"] = "transcripts.db"
+    config_path = write_configuration(tmp_path, document)
+
+    vad = MagicMock(spec=AudioVad)
+    transcriber = MagicMock(spec=Transcriber)
+    capture = MagicMock(spec=AudioCapture)
+
+    with (
+        patch("app.composition.create_capture", return_value=capture),
+        patch("app.composition.create_vad", return_value=vad),
+        patch("app.composition.create_transcriber", return_value=transcriber),
+    ):
+        # Act
+        application = create_application(config_path)
+
+    # Assert
+    assert isinstance(application, Application)
+    assert isinstance(application.pipeline, SpeechPipeline)
+    assert isinstance(application.recorder, TranscriptRecorderImpl)
+    assert application.capture is capture
+    assert application.transcriber is transcriber

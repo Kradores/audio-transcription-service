@@ -119,10 +119,10 @@ Success means:
 
 ## 1. Complete production composition
 
-* ⬜ Verify the complete production object graph
-* ⬜ Wire `TranscriptRecorder` into `SpeechPipeline` result delivery
-* ⬜ Verify SQLite repository/database ownership
-* ⬜ Add/adjust composition integration coverage
+* ✅ Verify the complete production object graph
+* ✅ Wire `TranscriptRecorder` into `SpeechPipeline` result delivery
+* ✅ Verify SQLite repository/database ownership
+* ✅ Add/adjust composition integration coverage
 
 ## 2. Verify real ML components
 
