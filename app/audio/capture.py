@@ -96,6 +96,12 @@ class QueuedAudioCapture(AudioCapture):
                 frames_dropped=self._frames_dropped,
             )
 
+    def set_discontinuity_handler(
+        self,
+        handler: Callable[[], None],
+    ) -> None:
+        return None
+
     async def _frame_stream(self) -> AsyncIterator[AudioFrame]:
         while True:
             frame = await asyncio.to_thread(self._queue.get)
@@ -178,6 +184,7 @@ class PyAudioCapture(AudioCapture):
         self._lifecycle_task: asyncio.Task[None] | None = None
         self._started = False
         self._sleep = sleep
+        self._discontinuity_handler: Callable[[], None] | None = None
 
     async def start(self) -> None:
         if self._started:
@@ -224,6 +231,18 @@ class PyAudioCapture(AudioCapture):
     def frames(self) -> AsyncIterator[AudioFrame]:
         return self._transport.frames()
 
+    def set_discontinuity_handler(
+        self,
+        handler: Callable[[], None],
+    ) -> None:
+        """Register the capture discontinuity handler."""
+        if self._started:
+            raise RuntimeError(
+                "discontinuity handler cannot be changed after capture has started",
+            )
+
+        self._discontinuity_handler = handler
+
     async def _open_stream(self) -> None:
         device = self._device_provider.get_default()
 
@@ -254,13 +273,16 @@ class PyAudioCapture(AudioCapture):
         self._stream = stream
 
     def _close_stream(self) -> None:
-        if self._stream is None:
+        stream = self._stream
+        self._stream = None
+
+        if stream is None:
             return
-        
+
         try:
-            self._stream.stop_stream()
+            stream.stop_stream()
         finally:
-            self._stream.close()
+            stream.close()
 
     def _create_frame(
         self,
@@ -323,6 +345,11 @@ class PyAudioCapture(AudioCapture):
 
             if not stream.is_active():
                 self._close_stream()
+
+                handler = self._discontinuity_handler
+                if handler is not None:
+                    handler()
+
                 continue
 
             await asyncio.sleep(

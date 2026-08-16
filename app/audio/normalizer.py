@@ -98,6 +98,20 @@ class AudioNormalizerImpl:
 
         return output
 
+    def reset(self) -> None:
+        """Discard all buffered and resampler state."""
+
+        self._buffer = np.empty(
+            (0, self._processing_format.channels),
+            dtype=np.float32,
+        )
+        self._buffer_timestamp = None
+
+        if self._resampler is not None:
+            self._resampler.reset()
+
+        self._input_sample_rate = None
+
     def _ensure_resampler(self, frame: AudioFrame) -> None:
         input_sample_rate = frame.format.sample_rate
 

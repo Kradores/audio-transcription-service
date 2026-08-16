@@ -34,6 +34,12 @@ class SpeechPipeline:
         self._task: asyncio.Task[None] | None = None
         self._started = False
 
+        self._discontinuity_pending = False
+
+        self._capture.set_discontinuity_handler(
+            self._handle_capture_discontinuity,
+        )
+
     async def start(self) -> None:
         """Start capture and the pipeline processing task."""
         if self._started:
@@ -64,12 +70,26 @@ class SpeechPipeline:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
-        self._assembler.reset()
+        self._normalizer.reset()
         self._vad.reset()
+        self._assembler.reset()
+
+    async def wait(self) -> None:
+        """Wait for the pipeline processing task to complete."""
+
+        task = self._task
+
+        if task is None:
+            return
+
+        await task
 
     async def _run(self) -> None:
         try:
             async for frame in self._capture.frames():
+                if self._discontinuity_pending:
+                    self._reset_processing_state()
+
                 processing_frames = self._normalizer.process(frame)
 
                 for processing_frame in processing_frames:
@@ -84,16 +104,6 @@ class SpeechPipeline:
             logger.exception("Speech pipeline processing failed")
             await self._capture.stop()
             raise
-
-    async def wait(self) -> None:
-        """Wait for the pipeline processing task to complete."""
-
-        task = self._task
-
-        if task is None:
-            return
-
-        await task
 
     async def _process_frame(self, frame: ProcessingAudioFrame) -> None:
         events = self._vad.process(frame)
@@ -110,3 +120,13 @@ class SpeechPipeline:
             )
 
             self._on_result(result)
+
+    def _handle_capture_discontinuity(self) -> None:
+        """Mark capture discontinuity for processing by the pipeline task."""
+        self._discontinuity_pending = True
+
+    def _reset_processing_state(self) -> None:
+        self._normalizer.reset()
+        self._vad.reset()
+        self._assembler.reset()
+        self._discontinuity_pending = False

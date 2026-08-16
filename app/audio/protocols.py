@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Protocol
 
 from app.audio.contracts import (
@@ -17,6 +17,12 @@ class AudioCapture(Protocol):
     def frames(self) -> AsyncIterator[AudioFrame]:
         """Return an asynchronous stream of captured audio frames."""
 
+    def set_discontinuity_handler(
+        self,
+        handler: Callable[[], None],
+    ) -> None:
+        """Register the handler notified when capture continuity is lost."""
+
     async def stop(self) -> None:
         """Stop audio capture."""
 
@@ -29,6 +35,9 @@ class AudioNormalizer(Protocol):
         frame: AudioFrame,
     ) -> tuple[ProcessingAudioFrame, ...]:
         """Normalize a captured frame and emit complete processing frames."""
+
+    def reset(self) -> None:
+        """Discard all state caused by the previous capture continuity."""
 
     def flush(self) -> tuple[ProcessingAudioFrame, ...]:
         """Flush the resampler and emit any final complete processing frames."""

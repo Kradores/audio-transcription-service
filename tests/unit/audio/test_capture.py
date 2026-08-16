@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
@@ -49,12 +49,73 @@ class FakeAudioCapture:
     async def submit(self, frame: AudioFrame) -> bool:
         return self._transport.submit(frame)
 
+    def set_discontinuity_handler(
+        self,
+        handler: Callable[[], None],
+    ) -> None:
+        self._discontinuity_handler = handler
+
+    def signal_discontinuity(self) -> None:
+        if self._discontinuity_handler is None:
+            raise AssertionError("discontinuity handler was not registered")
+
+        self._discontinuity_handler()
+
+
+class FakeStream(pyaudiowpatch.Stream):
+    def __init__(self, active: bool) -> None:
+        self.active = active
+        self.stop_called = False
+        self.close_called = False
+        self.start_called = False
+
+    def is_active(self) -> bool:
+        return self.active
+
+    def start_stream(self) -> None:
+        self.start_called = True
+
+    def stop_stream(self) -> None:
+        self.stop_called = True
+
+    def close(self) -> None:
+        self.close_called = True
+
+
+class TransitioningFakeStream(FakeStream):
+    def __init__(self) -> None:
+        super().__init__(active=True)
+        self._is_active_calls = 0
+
+    def is_active(self) -> bool:
+        self._is_active_calls += 1
+
+        if self._is_active_calls == 1:
+            return True
+
+        self.active = False
+        return False
+
+
+class BlockingSleep:
+    def __init__(self) -> None:
+        self.called = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def __call__(self, delay: float) -> None:
+        self.called.set()
+        await self.release.wait()
+
 
 recorded_delays: list[float] = []
 
 
 async def immediate_sleep(delay: float) -> None:
     recorded_delays.append(delay)
+
+
+async def yielding_sleep(delay: float) -> None:
+    await asyncio.sleep(0)
 
 
 @pytest.mark.anyio
@@ -446,3 +507,165 @@ async def test_stop_terminates_capture_stream() -> None:
         if not consumer.done():
             consumer.cancel()
             await consumer
+
+
+@pytest.mark.anyio
+async def test_set_discontinuity_handler_after_start_raises() -> None:
+    # Arrange
+    transport = QueuedAudioCapture(max_queue_size=4)
+    device = WasapiLoopbackDevice(
+        index=42,
+        name="Test Speakers [Loopback]",
+        channels=2,
+        sample_rate=48_000,
+    )
+
+    device_provider = MagicMock()
+    device_provider.get_default.return_value = device
+
+    capture = PyAudioCapture(
+        audio=MagicMock(),
+        device_provider=device_provider,
+        transport=transport,
+    )
+
+    await capture.start()
+
+    # Act / Assert
+    with pytest.raises(
+        RuntimeError,
+        match="cannot be changed after capture has started",
+    ):
+        capture.set_discontinuity_handler(lambda: None)
+
+    await capture.stop()
+
+
+def test_set_discontinuity_handler_before_start() -> None:
+    def handler() -> None: ...
+
+    capture = PyAudioCapture(
+        audio=MagicMock(),
+        device_provider=MagicMock(),
+        transport=MagicMock(),
+    )
+
+    capture.set_discontinuity_handler(handler)
+
+    assert capture._discontinuity_handler is handler
+
+
+@pytest.mark.anyio
+async def test_inactive_running_stream_invokes_discontinuity_handler() -> None:
+    # Arrange
+    transport = QueuedAudioCapture(max_queue_size=4)
+
+    device = WasapiLoopbackDevice(
+        index=42,
+        name="Test Speakers [Loopback]",
+        channels=2,
+        sample_rate=48_000,
+    )
+
+    first_stream = FakeStream(active=False)
+    recovered_stream = FakeStream(active=True)
+
+    audio = MagicMock()
+    audio.open.side_effect = [
+        first_stream,
+        recovered_stream,
+    ]
+
+    device_provider = MagicMock()
+    device_provider.get_default.return_value = device
+
+    discontinuity_event = asyncio.Event()
+    discontinuities: list[int] = []
+
+    def on_discontinuity() -> None:
+        discontinuities.append(1)
+        discontinuity_event.set()
+
+    capture = PyAudioCapture(
+        audio=audio,
+        device_provider=device_provider,
+        transport=transport,
+        sleep=yielding_sleep,
+    )
+
+    capture.set_discontinuity_handler(on_discontinuity)
+
+    # Act
+    await capture.start()
+
+    try:
+        await asyncio.wait_for(
+            discontinuity_event.wait(),
+            timeout=1.0,
+        )
+
+        # Assert
+        assert discontinuities == [1]
+        assert first_stream.stop_called
+        assert first_stream.close_called
+        assert recovered_stream.start_called
+        assert audio.open.call_count == 2
+        assert capture._stream is recovered_stream
+    finally:
+        await capture.stop()
+
+
+@pytest.mark.anyio
+async def test_initial_lookup_error_does_not_invoke_discontinuity_handler() -> None:
+    # Arrange
+    transport = QueuedAudioCapture(max_queue_size=4)
+
+    audio = MagicMock()
+    device_provider = MagicMock()
+    device_provider.get_default.side_effect = LookupError
+
+    sleep = AsyncMock()
+
+    discontinuities: list[int] = []
+
+    capture = PyAudioCapture(
+        audio=audio,
+        device_provider=device_provider,
+        transport=transport,
+        sleep=sleep,
+    )
+
+    capture.set_discontinuity_handler(
+        lambda: discontinuities.append(1),
+    )
+
+    # Act
+    await capture.start()
+
+    await asyncio.sleep(0)
+
+    # Assert
+    assert discontinuities == []
+
+    await capture.stop()
+
+
+@pytest.mark.anyio
+async def test_close_stream_clears_stream_reference() -> None:
+    # Arrange
+    stream = FakeStream(active=False)
+
+    capture = PyAudioCapture(
+        audio=MagicMock(),
+        device_provider=MagicMock(),
+        transport=MagicMock(),
+    )
+    capture._stream = stream
+
+    # Act
+    capture._close_stream()
+
+    # Assert
+    assert capture._stream is None
+    assert stream.stop_called
+    assert stream.close_called

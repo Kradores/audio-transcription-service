@@ -19,6 +19,7 @@ class FakeAudioResampler:
         )
         self.processed: list[Float32Audio] = []
         self.flush_called = False
+        self.reset_called = False
 
     def process(self, audio: Float32Audio) -> Float32Audio:
         self.processed.append(audio)
@@ -35,7 +36,8 @@ class FakeAudioResampler:
         self.flush_called = True
         return self._flush_output
 
-    def reset(self) -> None: ...
+    def reset(self) -> None:
+        self.reset_called = True
 
 
 class FakeAudioResamplerFactory:
@@ -727,3 +729,111 @@ def test_normalizer_resamples_48_khz_stream_into_processing_frames() -> None:
     assert sum(frame.audio.shape[0] for frame in output) == 320
     assert output[0].timestamp == pytest.approx(10.0)
     assert output[0].format.sample_rate == 16_000
+
+
+def test_normalizer_reset_discards_buffered_audio() -> None:
+    normalizer = create_normalizer()
+
+    first = create_frame(
+        np.ones((160, 1), dtype=np.int16),
+    )
+
+    assert normalizer.process(first) == ()
+
+    normalizer.reset()
+
+    second = create_frame(
+        np.full((160, 1), 2, dtype=np.int16),
+    )
+
+    output = normalizer.process(second)
+
+    assert output == ()
+
+
+def test_normalizer_reset_starts_new_processing_continuity() -> None:
+    normalizer = create_normalizer()
+
+    normalizer.process(
+        create_frame(
+            np.ones((160, 1), dtype=np.int16),
+        ),
+    )
+
+    normalizer.reset()
+
+    output = normalizer.process(
+        create_frame(
+            np.full((320, 1), 2, dtype=np.int16),
+        ),
+    )
+
+    assert len(output) == 1
+
+    np.testing.assert_array_equal(
+        output[0].audio[:, 0],
+        np.full(
+            320,
+            2 / 32768.0,
+            dtype=np.float32,
+        ),
+    )
+
+
+def test_normalizer_reset_resets_resampler() -> None:
+    settings = create_settings()
+
+    resampler = FakeAudioResampler(
+        outputs=[
+            np.empty((0, 1), dtype=np.float32),
+        ],
+    )
+
+    factory = FakeAudioResamplerFactory(resampler)
+
+    normalizer = AudioNormalizerImpl(
+        settings,
+        factory,
+    )
+
+    normalizer.process(
+        create_frame(
+            np.zeros((320, 1), dtype=np.int16),
+        ),
+    )
+
+    normalizer.reset()
+    assert resampler.reset_called
+
+
+def test_normalizer_reset_does_not_flush_resampler() -> None:
+    # Arrange
+    settings = create_settings()
+
+    resampler = FakeAudioResampler(
+        outputs=[
+            np.empty((0, 1), dtype=np.float32),
+        ],
+        flush_output=np.ones(
+            (320, 1),
+            dtype=np.float32,
+        ),
+    )
+
+    normalizer = AudioNormalizerImpl(
+        settings,
+        FakeAudioResamplerFactory(resampler),
+    )
+
+    normalizer.process(
+        create_frame(
+            np.zeros((320, 1), dtype=np.int16),
+        ),
+    )
+
+    # Act
+    normalizer.reset()
+
+    # Assert
+    assert resampler.reset_called
+    assert not resampler.flush_called

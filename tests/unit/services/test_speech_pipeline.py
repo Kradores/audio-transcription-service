@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 import numpy as np
 import pytest
@@ -36,6 +36,7 @@ class FakeAudioCapture:
         self._frames = frames
         self.started = False
         self.stopped = False
+        self._discontinuity_handler: Callable[[], None] | None = None
 
     async def start(self) -> None:
         self.started = True
@@ -47,52 +48,93 @@ class FakeAudioCapture:
         for frame in self._frames:
             yield frame
 
+    def set_discontinuity_handler(
+        self,
+        handler: Callable[[], None],
+    ) -> None:
+        self._discontinuity_handler = handler
+
+    def signal_discontinuity(self) -> None:
+        if self._discontinuity_handler is None:
+            raise AssertionError("discontinuity handler was not registered")
+
+        self._discontinuity_handler()
+
 
 class FakeNormalizer:
     def __init__(
         self,
         processing_frames: tuple[ProcessingAudioFrame, ...],
         flushed_frames: tuple[ProcessingAudioFrame, ...] = (),
+        events: list[str] | None = None,
     ) -> None:
         self.processing_frames = processing_frames
         self.flushed_frames = flushed_frames
+        self.events = events
 
         self.processed: list[AudioFrame] = []
         self.flush_called = False
+        self.reset_count = 0
 
     def process(
         self,
         frame: AudioFrame,
     ) -> tuple[ProcessingAudioFrame, ...]:
         self.processed.append(frame)
+
+        if self.events is not None:
+            self.events.append("normalizer-process")
+
         return self.processing_frames
 
     def flush(self) -> tuple[ProcessingAudioFrame, ...]:
         self.flush_called = True
         return self.flushed_frames
 
+    def reset(self) -> None:
+        self.reset_count += 1
+
+        if self.events is not None:
+            self.events.append("normalizer-reset")
+
 
 class FakeVad:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        events: list[str] | None = None,
+    ) -> None:
         self.processed: list[ProcessingAudioFrame] = []
-        self.reset_called = False
+        self.reset_count = 0
+        self.events = events
 
-    def process(self, frame: ProcessingAudioFrame) -> tuple[SpeechStart | SpeechEnd, ...]:
+    def process(
+        self,
+        frame: ProcessingAudioFrame,
+    ) -> tuple[SpeechStart | SpeechEnd, ...]:
         self.processed.append(frame)
+
+        if self.events is not None:
+            self.events.append("vad-process")
+
         return ()
 
     def reset(self) -> None:
-        self.reset_called = True
+        self.reset_count += 1
+
+        if self.events is not None:
+            self.events.append("vad-reset")
 
 
 class FakeAssembler:
     def __init__(
         self,
         segments_by_frame: dict[int, tuple[SpeechSegment, ...]],
+        events: list[str] | None = None,
     ) -> None:
         self._segments_by_frame = segments_by_frame
         self.processed: list[ProcessingAudioFrame] = []
-        self.reset_called = False
+        self.reset_count = 0
+        self.events = events
 
     def process(
         self,
@@ -100,10 +142,17 @@ class FakeAssembler:
         events: tuple[SpeechStart | SpeechEnd, ...],
     ) -> tuple[SpeechSegment, ...]:
         self.processed.append(frame)
+
+        if self.events is not None:
+            self.events.append("assembler-process")
+
         return self._segments_by_frame.get(id(frame), ())
 
     def reset(self) -> None:
-        self.reset_called = True
+        self.reset_count += 1
+
+        if self.events is not None:
+            self.events.append("assembler-reset")
 
     def flush(self) -> tuple[SpeechSegment, ...]:
         return ()
@@ -149,6 +198,27 @@ class BlockingTranscriber:
             start=0.0,
             end=1.0,
         )
+
+
+class ControllableAudioCapture(FakeAudioCapture):
+    def __init__(self) -> None:
+        super().__init__([])
+        self._queue: asyncio.Queue[AudioFrame | None] = asyncio.Queue()
+
+    async def frames(self) -> AsyncIterator[AudioFrame]:
+        while True:
+            frame = await self._queue.get()
+
+            if frame is None:
+                return
+
+            yield frame
+
+    async def submit(self, frame: AudioFrame) -> None:
+        await self._queue.put(frame)
+
+    async def close(self) -> None:
+        await self._queue.put(None)
 
 
 def create_audio_frame() -> AudioFrame:
@@ -590,7 +660,7 @@ async def test_stop_discards_incomplete_assembler_state() -> None:
     await pipeline.start()
     await pipeline.stop()
 
-    assert assembler.reset_called
+    assert assembler.reset_count == 1
 
 
 @pytest.mark.anyio
@@ -800,3 +870,237 @@ async def test_pipeline_does_not_call_on_result_when_transcription_fails() -> No
         await pipeline.wait()
 
     assert results == []
+
+
+@pytest.mark.anyio
+async def test_pipeline_discontinuity_callback_only_marks_pending_reset() -> None:
+    # Arrange
+    capture = ControllableAudioCapture()
+
+    normalizer = FakeNormalizer(())
+    vad = FakeVad()
+    assembler = FakeAssembler({})
+    transcriber = FakeTranscriber()
+
+    pipeline = SpeechPipeline(
+        capture=capture,
+        normalizer=normalizer,
+        vad=vad,
+        assembler=assembler,
+        transcriber=transcriber,
+        on_result=sink_handler,
+    )
+
+    await pipeline.start()
+
+    # Act
+    capture.signal_discontinuity()
+
+    # Assert
+    assert normalizer.reset_count == 0
+    assert vad.reset_count == 0
+    assert assembler.reset_count == 0
+
+    await capture.close()
+    await pipeline.wait()
+
+
+@pytest.mark.anyio
+async def test_pipeline_discontinuity_resets_processing_components() -> None:
+    # Arrange
+    capture = ControllableAudioCapture()
+
+    processing_frame = create_processing_frame()
+
+    normalizer = FakeNormalizer((processing_frame,))
+    vad = FakeVad()
+    assembler = FakeAssembler({})
+    transcriber = FakeTranscriber()
+
+    pipeline = SpeechPipeline(
+        capture=capture,
+        normalizer=normalizer,
+        vad=vad,
+        assembler=assembler,
+        transcriber=transcriber,
+        on_result=sink_handler,
+    )
+
+    await pipeline.start()
+
+    capture.signal_discontinuity()
+
+    # Act
+    await capture.submit(create_audio_frame())
+
+    await asyncio.sleep(0)
+
+    # Assert
+    assert normalizer.reset_count == 1
+    assert vad.reset_count == 1
+    assert assembler.reset_count == 1
+
+    await capture.close()
+    await pipeline.wait()
+
+
+@pytest.mark.anyio
+async def test_pipeline_resets_before_first_post_discontinuity_frame() -> None:
+    # Arrange
+    events: list[str] = []
+
+    capture = ControllableAudioCapture()
+    processing_frame = create_processing_frame()
+
+    normalizer = FakeNormalizer(
+        (processing_frame,),
+        events=events,
+    )
+    vad = FakeVad()
+    vad.events = events
+
+    assembler = FakeAssembler({})
+    assembler.events = events
+
+    pipeline = SpeechPipeline(
+        capture=capture,
+        normalizer=normalizer,
+        vad=vad,
+        assembler=assembler,
+        transcriber=FakeTranscriber(),
+        on_result=sink_handler,
+    )
+
+    await pipeline.start()
+
+    capture.signal_discontinuity()
+
+    # Act
+    await capture.submit(create_audio_frame())
+
+    await asyncio.sleep(0)
+
+    # Assert
+    assert events == [
+        "normalizer-reset",
+        "vad-reset",
+        "assembler-reset",
+        "normalizer-process",
+        "vad-process",
+        "assembler-process",
+    ]
+
+    await capture.close()
+    await pipeline.wait()
+
+
+@pytest.mark.anyio
+async def test_pipeline_handles_multiple_discontinuities() -> None:
+    # Arrange
+    capture = ControllableAudioCapture()
+    processing_frame = create_processing_frame()
+
+    normalizer = FakeNormalizer((processing_frame,))
+    vad = FakeVad()
+    assembler = FakeAssembler({})
+
+    pipeline = SpeechPipeline(
+        capture=capture,
+        normalizer=normalizer,
+        vad=vad,
+        assembler=assembler,
+        transcriber=FakeTranscriber(),
+        on_result=sink_handler,
+    )
+
+    await pipeline.start()
+
+    # Act
+    capture.signal_discontinuity()
+    await capture.submit(create_audio_frame())
+    await asyncio.sleep(0)
+
+    capture.signal_discontinuity()
+    await capture.submit(create_audio_frame())
+    await asyncio.sleep(0)
+
+    # Assert
+    assert normalizer.reset_count == 2
+    assert vad.reset_count == 2
+    assert assembler.reset_count == 2
+
+    await capture.close()
+    await pipeline.wait()
+
+
+@pytest.mark.anyio
+async def test_pipeline_coalesces_multiple_pending_discontinuities() -> None:
+    # Arrange
+    capture = ControllableAudioCapture()
+    processing_frame = create_processing_frame()
+
+    normalizer = FakeNormalizer((processing_frame,))
+    vad = FakeVad()
+    assembler = FakeAssembler({})
+
+    pipeline = SpeechPipeline(
+        capture=capture,
+        normalizer=normalizer,
+        vad=vad,
+        assembler=assembler,
+        transcriber=FakeTranscriber(),
+        on_result=sink_handler,
+    )
+
+    await pipeline.start()
+
+    # Act
+    capture.signal_discontinuity()
+    capture.signal_discontinuity()
+    capture.signal_discontinuity()
+
+    await capture.submit(create_audio_frame())
+    await asyncio.sleep(0)
+
+    # Assert
+    assert normalizer.reset_count == 1
+    assert vad.reset_count == 1
+    assert assembler.reset_count == 1
+
+    await capture.close()
+    await pipeline.wait()
+
+
+@pytest.mark.anyio
+async def test_pipeline_discontinuity_does_not_produce_transcription() -> None:
+    # Arrange
+    capture = ControllableAudioCapture()
+
+    normalizer = FakeNormalizer(())
+    vad = FakeVad()
+    assembler = FakeAssembler({})
+    transcriber = FakeTranscriber()
+
+    results: list[TranscriptionResult] = []
+
+    pipeline = SpeechPipeline(
+        capture=capture,
+        normalizer=normalizer,
+        vad=vad,
+        assembler=assembler,
+        transcriber=transcriber,
+        on_result=results.append,
+    )
+
+    await pipeline.start()
+
+    # Act
+    capture.signal_discontinuity()
+    await asyncio.sleep(0)
+
+    # Assert
+    assert transcriber.transcribed == []
+    assert results == []
+
+    await capture.close()
+    await pipeline.wait()
