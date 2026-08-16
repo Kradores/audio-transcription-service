@@ -12,9 +12,11 @@ class SileroVADAdapter:
     _SUPPORTED_SAMPLE_RATE = 16_000
     _SUPPORTED_CHANNELS = 1
     _SUPPORTED_SAMPLE_TYPE: AudioSampleType = "float32"
+    _SILERO_WINDOW_SAMPLES = 512
 
     def __init__(self, iterator: SileroVADIterator) -> None:
         self._iterator = iterator
+        self._audio_buffer = np.empty(0, dtype=np.float32)
 
     def process(
         self,
@@ -27,7 +29,17 @@ class SileroVADAdapter:
             dtype=np.float32,
         )
 
-        event = self._iterator(audio)
+        self._audio_buffer = np.concatenate(
+            (self._audio_buffer, audio),
+        )
+
+        if self._audio_buffer.size < self._SILERO_WINDOW_SAMPLES:
+            return ()
+
+        window = self._audio_buffer[: self._SILERO_WINDOW_SAMPLES]
+        self._audio_buffer = self._audio_buffer[self._SILERO_WINDOW_SAMPLES :].copy()
+
+        event = self._iterator(window)
 
         if event is None:
             return ()
@@ -41,9 +53,10 @@ class SileroVADAdapter:
         raise ValueError(f"unexpected Silero VAD event: {event!r}")
 
     def reset(self) -> None:
-        """Reset the underlying Silero VAD state."""
+        """Reset the underlying Silero VAD state and pending audio."""
 
         self._iterator.reset_states()
+        self._audio_buffer = np.empty(0, dtype=np.float32)
 
     @classmethod
     def _validate_frame(cls, frame: ProcessingAudioFrame) -> None:
