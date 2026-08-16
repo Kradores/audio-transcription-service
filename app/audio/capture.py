@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+import contextlib
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from queue import Full, Queue
 from threading import Lock
@@ -11,6 +12,11 @@ import pyaudiowpatch
 
 from app.audio.contracts import AudioFormat, AudioFrame
 from app.audio.protocols import AudioCapture
+
+type Sleep = Callable[[float], Awaitable[None]]
+RECOVERY_INITIAL_DELAY_SECONDS = 0.1
+RECOVERY_MAX_DELAY_SECONDS = 5.0
+RECOVERY_MONITOR_INTERVAL_SECONDS = 0.1
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,27 +168,72 @@ class PyAudioCapture(AudioCapture):
         audio: pyaudiowpatch.PyAudio,
         device_provider: WasapiLoopbackDeviceProvider,
         transport: QueuedAudioCapture,
+        sleep: Sleep = asyncio.sleep,
     ) -> None:
         self._audio = audio
         self._device_provider = device_provider
         self._transport = transport
         self._format: AudioFormat | None = None
         self._stream: pyaudiowpatch.Stream | None = None
+        self._lifecycle_task: asyncio.Task[None] | None = None
+        self._started = False
+        self._sleep = sleep
 
     async def start(self) -> None:
-        if self._stream is not None:
+        if self._started:
             return
 
-        device_provider = WasapiLoopbackDeviceProvider(self._audio)
-        device = device_provider.get_default()
+        self._started = True
+        await self._transport.start()
 
-        self._format = AudioFormat(
+        try:
+            await self._open_stream()
+        except LookupError:
+            pass
+        except Exception:
+            self._started = False
+            await self._transport.stop()
+            self._audio.terminate()
+            raise
+
+        self._lifecycle_task = asyncio.create_task(
+            self._run(),
+            name="audio-capture-lifecycle",
+        )
+
+    async def stop(self) -> None:
+        if not self._started:
+            return
+
+        self._started = False
+
+        task = self._lifecycle_task
+        self._lifecycle_task = None
+
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+        self._close_stream()
+
+        self._audio.terminate()
+
+        await self._transport.stop()
+
+    def frames(self) -> AsyncIterator[AudioFrame]:
+        return self._transport.frames()
+
+    async def _open_stream(self) -> None:
+        device = self._device_provider.get_default()
+
+        audio_format = AudioFormat(
             sample_rate=int(device.sample_rate),
             channels=device.channels,
             sample_type="int16",
         )
 
-        self._stream = self._audio.open(
+        stream = self._audio.open(
             rate=int(device.sample_rate),
             channels=device.channels,
             format=pyaudiowpatch.paInt16,
@@ -193,22 +244,23 @@ class PyAudioCapture(AudioCapture):
             stream_callback=self._on_audio,
         )
 
-        self._stream.start_stream()
-
-    async def stop(self) -> None:
-        stream = self._stream
-
-        if stream is not None:
-            self._stream = None
-
-            stream.stop_stream()
+        try:
+            stream.start_stream()
+        except Exception:
             stream.close()
-            self._audio.terminate()
+            raise
 
-        await self._transport.stop()
+        self._format = audio_format
+        self._stream = stream
 
-    def frames(self) -> AsyncIterator[AudioFrame]:
-        return self._transport.frames()
+    def _close_stream(self) -> None:
+        if self._stream is None:
+            return
+        
+        try:
+            self._stream.stop_stream()
+        finally:
+            self._stream.close()
 
     def _create_frame(
         self,
@@ -246,3 +298,33 @@ class PyAudioCapture(AudioCapture):
         self._transport.submit(frame)
 
         return None, pyaudiowpatch.paContinue
+
+    async def _run(self) -> None:
+        delay = RECOVERY_INITIAL_DELAY_SECONDS
+
+        while self._started:
+            if self._stream is None:
+                try:
+                    await self._open_stream()
+                except LookupError:
+                    await asyncio.sleep(delay)
+                    delay = min(
+                        delay * 2,
+                        RECOVERY_MAX_DELAY_SECONDS,
+                    )
+                    continue
+
+                delay = RECOVERY_INITIAL_DELAY_SECONDS
+
+            stream = self._stream
+
+            if stream is None:
+                continue
+
+            if not stream.is_active():
+                self._close_stream()
+                continue
+
+            await asyncio.sleep(
+                RECOVERY_MONITOR_INTERVAL_SECONDS,
+            )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
 import pyaudiowpatch
@@ -13,7 +13,6 @@ from app.audio.capture import (
     QueuedAudioCapture,
     WasapiAudioFrameFactory,
     WasapiLoopbackDevice,
-    WasapiLoopbackDeviceProvider,
 )
 from app.audio.contracts import AudioFormat, AudioFrame
 from app.audio.transport import AudioFrameTransport
@@ -51,6 +50,13 @@ class FakeAudioCapture:
         return self._transport.submit(frame)
 
 
+recorded_delays: list[float] = []
+
+
+async def immediate_sleep(delay: float) -> None:
+    recorded_delays.append(delay)
+
+
 @pytest.mark.anyio
 async def test_capture_streams_frames() -> None:
     capture = FakeAudioCapture()
@@ -68,29 +74,6 @@ async def test_capture_streams_frames() -> None:
     finally:
         await capture.stop()
         await consumer
-
-
-def test_get_default_returns_loopback_device() -> None:
-    audio = Mock()
-    audio.get_default_wasapi_loopback.return_value = {
-        "index": 10,
-        "name": "Speakers (Realtek(R) Audio) [Loopback]",
-        "maxInputChannels": 2,
-        "defaultSampleRate": 48000.0,
-    }
-
-    provider = WasapiLoopbackDeviceProvider(audio)
-
-    device = provider.get_default()
-
-    assert device == WasapiLoopbackDevice(
-        index=10,
-        name="Speakers (Realtek(R) Audio) [Loopback]",
-        channels=2,
-        sample_rate=48000.0,
-    )
-
-    audio.get_default_wasapi_loopback.assert_called_once_with()
 
 
 def test_wasapi_audio_frame_factory_creates_frame() -> None:
@@ -147,20 +130,77 @@ def test_wasapi_audio_frame_factory_uses_callback_frame_count() -> None:
 
 
 @pytest.mark.anyio
+async def test_start_uses_injected_device_provider() -> None:
+    audio = MagicMock()
+    stream = MagicMock()
+
+    device = WasapiLoopbackDevice(
+        index=42,
+        name="Test Speakers [Loopback]",
+        channels=2,
+        sample_rate=48_000,
+    )
+
+    device_provider = MagicMock()
+    device_provider.get_default.return_value = device
+
+    transport = QueuedAudioCapture(max_queue_size=4)
+    audio.open.return_value = stream
+
+    capture = PyAudioCapture(
+        audio=audio,
+        device_provider=device_provider,
+        transport=transport,
+    )
+
+    try:
+        await capture.start()
+
+        device_provider.get_default.assert_called_once_with()
+        audio.get_default_wasapi_loopback.assert_not_called()
+        audio.open.assert_called_once()
+        stream.start_stream.assert_called_once_with()
+    finally:
+        await capture.stop()
+
+
+@pytest.mark.anyio
+async def test_start_enters_recovery_when_no_loopback_device_is_available() -> None:
+    audio = MagicMock()
+    device_provider = MagicMock()
+    device_provider.get_default.side_effect = LookupError
+
+    transport = QueuedAudioCapture(max_queue_size=4)
+
+    capture = PyAudioCapture(
+        audio=audio,
+        device_provider=device_provider,
+        transport=transport,
+    )
+
+    await capture.start()
+
+    try:
+        assert capture._lifecycle_task is not None
+        assert capture._stream is None
+    finally:
+        await capture.stop()
+
+
+@pytest.mark.anyio
 async def test_start_opens_default_wasapi_loopback_stream(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     audio = MagicMock()
     stream = MagicMock()
 
-    device = {
-        "index": 42,
-        "name": "Test Speakers [Loopback]",
-        "maxInputChannels": 2,
-        "defaultSampleRate": 48000.0,
-    }
+    device = WasapiLoopbackDevice(
+        index=42,
+        name="Test Speakers [Loopback]",
+        channels=2,
+        sample_rate=48_000.0,
+    )
 
-    audio.get_default_wasapi_loopback.return_value = device
     audio.open.return_value = stream
 
     monkeypatch.setattr(
@@ -169,7 +209,10 @@ async def test_start_opens_default_wasapi_loopback_stream(
     )
 
     fake_device_provider = MagicMock()
+    fake_device_provider.get_default.return_value = device
+
     fake_transport = MagicMock()
+    fake_transport.start = AsyncMock()
     fake_transport.stop = AsyncMock()
 
     capture = PyAudioCapture(
@@ -183,7 +226,10 @@ async def test_start_opens_default_wasapi_loopback_stream(
     finally:
         await capture.stop()
 
-    audio.get_default_wasapi_loopback.assert_called_once_with()
+    fake_device_provider.get_default.assert_called_once_with()
+
+    fake_transport.start.assert_awaited_once_with()
+    fake_transport.stop.assert_awaited_once_with()
 
     audio.open.assert_called_once_with(
         rate=48_000,
@@ -206,12 +252,12 @@ async def test_start_uses_loopback_device_format(
     audio = MagicMock()
     stream = MagicMock()
 
-    audio.get_default_wasapi_loopback.return_value = {
-        "index": 42,
-        "name": "Test Speakers [Loopback]",
-        "maxInputChannels": 2,
-        "defaultSampleRate": 48000.0,
-    }
+    device = WasapiLoopbackDevice(
+        index=42,
+        name="Test Speakers [Loopback]",
+        channels=2,
+        sample_rate=48_000.0,
+    )
     audio.open.return_value = stream
 
     monkeypatch.setattr(
@@ -220,7 +266,10 @@ async def test_start_uses_loopback_device_format(
     )
 
     fake_device_provider = MagicMock()
+    fake_device_provider.get_default.return_value = device
+
     fake_transport = MagicMock()
+    fake_transport.start = AsyncMock()
     fake_transport.stop = AsyncMock()
 
     capture = PyAudioCapture(
@@ -238,6 +287,9 @@ async def test_start_uses_loopback_device_format(
         assert capture._format.sample_type == "int16"
     finally:
         await capture.stop()
+
+    fake_transport.start.assert_awaited_once_with()
+    fake_transport.stop.assert_awaited_once_with()
 
 
 def test_audio_callback_creates_and_submits_frame() -> None:
@@ -371,13 +423,18 @@ async def test_callback_frame_is_received_by_async_consumer() -> None:
 @pytest.mark.anyio
 async def test_stop_terminates_capture_stream() -> None:
     transport = QueuedAudioCapture(max_queue_size=4)
+
+    audio = MagicMock()
+    device_provider = MagicMock()
+    device_provider.get_default.side_effect = LookupError
+
     capture = PyAudioCapture(
-        audio=MagicMock(),
-        device_provider=MagicMock(),
+        audio=audio,
+        device_provider=device_provider,
         transport=transport,
     )
 
-    await transport.start()
+    await capture.start()
 
     consumer = asyncio.create_task(consume_stream(capture))
 
