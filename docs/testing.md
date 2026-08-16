@@ -104,6 +104,13 @@ SileroVADAdapter
 
 SpeechSegmentAssembler
     └── deterministic state-machine tests
+
+Storage testing
+├── TranscriptRecorder
+│   └── deterministic unit tests with repository fake/mock
+│
+└── SQLiteTranscriptRepository
+    └── real SQLite tests using :memory:
 ```
 
 And specifically test:
@@ -118,6 +125,16 @@ And specifically test:
 - capture interruption
 - shutdown discard
 - maximum-duration invariant
+- SQLite repository tests use real SQLite;
+- `:memory:` is used to avoid filesystem dependency;
+- schema initialization is tested;
+- insertion/persistence is tested;
+- nullable confidence is tested;
+- append-only behavior is tested;
+- commit behavior is tested;
+- database failures propagate;
+- composition tests verify database construction/wiring;
+- lifecycle tests verify the database connection is closed during application shutdown.
 
 ### Unit tests
 No Windows audio hardware required.

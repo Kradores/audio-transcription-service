@@ -38,3 +38,42 @@ with ownership/invariants.
 - duration
 - format
 with its invariants.
+
+## TranscriptionResult
+```
+text
+language
+confidence
+start
+end
+```
+with:
+- `confidence`: optional `float`;
+- `start` / `end`: transcription segment timestamps;
+- represents one complete `SpeechSegment` transcription.
+
+## Transcriber
+```py
+transcribe(segment: SpeechSegment) -> TranscriptionResult
+```
+Synchronous.
+
+## TranscriptionResultHandler
+```py
+(TranscriptionResult) -> None
+```
+The pipeline invokes it after successful transcription.
+
+## TranscriptRecorder
+```py
+record(result: TranscriptionResult) -> None
+```
+Application-level persistence boundary.
+
+## TranscriptRepository
+```py
+insert(result: TranscriptionResult) -> None
+```
+Append-only persistence contract.
+
+

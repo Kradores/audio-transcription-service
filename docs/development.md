@@ -250,3 +250,23 @@ Hardware-independent tests
     ↓
 Real Windows integration
 ```
+
+## Database
+
+The application uses SQLite for transcript persistence.
+
+The database path is configured through:
+
+```yaml
+database:
+  path: transcripts.db
+```
+
+Relative database paths are resolved relative to the configuration file.
+
+The application creates the parent directory for the configured database
+path when necessary.
+
+Database schema initialization is performed during application composition.
+
+Schema migrations are intentionally not introduced yet.

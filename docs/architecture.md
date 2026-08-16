@@ -1,47 +1,32 @@
 # High-Level Architecture
 
-```text
-                    Windows System Audio
-                            │
-                            ▼
-                    WASAPI Loopback
-                            │
-                            ▼
-                     PyAudioWPatch
-                            │
-                            ▼
-                    ┌───────────────┐
-                    │ AudioCapture  │
-                    └───────┬───────┘
-                            │
-                     AudioFrame
-                   native format
-                            │
-                            ▼
-                   bounded async queue
-                            │
-                            ▼
-                   AudioNormalizer
-                            │
-                            │ ProcessingAudioFrame
-                            │ 16 kHz / mono / float32
-                            │ exactly 20 ms
-                            ▼
-                  SileroVADAdapter
-                            │
-                            │ SpeechStart / SpeechEnd
-                            ▼
-               SpeechSegmentAssembler
-                            │
-                            │ SpeechSegment
-                            ▼
-                     Faster-Whisper
-                            │
-                            ▼
-                       Transcript
-                            │
-                            ▼
-                         SQLite
+```
+                    APPLICATION
+──────────────────────────────────────────
+WASAPI Loopback
+    ↓
+AudioCapture
+    ↓
+AudioNormalizer
+    ↓
+VAD
+    ↓
+SpeechSegmentAssembler
+    ↓
+Transcriber
+    ↓
+SpeechPipeline
+    ↓
+TranscriptionResult
+    ↓
+TranscriptRecorder
+    ↓
+TranscriptRepository
+             │
+             ▼
+──────────────────────────────────────────
+              INFRASTRUCTURE
+             SQLite
 ```
 
 # Project Structure
@@ -241,3 +226,5 @@ This is another reason why `AudioNormalizer` deserves its own interface.
 | Transcription                       | Whisper pipeline         |
 
 
+## key ownership statement
+`SpeechPipeline` remains storage-agnostic. It delivers completed `TranscriptionResult` values through its result handler. `TranscriptRecorder` owns the application-level transition into persistence, while `TranscriptRepository` abstracts persistence mechanics.
