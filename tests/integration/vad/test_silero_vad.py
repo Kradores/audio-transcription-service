@@ -2,6 +2,7 @@ import wave
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from app.audio.contracts import AudioFormat, AudioFrame, SpeechEnd, SpeechStart
 from app.audio.normalizer import AudioNormalizerImpl
@@ -37,6 +38,8 @@ def _read_wav(path: Path) -> AudioFrame:
     )
 
 
+@pytest.mark.slow_integration
+@pytest.mark.timeout(120)
 def test_real_silero_detects_speech_in_audio_fixture() -> None:
     # Arrange
     settings = ConfigurationLoader(DEFAULT_CONFIGURATION_PATH).load()

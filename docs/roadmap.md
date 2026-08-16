@@ -126,10 +126,10 @@ Success means:
 
 ## 2. Verify real ML components
 
-* ⬜ Real Silero integration test
-* ⬜ Real Faster-Whisper integration test
-* ⬜ Verify Python 3.14 runtime compatibility
-* ⬜ Resolve any model-loading/runtime compatibility issues discovered
+* ✅ Real Silero integration test
+* ✅ Real Faster-Whisper integration test
+* ✅ Verify Python 3.14 runtime compatibility
+* ✅ Resolve any model-loading/runtime compatibility issues discovered
 
 ## 3. Verify real WASAPI capture
 

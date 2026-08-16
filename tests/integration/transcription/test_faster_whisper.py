@@ -1,15 +1,15 @@
-from pathlib import Path
 import wave
+from pathlib import Path
 
 import numpy as np
+import pytest
 
 from app.audio.contracts import AudioFormat, AudioFrame, ProcessingAudioFrame, SpeechSegment
 from app.audio.normalizer import AudioNormalizerImpl
 from app.audio.resampler import SoXRResamplerFactory
 from app.composition import create_transcriber
-from app.core.config.constants import DEFAULT_CONFIGURATION_PATH, PROCESSING_FRAME_DURATION_SECONDS
+from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
-
 
 FIXTURE_PATH = Path(__file__).parents[2] / "fixtures" / "audio" / "english_speech.wav"
 
@@ -57,6 +57,8 @@ def _create_speech_segment(
     )
 
 
+@pytest.mark.slow_integration
+@pytest.mark.timeout(120)
 def test_real_faster_whisper_transcribes_audio_fixture() -> None:
     # Arrange
     settings = ConfigurationLoader(DEFAULT_CONFIGURATION_PATH).load()
