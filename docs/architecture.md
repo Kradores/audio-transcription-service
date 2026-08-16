@@ -228,3 +228,17 @@ This is another reason why `AudioNormalizer` deserves its own interface.
 
 ## key ownership statement
 `SpeechPipeline` remains storage-agnostic. It delivers completed `TranscriptionResult` values through its result handler. `TranscriptRecorder` owns the application-level transition into persistence, while `TranscriptRepository` abstracts persistence mechanics.
+
+
+## discontinuity path
+```
+AudioCapture
+    │
+    │ discontinuity callback
+    ▼
+SpeechPipeline
+    │
+    ├── AudioNormalizer.reset()
+    ├── AudioVad.reset()
+    └── SpeechSegmentAssembler.reset()
+```

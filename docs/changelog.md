@@ -77,3 +77,17 @@ Verification
     ✅ Ruff
     ✅ Ruff format
     ✅ mypy
+
+## As of 2026-08-16
+**Implemented**
+- transcription boundary and pipeline;
+- TranscriptionResult;
+- transcript recording;
+- SQLite persistence;
+- ADR-032;
+- ADR-033;
+- ADR-034;
+- ADR-035;
+- capture recovery/discontinuity propagation;
+- processing-state reset;
+- and we're now at 218 passing tests.

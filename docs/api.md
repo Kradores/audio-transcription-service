@@ -12,6 +12,13 @@ Invalid configuration in 'config/config.yaml': audio.sample_rate must be greater
 
 ## AudioCapture
 Lifecycle and streaming contract.
+### AudioCapture contract
+- registration happens before start();
+- replacing the handler while running is prohibited;
+- callback is synchronous;
+- callback is notification-only;
+- callback does not reset downstream components directly;
+- SpeechPipeline consumes the notification and coordinates reset.
 
 ## AudioFrame
 - samples

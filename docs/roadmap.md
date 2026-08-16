@@ -1,74 +1,175 @@
 # Roadmap
-We have completed approximately this:
+
+## 🎯 Current Goal — First Real Transcript
+
+The current milestone is to run the complete application on Windows and
+produce the first real persisted transcript.
+
+### Definition of success
+
+```text
+Windows system audio
+        ↓
+WASAPI loopback capture
+        ↓
+Audio normalization
+        ↓
+Silero VAD
+        ↓
+Speech segment assembly
+        ↓
+Faster-Whisper transcription
+        ↓
+TranscriptionResult
+        ↓
+TranscriptRecorder
+        ↓
+SQLite
 ```
-Sprint 1
-────────────────────────────────────
 
-✅ Project structure
-✅ Python tooling
-✅ Configuration models
-✅ Configuration loader
-✅ Tests
-✅ Quality gates
-✅ Configuration files
-⬜ Application bootstrap
-```
+Success means:
 
-## Sprint 2 - Application Bootstrap Plan
+1. `uv run python -m app` starts and remains running.
+2. The application captures real system audio.
+3. Speech is detected.
+4. A speech segment is created.
+5. Faster-Whisper produces a `TranscriptionResult`.
+6. The result is delivered to `TranscriptRecorder`.
+7. SQLite persists the result.
+8. The persisted transcript can be verified in the database.
+9. The application shuts down cleanly.
 
-| Order | Task                                                                             | Status     |
-| ----: | -------------------------------------------------------------------------------- | ---------- |
-|     1 | Populate `config/config.yaml`                                                    | Done       |
-|     2 | Populate `config/config.example.yaml`                                            | Done       |
-|     3 | Remove (or intentionally use) the unused configuration fixture files             | Done       |
-|     4 | Implement the logging subsystem                                                  | Done       |
-|     5 | Expand `Application` into the application lifecycle owner (`start()` / `stop()`) | Done       |
-|     6 | Implement the composition root                                                   | Done       |
-|     7 | Implement `main.py` and `__main__.py`                                            | Done       |
-|     8 | Add startup integration tests                                                    | Done       |
-|     9 | Verify `uv run python -m app` from a clean checkout                              | Done       |
+---
 
-### Why this order works
-Each step builds on the previous one:
-- Configuration provides valid input to the application.
-- Logging gives visibility into startup and shutdown.
-- Application defines the application's lifetime.
-- Composition Root wires everything together in one place.
-- Entry points (`main.py` / `__main__.py`) become very thin, which is exactly what ADR-016 intends.
-- Integration tests verify the complete startup path rather than isolated pieces.
-By the end of Sprint 2, the application should have a stable skeleton that future subsystems can plug into without revisiting the startup architecture.
+## Completed foundation
 
-## My expectation for the end of Sprint 2
+### Configuration and bootstrap
 
-When Sprint 2 finishes, I want the project to feel like a real application.
-```
-uv run python -m app
-```
-should:
-- load configuration,
-- construct the application,
-- report successful startup,
-- exit cleanly,
-- and leave the quality pipeline completely green.
+* ✅ Project structure
+* ✅ Python tooling
+* ✅ Typed configuration
+* ✅ Configuration loader
+* ✅ Production/example configuration
+* ✅ Logging
+* ✅ Application lifecycle foundation
+* ✅ Composition root
+* ✅ Entry points
+* ✅ Startup integration tests
 
-Once we reach that point, we can start on the part everyone is excited about—designing the audio capture pipeline. The difference is that we'll be building it on a foundation that's already proven itself.
+### Audio capture
 
-## Sprint 2 ends with:
-- configuration loading from YAML ✅
-- immutable validated settings ✅
-- logging ✅
-- composition root ✅
-- application object ✅
-- executable startup ✅
-- environment overrides (ADR-008) ⏸️ deferred until deployment environments actually require them
+* ✅ PyAudioWPatch / WASAPI loopback
+* ✅ Application-owned `AudioCapture`
+* ✅ Bounded asynchronous transport
+* ✅ Frame ownership and timestamps
+* ✅ Device recovery
+* ✅ Capture discontinuity notification
+* ✅ Discontinuity propagation to the speech pipeline
 
-## Sprint 3 - Audio
-```
-Phase 1
- ├── Audio Capture         ✅
- ├── Normalization         ✅
- ├── VAD                   ✅
- ├── Segmentation          ✅
- ├── Transcription         ✅
- └── Storage               ✅
-```
+### Audio processing
+
+* ✅ Audio normalization
+* ✅ Streaming resampling
+* ✅ Downmixing
+* ✅ Fixed 20 ms processing frames
+* ✅ Normalizer reset semantics
+
+### Speech detection and segmentation
+
+* ✅ Silero VAD boundary
+* ✅ VAD state/reset semantics
+* ✅ SpeechStart / SpeechEnd contract
+* ✅ SpeechSegmentAssembler
+* ✅ Pre-roll/post-roll
+* ✅ Maximum-duration splitting
+* ✅ Discontinuity reset semantics
+
+### Transcription
+
+* ✅ `Transcriber` contract
+* ✅ `TranscriptionResult`
+* ✅ Faster-Whisper adapter
+* ✅ Sequential pipeline transcription
+* ✅ Worker-thread execution for blocking inference
+* ✅ Result delivery boundary
+
+### Persistence
+
+* ✅ `TranscriptRecorder`
+* ✅ `TranscriptRepository`
+* ✅ SQLite repository
+* ✅ Initial schema
+* ✅ Append-only persistence
+* ✅ Transaction/commit behavior
+* ✅ SQLite configuration and startup wiring
+* ✅ No migration framework yet
+
+### Verification
+
+* ✅ Unit test suite
+* ✅ Integration test foundation
+* ✅ Ruff
+* ✅ Ruff format
+* ✅ MyPy
+* ✅ 218 tests passing
+
+---
+
+# Path to the first transcript
+
+## 1. Complete production composition
+
+* ⬜ Verify the complete production object graph
+* ⬜ Wire `TranscriptRecorder` into `SpeechPipeline` result delivery
+* ⬜ Verify SQLite repository/database ownership
+* ⬜ Add/adjust composition integration coverage
+
+## 2. Verify real ML components
+
+* ⬜ Real Silero integration test
+* ⬜ Real Faster-Whisper integration test
+* ⬜ Verify Python 3.14 runtime compatibility
+* ⬜ Resolve any model-loading/runtime compatibility issues discovered
+
+## 3. Verify real WASAPI capture
+
+* ⬜ Windows integration test with a real default output device
+* ⬜ Verify loopback frame acquisition
+* ⬜ Verify capture format and timestamps
+* ⬜ Verify real startup/shutdown behavior
+
+## 4. Complete application runtime lifecycle
+
+* ⬜ Keep the application alive after startup
+* ⬜ Add graceful shutdown handling
+* ⬜ Ensure pipeline and database resources are released
+* ⬜ Update startup integration tests for long-running lifecycle semantics
+
+## 5. First end-to-end transcript
+
+* ⬜ Run the application against real system audio
+* ⬜ Produce a real `SpeechSegment`
+* ⬜ Produce a real `TranscriptionResult`
+* ⬜ Persist the result to SQLite
+* ⬜ Verify the persisted transcript
+* ⬜ Verify clean shutdown
+
+---
+
+# After the first transcript
+
+Only after the first successful end-to-end run:
+
+* ⬜ Measure capture/transcription throughput
+* ⬜ Measure transcription latency
+* ⬜ Inspect queue pressure and dropped frames
+* ⬜ Tune VAD and segmentation parameters
+* ⬜ Improve runtime observability
+* ⬜ Investigate persistence failure/retry requirements
+* ⬜ Evaluate transcription concurrency based on measurements
+* ⬜ Add transcript querying/inspection capability
+* ⬜ Add broader Windows recovery testing
+* ⬜ Evaluate packaging/deployment
+
+No optimization or additional concurrency should be introduced
+without measurements demonstrating a need.
