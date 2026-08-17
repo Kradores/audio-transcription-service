@@ -133,26 +133,26 @@ Success means:
 
 ## 3. Verify real WASAPI capture
 
-* ⬜ Windows integration test with a real default output device
-* ⬜ Verify loopback frame acquisition
-* ⬜ Verify capture format and timestamps
-* ⬜ Verify real startup/shutdown behavior
+* ✅ Windows integration test with a real default output device
+* ✅ Verify loopback frame acquisition
+* ✅ Verify capture format and timestamps
+* ✅ Verify real startup/shutdown behavior
 
 ## 4. Complete application runtime lifecycle
 
-* ⬜ Keep the application alive after startup
-* ⬜ Add graceful shutdown handling
-* ⬜ Ensure pipeline and database resources are released
-* ⬜ Update startup integration tests for long-running lifecycle semantics
+* ✅ Keep the application alive after startup
+* ✅ Add graceful shutdown handling
+* ✅ Ensure pipeline and database resources are released
+* ✅ Update startup integration tests for long-running lifecycle semantics
 
 ## 5. First end-to-end transcript
 
-* ⬜ Run the application against real system audio
-* ⬜ Produce a real `SpeechSegment`
-* ⬜ Produce a real `TranscriptionResult`
-* ⬜ Persist the result to SQLite
-* ⬜ Verify the persisted transcript
-* ⬜ Verify clean shutdown
+* ✅ Run the application against real system audio
+* ✅ Produce a real `SpeechSegment`
+* ✅ Produce a real `TranscriptionResult`
+* ✅ Persist the result to SQLite
+* ✅ Verify the persisted transcript
+* ✅ Verify clean shutdown
 
 ---
 

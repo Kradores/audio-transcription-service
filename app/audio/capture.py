@@ -183,6 +183,7 @@ class PyAudioCapture(AudioCapture):
         self._stream: pyaudiowpatch.Stream | None = None
         self._lifecycle_task: asyncio.Task[None] | None = None
         self._started = False
+        self._capture_timestamp_origin: float | None = None
         self._sleep = sleep
         self._discontinuity_handler: Callable[[], None] | None = None
 
@@ -191,6 +192,7 @@ class PyAudioCapture(AudioCapture):
             return
 
         self._started = True
+        self._capture_timestamp_origin = None
         await self._transport.start()
 
         try:
@@ -298,9 +300,16 @@ class PyAudioCapture(AudioCapture):
             self._format.channels,
         )
 
+        callback_timestamp = time_info["input_buffer_adc_time"]
+
+        if self._capture_timestamp_origin is None:
+            self._capture_timestamp_origin = callback_timestamp
+
+        timestamp = callback_timestamp - self._capture_timestamp_origin
+
         return AudioFrame(
             audio=audio,
-            timestamp=time_info["input_buffer_adc_time"],
+            timestamp=timestamp,
             format=self._format,
         )
 

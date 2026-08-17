@@ -1,25 +1,66 @@
+import asyncio
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.main import main
-from tests.unit.core.config.builders import valid_configuration_document
-from tests.unit.core.config.helpers import write_configuration
+import pytest
+
+from app.main import run_application
 
 
-@patch("app.composition.create_vad")
-def test_main_starts_application_with_configuration(
-    create_vad: MagicMock,
+@pytest.mark.anyio
+async def test_run_application_starts_and_stops_application(
     tmp_path: Path,
 ) -> None:
     # Arrange
-    document = valid_configuration_document()
-    config_path = write_configuration(tmp_path, document)
+    application = MagicMock()
+    application.start = AsyncMock()
+    application.stop = AsyncMock()
 
-    vad = MagicMock()
-    create_vad.return_value = vad
+    shutdown_event = asyncio.Event()
+    shutdown_event.set()
 
-    # Act
-    main(config_path)
+    with patch(
+        "app.main.create_application",
+        return_value=application,
+    ):
+        # Act
+        await run_application(
+            tmp_path / "config.yaml",
+            shutdown_event=shutdown_event,
+        )
 
     # Assert
-    # Reaching this point means startup completed successfully.
+    application.start.assert_awaited_once()
+    application.stop.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_run_application_stops_application_when_cancelled(
+    tmp_path: Path,
+) -> None:
+    application = MagicMock()
+    application.start = AsyncMock()
+    application.stop = AsyncMock()
+
+    shutdown_event = asyncio.Event()
+
+    with patch(
+        "app.main.create_application",
+        return_value=application,
+    ):
+        task = asyncio.create_task(
+            run_application(
+                tmp_path / "config.yaml",
+                shutdown_event=shutdown_event,
+            )
+        )
+
+        await asyncio.sleep(0)
+
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    application.start.assert_awaited_once()
+    application.stop.assert_awaited_once()

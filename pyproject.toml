@@ -76,6 +76,7 @@ python_functions = ["test_*"]
 timeout = 30
 markers = [
     "slow_integration: integration tests that execute real ML models and may take significantly longer than normal tests",
+    "hardware_integration: integration tests that require real Windows audio hardware"
 ]
 
 [tool.coverage.run]

@@ -353,7 +353,7 @@ async def test_start_uses_loopback_device_format(
     fake_transport.stop.assert_awaited_once_with()
 
 
-def test_audio_callback_creates_and_submits_frame() -> None:
+def test_audio_callback_creates_frame_with_capture_relative_timestamp() -> None:
     samples = np.array(
         [
             [100, 200],
@@ -378,24 +378,29 @@ def test_audio_callback_creates_and_submits_frame() -> None:
         sample_type="int16",
     )
 
-    result = capture._on_audio(
+    capture._on_audio(
         in_data=samples.tobytes(),
         frame_count=2,
         time_info={"input_buffer_adc_time": 123.5},
         status_flags=0,
     )
 
-    assert result == (None, pyaudiowpatch.paContinue)
+    capture._on_audio(
+        in_data=samples.tobytes(),
+        frame_count=2,
+        time_info={"input_buffer_adc_time": 123.52},
+        status_flags=0,
+    )
 
-    fake_transport.submit.assert_called_once()
+    first_frame = fake_transport.submit.call_args_list[0].args[0]
+    second_frame = fake_transport.submit.call_args_list[1].args[0]
 
-    frame = fake_transport.submit.call_args.args[0]
+    assert first_frame.timestamp == 0.0
+    assert second_frame.timestamp ==  pytest.approx(0.02)
 
-    assert isinstance(frame, AudioFrame)
-    assert frame.timestamp == 123.5
-    assert frame.format.sample_rate == 48_000
-    assert frame.format.channels == 2
-    np.testing.assert_array_equal(frame.audio, samples)
+    assert first_frame.format.sample_rate == 48_000
+    assert first_frame.format.channels == 2
+    np.testing.assert_array_equal(first_frame.audio, samples)
 
 
 def test_pyaudio_capture_dependency_boundary() -> None:
@@ -452,7 +457,7 @@ async def test_callback_frame_is_received_by_async_consumer() -> None:
                 ],
                 dtype=np.int16,
             ),
-            timestamp=1.0,
+            timestamp=0,
             format=AudioFormat(
                 sample_rate=48_000,
                 channels=2,
@@ -669,3 +674,55 @@ async def test_close_stream_clears_stream_reference() -> None:
     assert capture._stream is None
     assert stream.stop_called
     assert stream.close_called
+
+
+def test_capture_timestamp_origin_survives_stream_recovery() -> None:
+    fake_transport = MagicMock()
+    submit = MagicMock()
+    fake_transport.submit = submit
+
+    capture = PyAudioCapture(
+        audio=MagicMock(spec=pyaudiowpatch.PyAudio),
+        device_provider=MagicMock(),
+        transport=fake_transport,
+    )
+
+    capture._format = AudioFormat(
+        sample_rate=48_000,
+        channels=2,
+        sample_type="int16",
+    )
+
+    samples = np.zeros((2, 2), dtype=np.int16)
+
+    capture._on_audio(
+        in_data=samples.tobytes(),
+        frame_count=2,
+        time_info={"input_buffer_adc_time": 100.0},
+        status_flags=0,
+    )
+
+    capture._on_audio(
+        in_data=samples.tobytes(),
+        frame_count=2,
+        time_info={"input_buffer_adc_time": 100.02},
+        status_flags=0,
+    )
+
+    first_frame = submit.call_args_list[0].args[0]
+    second_frame = submit.call_args_list[1].args[0]
+
+    assert first_frame.timestamp == 0.0
+    assert second_frame.timestamp == pytest.approx(0.02)
+
+    # Simulate a recovered stream whose backend clock has advanced.
+    capture._on_audio(
+        in_data=samples.tobytes(),
+        frame_count=2,
+        time_info={"input_buffer_adc_time": 101.0},
+        status_flags=0,
+    )
+
+    recovered_frame = submit.call_args_list[2].args[0]
+
+    assert recovered_frame.timestamp == 1.0
