@@ -63,7 +63,15 @@ with:
 ```py
 transcribe(segment: SpeechSegment) -> TranscriptionResult
 ```
-Synchronous.
+The `Transcriber` contract is intentionally synchronous:
+Execution scheduling is owned by the application pipeline.
+
+The pipeline may execute the synchronous Transcriber through a dedicated
+worker so that model inference does not block real-time audio processing.
+
+The transcription execution mechanism is not part of the Transcriber
+contract. Implementations must not depend on queue, worker, or concurrency
+details.
 
 ## TranscriptionResultHandler
 ```py

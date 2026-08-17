@@ -160,3 +160,83 @@ persisted transcripts
 
 Only after identifying the responsible boundary should VAD or segmentation
 parameters be changed.
+
+
+## Transcription execution
+
+The transcription execution boundary must expose enough information to
+distinguish real-time audio health from transcription backlog.
+
+The following runtime information should be observable:
+
+- transcription queue capacity;
+- transcription queue depth;
+- transcription jobs submitted;
+- transcription jobs completed;
+- transcription jobs failed;
+- transcription queue wait duration;
+- transcription inference duration.
+
+The existing `Transcriber` inference timing remains useful:
+
+```text
+transcription started
+    ↓
+transcription inference completed
+```
+
+The new execution boundary additionally makes queue waiting observable:
+```
+SpeechSegment emitted
+    ↓
+transcription job submitted
+    ↓
+queue wait
+    ↓
+transcription started
+    ↓
+inference completed
+    ↓
+result delivered
+```
+
+## Backpressure interpretation
+Capture-frame drops indicate that the real-time audio path could not consume
+captured audio quickly enough.
+
+Transcription queue growth indicates that speech segments are being produced
+faster than the transcription worker can process them.
+
+These are different failure modes and must not be conflated.
+
+A healthy runtime should therefore make it possible to distinguish:
+```
+capture queue pressure
+vs.
+transcription queue pressure
+vs.
+transcription inference latency
+```
+
+## Current runtime evidence
+The initial sequential implementation was measured with Faster-Whisper
+processing approximately 5-second segments in approximately 3.1–3.3 seconds.
+
+With the previous capture queue capacity, the pipeline accumulated 722 dropped
+audio frames during a real recording.
+
+Increasing the capture queue to 500 frames, with approximately 10 ms per
+capture callback, provided approximately 5 seconds of buffering and resulted
+in:
+```py
+frames_dropped=0
+```
+
+Repeated runs produced the same complete transcript.
+
+This establishes that transcription inference was creating backpressure on
+the real-time audio path.
+
+The larger capture queue is therefore considered a diagnostic mitigation, not
+the architectural solution.
+

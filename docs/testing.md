@@ -164,3 +164,60 @@ Test the actual PyAudioWPatch adapter:
 - potentially device recovery
 
 This keeps CI/test architecture clean.
+
+
+## Transcription execution testing
+
+The transcription execution boundary must be tested independently from the
+real-time audio processing components.
+
+### Required behavior
+
+Tests must verify:
+
+- speech segments are accepted without waiting for transcription completion;
+- transcription work is processed by the configured worker;
+- the synchronous `Transcriber` contract remains unchanged;
+- transcription results are delivered through the existing result handler;
+- submitted segments are processed in chronological order;
+- transcription failures are observable and follow the configured failure
+  semantics;
+- shutdown handles queued transcription work deterministically;
+- an in-progress transcription does not cause the audio-processing loop to
+  stop consuming capture frames;
+- the transcription queue is bounded.
+
+### Throughput/backpressure tests
+
+Tests should distinguish the two buffering boundaries:
+
+```text
+AudioCapture
+    ↓
+capture transport
+    ↓
+real-time audio processing
+    ↓
+transcription queue
+    ↓
+transcription worker
+
+Capture queue capacity must not be used as the mechanism for absorbing normal
+transcription inference latency.
+
+The transcription queue's capacity and overflow behavior must be tested
+independently.
+```
+
+**Real ML integration**
+Real Faster-Whisper integration tests continue to validate the transcriber
+implementation itself.
+
+End-to-end runtime tests additionally verify that real transcription does not
+cause capture-frame loss under the expected workload.
+
+The last point is particularly important because we now have a real regression criterion:
+```py
+frames_dropped = 0
+```
+for the controlled workload.

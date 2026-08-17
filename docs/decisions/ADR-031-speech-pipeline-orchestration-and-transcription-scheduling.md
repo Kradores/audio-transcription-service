@@ -262,3 +262,19 @@ restarted. Capture-specific recovery remains owned by `AudioCapture`.
 - ADR-028: Voice Activity Detection Architecture and Silero Boundary
 - ADR-029: Speech Segment Assembler Contract and State Machine
 - ADR-030: Transcription Boundary and Faster-Whisper Adapter
+
+
+## Superseded aspects
+
+The initial sequential execution decision has been superseded by
+ADR-036.
+
+ADR-031 intentionally deferred a dedicated transcription queue until runtime
+measurement demonstrated that it was required.
+
+That condition has now been met. Runtime testing demonstrated that synchronous
+sequential transcription can create capture backpressure and cause audio-frame
+loss.
+
+ADR-036 therefore refines the transcription scheduling model while preserving
+the synchronous `Transcriber` contract established by ADR-030.

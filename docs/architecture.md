@@ -1,29 +1,40 @@
 # High-Level Architecture
 
 ```
-                    APPLICATION
-──────────────────────────────────────────
+                         APPLICATION
+──────────────────────────────────────────────────────────
+
+                    Real-time audio path
+
 WASAPI Loopback
-    ↓
+      ↓
 AudioCapture
-    ↓
+      ↓
 AudioNormalizer
-    ↓
+      ↓
 VAD
-    ↓
+      ↓
 SpeechSegmentAssembler
-    ↓
-Transcriber
-    ↓
-SpeechPipeline
-    ↓
-TranscriptionResult
-    ↓
-TranscriptRecorder
-    ↓
-TranscriptRepository
-             │
-             ▼
+      ↓
+SpeechSegment
+      ↓
+┌───────────────────────────────┐
+│ Transcription work queue      │
+│ bounded, application-owned    │
+└───────────────┬───────────────┘
+                ↓
+       Transcription worker
+                ↓
+           Transcriber
+                ↓
+      TranscriptionResult
+                ↓
+      TranscriptResultHandler
+                ↓
+       TranscriptRecorder
+                ↓
+      TranscriptRepository
+                ↓
 ──────────────────────────────────────────
               INFRASTRUCTURE
              SQLite
@@ -242,3 +253,28 @@ SpeechPipeline
     ├── AudioVad.reset()
     └── SpeechSegmentAssembler.reset()
 ```
+
+
+## Real-Time Audio and Transcription Execution Boundary
+
+The real-time audio-processing path must not wait for speech-to-text
+inference.
+
+`AudioCapture`, normalization, VAD, and speech-segment assembly operate as a
+continuous processing path. When a `SpeechSegment` is emitted, the segment is
+submitted to the transcription execution boundary.
+
+Transcription execution is handled independently from real-time audio
+processing through a bounded transcription work queue and a dedicated
+transcription worker.
+
+The `Transcriber` contract remains synchronous. The worker is responsible for
+executing that synchronous contract without blocking the real-time processing
+path.
+
+The initial implementation uses a single transcription worker. Additional
+workers are not introduced unless runtime measurements demonstrate that a
+single worker cannot maintain the required throughput.
+
+The capture transport remains responsible for buffering native audio frames.
+It is not used as the primary buffering mechanism for transcription latency.
