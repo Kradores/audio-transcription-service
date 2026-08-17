@@ -396,7 +396,7 @@ def test_audio_callback_creates_frame_with_capture_relative_timestamp() -> None:
     second_frame = fake_transport.submit.call_args_list[1].args[0]
 
     assert first_frame.timestamp == 0.0
-    assert second_frame.timestamp ==  pytest.approx(0.02)
+    assert second_frame.timestamp == pytest.approx(0.02)
 
     assert first_frame.format.sample_rate == 48_000
     assert first_frame.format.channels == 2

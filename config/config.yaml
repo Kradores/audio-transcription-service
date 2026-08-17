@@ -11,7 +11,7 @@ logging:
 
 audio:
   capture:
-    queue_capacity: 100
+    queue_capacity: 500
 
   processing:
     sample_rate: 16000

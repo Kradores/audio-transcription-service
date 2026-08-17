@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from queue import Full, Queue
@@ -17,6 +18,8 @@ type Sleep = Callable[[float], Awaitable[None]]
 RECOVERY_INITIAL_DELAY_SECONDS = 0.1
 RECOVERY_MAX_DELAY_SECONDS = 5.0
 RECOVERY_MONITOR_INTERVAL_SECONDS = 0.1
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +45,8 @@ class QueuedAudioCapture(AudioCapture):
         self._started = False
         self._stopped = False
         self._frames_dropped = 0
+
+        logger.info("max_queue_size=%d", self._queue.maxsize)
 
     async def start(self) -> None:
         with self._state_lock:
@@ -85,6 +90,12 @@ class QueuedAudioCapture(AudioCapture):
         except Full:
             with self._state_lock:
                 self._frames_dropped += 1
+                frames_dropped = self._frames_dropped
+
+            logger.debug(
+                "audio frame dropped frames_dropped=%d",
+                frames_dropped,
+            )
 
             return False
 
@@ -186,6 +197,8 @@ class PyAudioCapture(AudioCapture):
         self._capture_timestamp_origin: float | None = None
         self._sleep = sleep
         self._discontinuity_handler: Callable[[], None] | None = None
+        self._recovery_active = False
+        self._capture_frame_duration_logged = False
 
     async def start(self) -> None:
         if self._started:
@@ -193,6 +206,8 @@ class PyAudioCapture(AudioCapture):
 
         self._started = True
         self._capture_timestamp_origin = None
+        self._recovery_active = False
+        self._capture_frame_duration_logged = False
         await self._transport.start()
 
         try:
@@ -204,6 +219,8 @@ class PyAudioCapture(AudioCapture):
             await self._transport.stop()
             self._audio.terminate()
             raise
+
+        logger.info("audio capture started")
 
         self._lifecycle_task = asyncio.create_task(
             self._run(),
@@ -228,6 +245,11 @@ class PyAudioCapture(AudioCapture):
 
         self._audio.terminate()
 
+        stats = self._transport.stats()
+        logger.info(
+            "audio capture stopped frames_dropped=%d",
+            stats.frames_dropped,
+        )
         await self._transport.stop()
 
     def frames(self) -> AsyncIterator[AudioFrame]:
@@ -247,6 +269,14 @@ class PyAudioCapture(AudioCapture):
 
     async def _open_stream(self) -> None:
         device = self._device_provider.get_default()
+
+        logger.info(
+            "audio capture device selected name=%r index=%d channels=%d sample_rate=%d",
+            device.name,
+            device.index,
+            device.channels,
+            int(device.sample_rate),
+        )
 
         audio_format = AudioFormat(
             sample_rate=int(device.sample_rate),
@@ -320,6 +350,20 @@ class PyAudioCapture(AudioCapture):
         time_info: dict[str, float],
         status_flags: int,
     ) -> tuple[None, int]:
+        if not self._capture_frame_duration_logged:
+            if self._format is None:
+                raise RuntimeError("capture format is not initialized")
+
+            frame_duration = frame_count / self._format.sample_rate
+
+            logger.info(
+                "audio capture frame format frame_count=%d duration=%.3fs",
+                frame_count,
+                frame_duration,
+            )
+
+            self._capture_frame_duration_logged = True
+
         frame = self._create_frame(
             in_data=in_data,
             frame_count=frame_count,
@@ -335,6 +379,10 @@ class PyAudioCapture(AudioCapture):
 
         while self._started:
             if self._stream is None:
+                if not self._recovery_active:
+                    logger.warning("audio capture recovery started")
+                    self._recovery_active = True
+
                 try:
                     await self._open_stream()
                 except LookupError:
@@ -346,6 +394,9 @@ class PyAudioCapture(AudioCapture):
                     continue
 
                 delay = RECOVERY_INITIAL_DELAY_SECONDS
+                if self._recovery_active:
+                    logger.info("audio capture recovered")
+                    self._recovery_active = False
 
             stream = self._stream
 
@@ -353,6 +404,7 @@ class PyAudioCapture(AudioCapture):
                 continue
 
             if not stream.is_active():
+                logger.warning("audio capture device became inactive")
                 self._close_stream()
 
                 handler = self._discontinuity_handler

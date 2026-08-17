@@ -49,8 +49,7 @@ def test_application_module_starts_and_remains_running() -> None:
         # The important regression check:
         # successful startup must leave the application running.
         assert process.poll() is None, (
-            "Application exited immediately after startup.\n"
-            f"stderr:\n{''.join(stderr_lines)}"
+            f"Application exited immediately after startup.\nstderr:\n{''.join(stderr_lines)}"
         )
 
         # Request graceful shutdown.

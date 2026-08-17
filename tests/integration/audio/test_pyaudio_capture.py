@@ -26,6 +26,7 @@ async def test_real_pyaudio_capture_receives_wasapi_loopback_frames() -> None:
     await capture.start()
 
     try:
+
         async def collect_frames() -> None:
             async for frame in capture.frames():
                 frames.append(frame)

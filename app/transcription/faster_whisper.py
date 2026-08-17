@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import logging
+import time
+
 from app.audio.contracts import SpeechSegment
 from app.transcription.contracts import TranscriptionResult
 from app.transcription.protocols import WhisperModelProtocol
+
+logger = logging.getLogger(__name__)
 
 
 class FasterWhisperTranscriber:
@@ -12,6 +17,12 @@ class FasterWhisperTranscriber:
         self._model = model
 
     def transcribe(self, segment: SpeechSegment) -> TranscriptionResult:
+        logger.info(
+            "transcription started start=%.3f duration=%.3f",
+            segment.timestamp,
+            segment.duration,
+        )
+        started_at = time.perf_counter()
         audio = segment.audio[:, 0]
 
         whisper_segments, info = self._model.transcribe(audio)
@@ -20,10 +31,27 @@ class FasterWhisperTranscriber:
 
         text = " ".join(result.text.strip() for result in segments if result.text.strip())
 
-        return TranscriptionResult(
+        result = TranscriptionResult(
             text=text,
             language=info.language,
             confidence=None,
             start=segment.timestamp,
             end=segment.timestamp + segment.duration,
         )
+
+        logger.info(
+            "transcription inference completed start=%.3f duration=%.3f "
+            "inference_duration=%.3f language=%s",
+            segment.timestamp,
+            segment.duration,
+            time.perf_counter() - started_at,
+            result.language,
+        )
+        logger.debug(
+            "transcription result start=%.3f end=%.3f text=%r",
+            result.start,
+            result.end,
+            result.text,
+        )
+
+        return result

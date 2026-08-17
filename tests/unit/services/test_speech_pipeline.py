@@ -1104,3 +1104,46 @@ async def test_pipeline_discontinuity_does_not_produce_transcription() -> None:
 
     await capture.close()
     await pipeline.wait()
+
+
+@pytest.mark.anyio
+async def test_pipeline_logs_vad_segments_and_final_statistics(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Arrange
+    processing_frame = create_processing_frame()
+    segment = create_speech_segment()
+
+    class VadWithEvents(FakeVad):
+        def process(
+            self,
+            frame: ProcessingAudioFrame,
+        ) -> tuple[SpeechStart | SpeechEnd, ...]:
+            return (SpeechStart(timestamp=12.0),)
+
+    capture = FakeAudioCapture([create_audio_frame()])
+    pipeline = SpeechPipeline(
+        capture=capture,
+        normalizer=FakeNormalizer((processing_frame,)),
+        vad=VadWithEvents(),
+        assembler=FakeAssembler({id(processing_frame): (segment,)}),
+        transcriber=FakeTranscriber(),
+        on_result=sink_handler,
+    )
+
+    # Act
+    with caplog.at_level("INFO", logger="app.services.speech_pipeline"):
+        await pipeline.start()
+        await pipeline.wait()
+        await pipeline.stop()
+
+    # Assert
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("VAD SpeechStart timestamp=12.000" in message for message in messages)
+    assert any("speech segment emitted id=1" in message for message in messages)
+    assert any("transcription completed id=1" in message for message in messages)
+    assert any(
+        "speech pipeline stopped captured_frames=1 processing_frames=1 "
+        "segments_emitted=1 transcriptions_completed=1" in message
+        for message in messages
+    )

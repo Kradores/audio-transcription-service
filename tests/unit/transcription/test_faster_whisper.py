@@ -1,6 +1,7 @@
 from collections.abc import Iterable
 
 import numpy as np
+import pytest
 
 from app.audio.contracts import AudioFormat, SpeechSegment
 from app.transcription.faster_whisper import FasterWhisperTranscriber
@@ -121,3 +122,26 @@ def test_transcribe_ignores_empty_model_segments() -> None:
 
     # Assert
     assert result.text == "Hello world"
+
+
+def test_transcribe_logs_inference_timing_and_result(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Arrange
+    model = FakeWhisperModel(
+        segments=[FakeWhisperSegment("Hello")],
+        language="en",
+    )
+    transcriber = FasterWhisperTranscriber(model)
+
+    # Act
+    with caplog.at_level("INFO", logger="app.transcription.faster_whisper"):
+        result = transcriber.transcribe(create_segment())
+
+    # Assert
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "transcription started start=10.000 duration=1.000" in message for message in messages
+    )
+    assert any("transcription inference completed" in message for message in messages)
+    assert result.text == "Hello"

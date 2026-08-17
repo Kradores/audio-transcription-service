@@ -1,32 +1,162 @@
-## queue overflow should be observable
-For example:
-- audio.capture.started
-- audio.capture.stopped
-- audio.capture.device_selected
-- audio.capture.device_changed
-- audio.capture.recovery_started
-- audio.capture.recovered
-- audio.capture.frame_dropped
-- audio.capture.error
-Not yet decided, only on an idea level!
+# Observability
 
-## audio pipeline events
-### Important events:
-capture_started
-capture_stopped
-capture_device_lost
-capture_recovery_started
-capture_recovered
-audio_frame_dropped
+## Purpose
 
-speech_started
-speech_ended
-speech_segment_created
+The first observability milestone is intentionally diagnostic rather than a
+full metrics/telemetry subsystem.
 
-### Metrics such as:
-capture_queue_depth
-audio_frames_dropped
-capture_recovery_count
-speech_segment_duration
-vad_processing_duration
-normalization_processing_duration
+The immediate question is:
+
+> At which processing boundary is live speech being lost?
+
+The runtime path is:
+
+```text
+AudioCapture
+    ↓
+AudioNormalizer
+    ↓
+Silero VAD
+    ↓
+SpeechSegmentAssembler
+    ↓
+Faster-Whisper
+    ↓
+TranscriptRecorder
+    ↓
+SQLite
+```
+
+Observability must let us compare what crossed each boundary without logging
+every 20 ms audio frame.
+
+## Logging strategy
+
+The application uses the standard-library `logging` package as defined by
+ADR-017. Logs are emitted at meaningful lifecycle and semantic events rather
+than for every processing frame.
+
+Normal runtime logs must not include transcript text. Transcript text is
+available at `DEBUG` level for controlled diagnostic runs.
+
+## Current diagnostic events
+
+### Audio capture
+
+The capture boundary logs:
+
+- capture started;
+- selected output device;
+- recovery started;
+- capture recovered;
+- device becoming inactive;
+- individual dropped-frame events when the bounded transport overflows;
+- capture stopped with the total dropped-frame count.
+
+Capture discontinuities are also surfaced to `SpeechPipeline`, which logs the
+processing-state reset.
+
+### Speech pipeline
+
+`SpeechPipeline` maintains a small set of runtime counters:
+
+- `captured_frames` — frames received from `AudioCapture`;
+- `processing_frames` — normalized processing frames produced;
+- `segments_emitted` — speech segments emitted by the assembler;
+- `transcriptions_completed` — transcription calls that completed successfully.
+
+At INFO level, the pipeline logs:
+
+- `SpeechStart` and `SpeechEnd` events with timestamps;
+- every emitted speech segment with a pipeline-local sequential ID, start,
+  duration, and end timestamp;
+- every completed transcription with its segment ID and timestamps;
+- final pipeline counters when the pipeline stops.
+
+### Faster-Whisper
+
+The transcriber logs:
+
+- transcription start with segment timestamp and duration;
+- inference completion with segment timestamp, duration, inference duration,
+  and detected language.
+
+The resulting transcript text is logged only at DEBUG level.
+
+### Transcript recorder
+
+The recorder logs:
+
+- successful persistence with transcript timestamps;
+- persistence failures with the exception and transcript timestamps.
+
+A successful recorder call means the repository operation completed
+successfully. SQLite-specific SQL/commit logging is not required at this
+boundary.
+
+## Diagnostic interpretation
+
+The logs should allow an investigation to follow one piece of speech through
+the system:
+
+```text
+Capture
+  ↓
+processing frame count
+  ↓
+VAD SpeechStart/SpeechEnd
+  ↓
+SpeechSegment id + timestamp/duration
+  ↓
+Whisper inference
+  ↓
+TranscriptRecorder
+  ↓
+SQLite
+```
+
+Interpretation:
+
+- speech absent from VAD events → investigate capture/normalization/VAD;
+- VAD event present but no corresponding segment → investigate the assembler;
+- segment present but transcription missing/failing → investigate Whisper or
+  its input audio;
+- transcription completed but persistence missing/failing → investigate the
+  recorder/repository boundary.
+
+Capture discontinuities and dropped frames must be considered when comparing
+these stages because a discontinuity intentionally resets downstream state
+and discards incomplete speech state.
+
+## Deliberately not implemented yet
+
+The diagnostic pass does not introduce:
+
+- Prometheus or another metrics backend;
+- OpenTelemetry;
+- a metrics abstraction or protocol;
+- per-frame logging;
+- Silero probability logging;
+- audio debug dumps;
+- VAD or segmentation parameter changes.
+
+These can be introduced if the diagnostic evidence shows that they are needed.
+
+## Next investigation
+
+Run the application with a known piece of live speech and compare:
+
+```text
+speech that was played
+vs.
+VAD events
+vs.
+speech segments
+vs.
+Whisper results
+vs.
+persisted transcripts
+```
+
+Only after identifying the responsible boundary should VAD or segmentation
+parameters be changed.
