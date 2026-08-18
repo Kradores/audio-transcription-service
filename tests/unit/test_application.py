@@ -5,7 +5,6 @@ import pytest
 
 from app.application import Application
 from app.audio.protocols import AudioCapture, AudioNormalizer
-from app.transcription.protocols import Transcriber
 from tests.unit.core.config.builders import SettingsBuilder
 
 
@@ -14,17 +13,14 @@ def test_application_exposes_provided_settings() -> None:
     settings = SettingsBuilder().build()
     capture = MagicMock(spec=AudioCapture)
     normalizer = MagicMock(spec=AudioNormalizer)
-    transcriber = MagicMock(spec=Transcriber)
 
     # Act
     application = Application(
         settings=settings,
         capture=capture,
         normalizer=normalizer,
-        transcriber=transcriber,
         pipeline=AsyncMock(),
         database=MagicMock(spec=sqlite3.Connection),
-        recorder=MagicMock(),
     )
 
     # Assert
@@ -36,17 +32,14 @@ def test_application_exposes_provided_audio_capture() -> None:
     settings = SettingsBuilder().build()
     capture = MagicMock(spec=AudioCapture)
     normalizer = MagicMock(spec=AudioNormalizer)
-    transcriber = MagicMock(spec=Transcriber)
 
     # Act
     application = Application(
         settings=settings,
         capture=capture,
         normalizer=normalizer,
-        transcriber=transcriber,
         pipeline=AsyncMock(),
         database=MagicMock(spec=sqlite3.Connection),
-        recorder=MagicMock(),
     )
 
     # Assert
@@ -58,17 +51,14 @@ def test_application_exposes_provided_audio_normalizer() -> None:
     settings = SettingsBuilder().build()
     capture = MagicMock(spec=AudioCapture)
     normalizer = MagicMock(spec=AudioNormalizer)
-    transcriber = MagicMock(spec=Transcriber)
 
     # Act
     application = Application(
         settings=settings,
         capture=capture,
         normalizer=normalizer,
-        transcriber=transcriber,
         pipeline=AsyncMock(),
         database=MagicMock(spec=sqlite3.Connection),
-        recorder=MagicMock(),
     )
 
     # Assert
@@ -84,10 +74,8 @@ async def test_start_starts_pipeline() -> None:
         settings=settings,
         capture=MagicMock(),
         normalizer=MagicMock(),
-        transcriber=MagicMock(),
         pipeline=pipeline,
         database=MagicMock(spec=sqlite3.Connection),
-        recorder=MagicMock(),
     )
 
     await application.start()
@@ -104,10 +92,8 @@ async def test_stop_stops_pipeline() -> None:
         settings=settings,
         capture=MagicMock(),
         normalizer=MagicMock(),
-        transcriber=MagicMock(),
         pipeline=pipeline,
         database=MagicMock(spec=sqlite3.Connection),
-        recorder=MagicMock(),
     )
 
     await application.stop()
@@ -125,10 +111,8 @@ async def test_stop_closes_database() -> None:
         settings=settings,
         capture=MagicMock(),
         normalizer=MagicMock(),
-        transcriber=MagicMock(),
         pipeline=pipeline,
         database=database,
-        recorder=MagicMock(),
     )
 
     await application.stop()
@@ -156,10 +140,8 @@ async def test_stop_stops_pipeline_before_closing_database() -> None:
         settings=settings,
         capture=MagicMock(),
         normalizer=MagicMock(),
-        transcriber=MagicMock(),
         pipeline=pipeline,
         database=database,
-        recorder=MagicMock(),
     )
 
     await application.stop()

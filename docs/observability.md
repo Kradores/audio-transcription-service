@@ -229,7 +229,7 @@ Increasing the capture queue to 500 frames, with approximately 10 ms per
 capture callback, provided approximately 5 seconds of buffering and resulted
 in:
 ```py
-frames_dropped=0
+frames_dropped = 0
 ```
 
 Repeated runs produced the same complete transcript.

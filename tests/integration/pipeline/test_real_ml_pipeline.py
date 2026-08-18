@@ -13,14 +13,12 @@ from app.audio.normalizer import AudioNormalizerImpl
 from app.audio.resampler import SoXRResamplerFactory
 from app.composition import (
     create_speech_assembler,
-    create_transcriber,
+    create_transcription_executor,
     create_vad,
 )
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
 from app.services.speech_pipeline import SpeechPipeline
-from app.storage.recorder import TranscriptRecorderImpl
-from app.storage.sqlite import SQLiteTranscriptRepository
 
 FIXTURE_PATH = Path(__file__).parents[2] / "fixtures" / "audio" / "english_speech.wav"
 
@@ -92,29 +90,29 @@ async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None
         raise AssertionError("VAD must be enabled for this integration test")
 
     assembler = create_speech_assembler(settings.audio.segmentation)
-    transcriber = create_transcriber(settings)
 
-    connection = sqlite3.connect(":memory:")
-    repository = SQLiteTranscriptRepository(connection)
-    repository.initialize()
+    database = sqlite3.connect(":memory:")
 
-    recorder = TranscriptRecorderImpl(repository)
+    transcription_executor = create_transcription_executor(
+        database=database,
+        settings=settings,
+    )
 
     pipeline = SpeechPipeline(
         capture=capture,
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
-        transcriber=transcriber,
-        on_result=recorder.record,
+        transcription_executor=transcription_executor,
     )
 
     # Act
     await pipeline.start()
     await pipeline.wait()
+    await pipeline.stop()
 
     # Assert
-    rows = connection.execute(
+    rows = database.execute(
         """
         SELECT
             start_time,
@@ -126,7 +124,7 @@ async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None
         """,
     ).fetchall()
 
-    connection.close()
+    database.close()
 
     assert rows
     assert all(row[2] == "en" for row in rows)

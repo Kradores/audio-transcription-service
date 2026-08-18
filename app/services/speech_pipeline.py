@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from app.audio.contracts import ProcessingAudioFrame
 from app.audio.protocols import AudioCapture, AudioNormalizer
-from app.transcription.protocols import Transcriber, TranscriptionResultHandler
+from app.services.transcription_executor import TranscriptionExecutor
 from app.vad.protocols import AudioVad, SpeechSegmentAssembler
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ class _SpeechPipelineStats:
     captured_frames: int = 0
     processing_frames: int = 0
     segments_emitted: int = 0
-    transcriptions_completed: int = 0
+    segments_rejected: int = 0
 
 
 class SpeechPipeline:
@@ -32,15 +32,13 @@ class SpeechPipeline:
         normalizer: AudioNormalizer,
         vad: AudioVad,
         assembler: SpeechSegmentAssembler,
-        transcriber: Transcriber,
-        on_result: TranscriptionResultHandler,
+        transcription_executor: TranscriptionExecutor,
     ) -> None:
         self._capture = capture
         self._normalizer = normalizer
         self._vad = vad
         self._assembler = assembler
-        self._transcriber = transcriber
-        self._on_result = on_result
+        self._transcription_executor = transcription_executor
 
         self._task: asyncio.Task[None] | None = None
         self._started = False
@@ -54,23 +52,26 @@ class SpeechPipeline:
         )
 
     async def start(self) -> None:
-        """Start capture and the pipeline processing task."""
+        """Start transcription execution, capture, and pipeline processing."""
         if self._started:
             raise RuntimeError("pipeline has already been started")
 
+        await self._transcription_executor.start()
         await self._capture.start()
 
         self._stats = _SpeechPipelineStats()
         self._next_segment_id = 1
         self._started = True
+
         logger.info("speech pipeline started")
+
         self._task = asyncio.create_task(
             self._run(),
             name="speech-pipeline",
         )
 
     async def stop(self) -> None:
-        """Stop the pipeline and discard incomplete segmentation state."""
+        """Stop the pipeline and drain accepted transcription work."""
         if not self._started:
             return
 
@@ -86,13 +87,15 @@ class SpeechPipeline:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
+        await self._transcription_executor.stop()
+
         logger.info(
             "speech pipeline stopped captured_frames=%d processing_frames=%d "
-            "segments_emitted=%d transcriptions_completed=%d",
+            "segments_emitted=%d segments_rejected=%d",
             self._stats.captured_frames,
             self._stats.processing_frames,
             self._stats.segments_emitted,
-            self._stats.transcriptions_completed,
+            self._stats.segments_rejected,
         )
 
         self._normalizer.reset()
@@ -165,26 +168,17 @@ class SpeechPipeline:
                 segment.timestamp + segment.duration,
             )
 
-            result = await asyncio.to_thread(
-                self._transcriber.transcribe,
-                segment,
-            )
+            accepted = self._transcription_executor.submit(segment)
 
-            self._stats.transcriptions_completed += 1
-            logger.info(
-                "transcription completed id=%d start=%.3f end=%.3f",
-                segment_id,
-                result.start,
-                result.end,
-            )
-            logger.debug(
-                "transcription result id=%d language=%s text=%r",
-                segment_id,
-                result.language,
-                result.text,
-            )
+            if not accepted:
+                self._stats.segments_rejected += 1
 
-            self._on_result(result)
+                logger.warning(
+                    "speech segment rejected by transcription executor id=%d start=%.3f end=%.3f",
+                    segment_id,
+                    segment.timestamp,
+                    segment.timestamp + segment.duration,
+                )
 
     def _handle_capture_discontinuity(self) -> None:
         """Mark capture discontinuity for processing by the pipeline task."""

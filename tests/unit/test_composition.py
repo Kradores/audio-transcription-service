@@ -15,9 +15,7 @@ from app.composition import (
     create_vad,
 )
 from app.services.speech_pipeline import SpeechPipeline
-from app.storage.recorder import TranscriptRecorderImpl
 from app.transcription.faster_whisper import FasterWhisperTranscriber
-from app.transcription.protocols import Transcriber
 from app.vad.protocols import AudioVad
 from app.vad.silero import SileroVADAdapter
 from tests.unit.core.config.builders import SettingsBuilder, valid_configuration_document
@@ -214,30 +212,6 @@ def test_create_transcriber_passes_configured_whisper_settings() -> None:
 
 
 @patch("app.composition.create_vad")
-@patch("app.composition.create_transcriber")
-def test_create_application_wires_transcriber(
-    create_transcriber: MagicMock,
-    create_vad: MagicMock,
-    tmp_path: Path,
-) -> None:
-    # Arrange
-    document = valid_configuration_document()
-    config_path = write_configuration(tmp_path, document)
-
-    vad = MagicMock()
-    transcriber = MagicMock()
-
-    create_vad.return_value = vad
-    create_transcriber.return_value = transcriber
-
-    # Act
-    application = create_application(config_path)
-
-    # Assert
-    assert application.transcriber is transcriber
-
-
-@patch("app.composition.create_vad")
 @patch("app.composition.create_speech_pipeline")
 def test_create_application_wires_speech_pipeline(
     create_speech_pipeline: MagicMock,
@@ -266,8 +240,7 @@ def test_create_speech_pipeline_wires_recorder() -> None:
     normalizer = MagicMock()
     vad = MagicMock()
     assembler = MagicMock()
-    transcriber = MagicMock()
-    recorder = MagicMock()
+    transcription_executor = MagicMock()
 
     with patch("app.composition.SpeechPipeline") as pipeline_type:
         result = create_speech_pipeline(
@@ -275,8 +248,7 @@ def test_create_speech_pipeline_wires_recorder() -> None:
             normalizer=normalizer,
             vad=vad,
             assembler=assembler,
-            transcriber=transcriber,
-            recorder=recorder,
+            transcription_executor=transcription_executor,
         )
 
     assert result is pipeline_type.return_value
@@ -286,8 +258,7 @@ def test_create_speech_pipeline_wires_recorder() -> None:
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
-        transcriber=transcriber,
-        on_result=recorder.record,
+        transcription_executor=transcription_executor,
     )
 
 
@@ -300,13 +271,11 @@ def test_create_application_builds_production_persistence_graph(
     config_path = write_configuration(tmp_path, document)
 
     vad = MagicMock(spec=AudioVad)
-    transcriber = MagicMock(spec=Transcriber)
     capture = MagicMock(spec=AudioCapture)
 
     with (
         patch("app.composition.create_capture", return_value=capture),
         patch("app.composition.create_vad", return_value=vad),
-        patch("app.composition.create_transcriber", return_value=transcriber),
     ):
         # Act
         application = create_application(config_path)
@@ -314,6 +283,4 @@ def test_create_application_builds_production_persistence_graph(
     # Assert
     assert isinstance(application, Application)
     assert isinstance(application.pipeline, SpeechPipeline)
-    assert isinstance(application.recorder, TranscriptRecorderImpl)
     assert application.capture is capture
-    assert application.transcriber is transcriber

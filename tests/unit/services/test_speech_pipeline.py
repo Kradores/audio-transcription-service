@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import threading
 from collections.abc import AsyncIterator, Callable
 
 import numpy as np
@@ -17,8 +16,6 @@ from app.audio.contracts import (
 )
 from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.services.speech_pipeline import SpeechPipeline
-from app.transcription.contracts import TranscriptionResult
-from app.transcription.protocols import Transcriber, TranscriptionResultHandler
 from app.vad.protocols import AudioVad, SpeechSegmentAssembler
 
 SAMPLE_RATE = 16_000
@@ -158,46 +155,28 @@ class FakeAssembler:
         return ()
 
 
-class FakeTranscriber:
+class FakeTranscriptionExecutor:
     def __init__(self) -> None:
-        self.transcribed: list[object] = []
+        self.attempted: list[SpeechSegment] = []
+        self.submitted: list[SpeechSegment] = []
+        self.accept = True
+        self.started = False
+        self.stopped = False
 
-    def transcribe(self, segment: object) -> TranscriptionResult:
-        self.transcribed.append(segment)
+    async def start(self) -> None:
+        self.started = True
 
-        return TranscriptionResult(
-            text=f"text-{len(self.transcribed)}",
-            language="en",
-            confidence=None,
-            start=0.0,
-            end=1.0,
-        )
+    def submit(self, segment: SpeechSegment) -> bool:
+        self.attempted.append(segment)
 
+        if not self.accept:
+            return False
 
-class BlockingTranscriber:
-    def __init__(self) -> None:
-        self.started: list[object] = []
-        self.completed: list[object] = []
+        self.submitted.append(segment)
+        return True
 
-        self.first_started = threading.Event()
-        self.allow_first_to_finish = threading.Event()
-
-    def transcribe(self, segment: object) -> TranscriptionResult:
-        self.started.append(segment)
-
-        if len(self.started) == 1:
-            self.first_started.set()
-            self.allow_first_to_finish.wait()
-
-        self.completed.append(segment)
-
-        return TranscriptionResult(
-            text="text",
-            language="en",
-            confidence=None,
-            start=0.0,
-            end=1.0,
-        )
+    async def stop(self) -> None:
+        self.stopped = True
 
 
 class ControllableAudioCapture(FakeAudioCapture):
@@ -271,18 +250,13 @@ def create_speech_segment() -> SpeechSegment:
     )
 
 
-def sink_handler(_: TranscriptionResult) -> None:
-    """Does nothing"""
-
-
 def create_pipeline(
     *,
     capture: AudioCapture | None = None,
     normalizer: AudioNormalizer | None = None,
     vad: AudioVad | None = None,
     assembler: SpeechSegmentAssembler | None = None,
-    transcriber: Transcriber | None = None,
-    on_result: TranscriptionResultHandler | None = None,
+    transcription_executor: FakeTranscriptionExecutor | None = None,
     segments: tuple[SpeechSegment, ...] = (),
 ) -> SpeechPipeline:
     processing_frame = create_processing_frame()
@@ -303,19 +277,15 @@ def create_pipeline(
             }
         )
 
-    if transcriber is None:
-        transcriber = FakeTranscriber()
-
-    if on_result is None:
-        on_result = sink_handler
+    if transcription_executor is None:
+        transcription_executor = FakeTranscriptionExecutor()
 
     return SpeechPipeline(
         capture=capture,
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
-        transcriber=transcriber,
-        on_result=on_result,
+        transcription_executor=transcription_executor,
     )
 
 
@@ -334,17 +304,14 @@ async def test_pipeline_processes_frame_through_all_stages() -> None:
             id(processing_frame): (segment,),
         }
     )
-    transcriber = FakeTranscriber()
-
-    results: list[TranscriptionResult] = []
+    transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
         capture=capture,
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
-        transcriber=transcriber,
-        on_result=results.append,
+        transcription_executor=transcription_executor,
     )
 
     # Act
@@ -360,16 +327,9 @@ async def test_pipeline_processes_frame_through_all_stages() -> None:
     assert normalizer.processed == [captured_frame]
     assert vad.processed == [processing_frame]
     assert assembler.processed == [processing_frame]
-    assert transcriber.transcribed == [segment]
-    assert results == [
-        TranscriptionResult(
-            text="text-1",
-            language="en",
-            confidence=None,
-            start=0.0,
-            end=1.0,
-        ),
-    ]
+    assert transcription_executor.submitted == [segment]
+    assert transcription_executor.started
+    assert transcription_executor.stopped
 
 
 @pytest.mark.anyio
@@ -386,15 +346,14 @@ async def test_pipeline_processes_all_normalized_frames() -> None:
     normalizer = FakeNormalizer(processing_frames)
     vad = FakeVad()
     assembler = FakeAssembler({})
-    transcriber = FakeTranscriber()
+    transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
         capture=capture,
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
-        transcriber=transcriber,
-        on_result=sink_handler,
+        transcription_executor=transcription_executor,
     )
 
     await pipeline.start()
@@ -406,7 +365,7 @@ async def test_pipeline_processes_all_normalized_frames() -> None:
 
 
 @pytest.mark.anyio
-async def test_pipeline_transcribes_all_segments_from_one_processing_frame() -> None:
+async def test_pipeline_submits_all_segments_from_one_processing_frame() -> None:
     processing_frame = create_processing_frame()
 
     segment_one = create_speech_segment()
@@ -423,126 +382,23 @@ async def test_pipeline_transcribes_all_segments_from_one_processing_frame() -> 
             ),
         }
     )
-    transcriber = FakeTranscriber()
-
-    results: list[TranscriptionResult] = []
+    transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
         capture=capture,
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
-        transcriber=transcriber,
-        on_result=results.append,
+        transcription_executor=transcription_executor,
     )
 
     await pipeline.start()
     await pipeline.wait()
 
-    assert len(transcriber.transcribed) == 2
-    assert transcriber.transcribed[0] is segment_one
-    assert transcriber.transcribed[1] is segment_two
-    assert len(results) == 2
-
-
-@pytest.mark.anyio
-async def test_pipeline_transcribes_segments_sequentially() -> None:
-    processing_frame = create_processing_frame()
-
-    segment_one = create_speech_segment()
-    segment_two = create_speech_segment()
-
-    transcriber = BlockingTranscriber()
-
-    capture = FakeAudioCapture([create_audio_frame()])
-    normalizer = FakeNormalizer((processing_frame,))
-    vad = FakeVad()
-    assembler = FakeAssembler(
-        {
-            id(processing_frame): (
-                segment_one,
-                segment_two,
-            ),
-        }
-    )
-
-    pipeline = SpeechPipeline(
-        capture=capture,
-        normalizer=normalizer,
-        vad=vad,
-        assembler=assembler,
-        transcriber=transcriber,
-        on_result=sink_handler,
-    )
-
-    await pipeline.start()
-
-    await asyncio.to_thread(
-        transcriber.first_started.wait,
-    )
-
-    assert len(transcriber.started) == 1
-    assert transcriber.started[0] is segment_one
-    assert transcriber.completed == []
-
-    transcriber.allow_first_to_finish.set()
-
-    await pipeline.wait()
-
-    assert len(transcriber.started) == 2
-    assert transcriber.started[0] is segment_one
-    assert transcriber.started[1] is segment_two
-
-    assert len(transcriber.completed) == 2
-    assert transcriber.completed[0] is segment_one
-    assert transcriber.completed[1] is segment_two
-
-
-@pytest.mark.anyio
-async def test_pipeline_runs_transcription_without_blocking_event_loop() -> None:
-    processing_frame = create_processing_frame()
-    segment = create_speech_segment()
-
-    started = threading.Event()
-    release = threading.Event()
-
-    class BlockingTranscriber:
-        def transcribe(
-            self,
-            segment: object,
-        ) -> TranscriptionResult:
-            started.set()
-            release.wait()
-
-            return TranscriptionResult(
-                text="text",
-                language="en",
-                confidence=None,
-                start=0.0,
-                end=1.0,
-            )
-
-    transcriber = BlockingTranscriber()
-
-    pipeline = SpeechPipeline(
-        capture=FakeAudioCapture([create_audio_frame()]),
-        normalizer=FakeNormalizer((processing_frame,)),
-        vad=FakeVad(),
-        assembler=FakeAssembler({id(processing_frame): (segment,)}),
-        transcriber=transcriber,
-        on_result=sink_handler,
-    )
-
-    await pipeline.start()
-
-    await asyncio.to_thread(started.wait)
-
-    # The event loop must still be able to run.
-    await asyncio.sleep(0)
-
-    release.set()
-
-    await pipeline.stop()
+    assert transcription_executor.submitted == [
+        segment_one,
+        segment_two,
+    ]
 
 
 @pytest.mark.anyio
@@ -557,15 +413,14 @@ async def test_pipeline_processes_frames_emitted_by_normalizer_flush() -> None:
     )
     vad = FakeVad()
     assembler = FakeAssembler({})
-    transcriber = FakeTranscriber()
+    transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
         capture=capture,
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
-        transcriber=transcriber,
-        on_result=sink_handler,
+        transcription_executor=transcription_executor,
     )
 
     await pipeline.start()
@@ -627,29 +482,6 @@ async def test_start_twice_raises() -> None:
 
 
 @pytest.mark.anyio
-async def test_pipeline_propagates_transcriber_failure() -> None:
-    class FailingTranscriber:
-        def transcribe(
-            self,
-            segment: SpeechSegment,
-        ) -> TranscriptionResult:
-            raise RuntimeError("transcription failed")
-
-    pipeline = create_pipeline(
-        transcriber=FailingTranscriber(),
-        segments=(create_speech_segment(),),
-    )
-
-    await pipeline.start()
-
-    with pytest.raises(
-        RuntimeError,
-        match="transcription failed",
-    ):
-        await pipeline.wait()
-
-
-@pytest.mark.anyio
 async def test_stop_discards_incomplete_assembler_state() -> None:
     assembler = FakeAssembler({})
 
@@ -671,208 +503,6 @@ async def test_wait_before_start_is_harmless() -> None:
 
 
 @pytest.mark.anyio
-async def test_pipeline_delivers_transcription_result_to_on_result() -> None:
-    processing_frame = create_processing_frame()
-    segment = create_speech_segment()
-
-    expected_result = TranscriptionResult(
-        text="hello world",
-        language="en",
-        confidence=0.95,
-        start=10.0,
-        end=12.0,
-    )
-
-    class FixedTranscriber:
-        def transcribe(
-            self,
-            received_segment: SpeechSegment,
-        ) -> TranscriptionResult:
-            assert received_segment is segment
-            return expected_result
-
-    results: list[TranscriptionResult] = []
-
-    pipeline = SpeechPipeline(
-        capture=FakeAudioCapture([create_audio_frame()]),
-        normalizer=FakeNormalizer((processing_frame,)),
-        vad=FakeVad(),
-        assembler=FakeAssembler(
-            {id(processing_frame): (segment,)},
-        ),
-        transcriber=FixedTranscriber(),
-        on_result=results.append,
-    )
-
-    await pipeline.start()
-    await pipeline.wait()
-
-    assert results == [expected_result]
-
-
-@pytest.mark.anyio
-async def test_pipeline_delivers_results_in_transcription_order() -> None:
-    processing_frame = create_processing_frame()
-
-    segment_one = create_speech_segment()
-    segment_two = create_speech_segment()
-
-    result_one = TranscriptionResult(
-        text="first",
-        language="en",
-        confidence=None,
-        start=10.0,
-        end=11.0,
-    )
-    result_two = TranscriptionResult(
-        text="second",
-        language="en",
-        confidence=None,
-        start=11.0,
-        end=12.0,
-    )
-
-    class OrderedTranscriber:
-        def transcribe(
-            self,
-            segment: SpeechSegment,
-        ) -> TranscriptionResult:
-            if segment is segment_one:
-                return result_one
-
-            if segment is segment_two:
-                return result_two
-
-            raise AssertionError("Unexpected segment")
-
-    results: list[TranscriptionResult] = []
-
-    pipeline = SpeechPipeline(
-        capture=FakeAudioCapture([create_audio_frame()]),
-        normalizer=FakeNormalizer((processing_frame,)),
-        vad=FakeVad(),
-        assembler=FakeAssembler(
-            {
-                id(processing_frame): (
-                    segment_one,
-                    segment_two,
-                ),
-            },
-        ),
-        transcriber=OrderedTranscriber(),
-        on_result=results.append,
-    )
-
-    await pipeline.start()
-    await pipeline.wait()
-
-    assert results == [
-        result_one,
-        result_two,
-    ]
-
-
-@pytest.mark.anyio
-async def test_pipeline_calls_on_result_after_transcription_completes() -> None:
-    processing_frame = create_processing_frame()
-    segment = create_speech_segment()
-
-    events: list[str] = []
-
-    class RecordingTranscriber:
-        def transcribe(
-            self,
-            received_segment: SpeechSegment,
-        ) -> TranscriptionResult:
-            assert received_segment is segment
-            events.append("transcribe-start")
-            events.append("transcribe-complete")
-
-            return TranscriptionResult(
-                text="text",
-                language="en",
-                confidence=None,
-                start=0.0,
-                end=1.0,
-            )
-
-    def on_result(result: TranscriptionResult) -> None:
-        assert result.text == "text"
-        events.append("on-result")
-
-    pipeline = SpeechPipeline(
-        capture=FakeAudioCapture([create_audio_frame()]),
-        normalizer=FakeNormalizer((processing_frame,)),
-        vad=FakeVad(),
-        assembler=FakeAssembler(
-            {id(processing_frame): (segment,)},
-        ),
-        transcriber=RecordingTranscriber(),
-        on_result=on_result,
-    )
-
-    await pipeline.start()
-    await pipeline.wait()
-
-    assert events == [
-        "transcribe-start",
-        "transcribe-complete",
-        "on-result",
-    ]
-
-
-@pytest.mark.anyio
-async def test_pipeline_propagates_on_result_failure() -> None:
-    segment = create_speech_segment()
-
-    def failing_handler(_: TranscriptionResult) -> None:
-        raise RuntimeError("result handler failed")
-
-    pipeline = create_pipeline(
-        on_result=failing_handler,
-        segments=(segment,),
-    )
-
-    await pipeline.start()
-
-    with pytest.raises(
-        RuntimeError,
-        match="result handler failed",
-    ):
-        await pipeline.wait()
-
-
-@pytest.mark.anyio
-async def test_pipeline_does_not_call_on_result_when_transcription_fails() -> None:
-    segment = create_speech_segment()
-    results: list[TranscriptionResult] = []
-
-    class FailingTranscriber:
-        def transcribe(
-            self,
-            received_segment: SpeechSegment,
-        ) -> TranscriptionResult:
-            assert received_segment is segment
-            raise RuntimeError("transcription failed")
-
-    pipeline = create_pipeline(
-        transcriber=FailingTranscriber(),
-        on_result=results.append,
-        segments=(segment,),
-    )
-
-    await pipeline.start()
-
-    with pytest.raises(
-        RuntimeError,
-        match="transcription failed",
-    ):
-        await pipeline.wait()
-
-    assert results == []
-
-
-@pytest.mark.anyio
 async def test_pipeline_discontinuity_callback_only_marks_pending_reset() -> None:
     # Arrange
     capture = ControllableAudioCapture()
@@ -880,15 +510,14 @@ async def test_pipeline_discontinuity_callback_only_marks_pending_reset() -> Non
     normalizer = FakeNormalizer(())
     vad = FakeVad()
     assembler = FakeAssembler({})
-    transcriber = FakeTranscriber()
+    transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
         capture=capture,
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
-        transcriber=transcriber,
-        on_result=sink_handler,
+        transcription_executor=transcription_executor,
     )
 
     await pipeline.start()
@@ -915,15 +544,14 @@ async def test_pipeline_discontinuity_resets_processing_components() -> None:
     normalizer = FakeNormalizer((processing_frame,))
     vad = FakeVad()
     assembler = FakeAssembler({})
-    transcriber = FakeTranscriber()
+    transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
         capture=capture,
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
-        transcriber=transcriber,
-        on_result=sink_handler,
+        transcription_executor=transcription_executor,
     )
 
     await pipeline.start()
@@ -961,14 +589,14 @@ async def test_pipeline_resets_before_first_post_discontinuity_frame() -> None:
 
     assembler = FakeAssembler({})
     assembler.events = events
+    transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
         capture=capture,
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
-        transcriber=FakeTranscriber(),
-        on_result=sink_handler,
+        transcription_executor=transcription_executor,
     )
 
     await pipeline.start()
@@ -1003,14 +631,14 @@ async def test_pipeline_handles_multiple_discontinuities() -> None:
     normalizer = FakeNormalizer((processing_frame,))
     vad = FakeVad()
     assembler = FakeAssembler({})
+    transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
         capture=capture,
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
-        transcriber=FakeTranscriber(),
-        on_result=sink_handler,
+        transcription_executor=transcription_executor,
     )
 
     await pipeline.start()
@@ -1042,14 +670,14 @@ async def test_pipeline_coalesces_multiple_pending_discontinuities() -> None:
     normalizer = FakeNormalizer((processing_frame,))
     vad = FakeVad()
     assembler = FakeAssembler({})
+    transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
         capture=capture,
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
-        transcriber=FakeTranscriber(),
-        on_result=sink_handler,
+        transcription_executor=transcription_executor,
     )
 
     await pipeline.start()
@@ -1072,24 +700,21 @@ async def test_pipeline_coalesces_multiple_pending_discontinuities() -> None:
 
 
 @pytest.mark.anyio
-async def test_pipeline_discontinuity_does_not_produce_transcription() -> None:
+async def test_pipeline_discontinuity_does_not_submit_transcription() -> None:
     # Arrange
     capture = ControllableAudioCapture()
 
     normalizer = FakeNormalizer(())
     vad = FakeVad()
     assembler = FakeAssembler({})
-    transcriber = FakeTranscriber()
-
-    results: list[TranscriptionResult] = []
+    transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
         capture=capture,
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
-        transcriber=transcriber,
-        on_result=results.append,
+        transcription_executor=transcription_executor,
     )
 
     await pipeline.start()
@@ -1099,8 +724,7 @@ async def test_pipeline_discontinuity_does_not_produce_transcription() -> None:
     await asyncio.sleep(0)
 
     # Assert
-    assert transcriber.transcribed == []
-    assert results == []
+    assert transcription_executor.submitted == []
 
     await capture.close()
     await pipeline.wait()
@@ -1122,13 +746,14 @@ async def test_pipeline_logs_vad_segments_and_final_statistics(
             return (SpeechStart(timestamp=12.0),)
 
     capture = FakeAudioCapture([create_audio_frame()])
+    transcription_executor = FakeTranscriptionExecutor()
+
     pipeline = SpeechPipeline(
         capture=capture,
         normalizer=FakeNormalizer((processing_frame,)),
         vad=VadWithEvents(),
         assembler=FakeAssembler({id(processing_frame): (segment,)}),
-        transcriber=FakeTranscriber(),
-        on_result=sink_handler,
+        transcription_executor=transcription_executor,
     )
 
     # Act
@@ -1141,9 +766,50 @@ async def test_pipeline_logs_vad_segments_and_final_statistics(
     messages = [record.getMessage() for record in caplog.records]
     assert any("VAD SpeechStart timestamp=12.000" in message for message in messages)
     assert any("speech segment emitted id=1" in message for message in messages)
-    assert any("transcription completed id=1" in message for message in messages)
     assert any(
         "speech pipeline stopped captured_frames=1 processing_frames=1 "
-        "segments_emitted=1 transcriptions_completed=1" in message
+        "segments_emitted=1 segments_rejected=0" in message
         for message in messages
     )
+
+
+@pytest.mark.anyio
+async def test_pipeline_continues_when_transcription_executor_rejects_segment() -> None:
+    processing_frame = create_processing_frame()
+    segment = create_speech_segment()
+
+    transcription_executor = FakeTranscriptionExecutor()
+    transcription_executor.accept = False
+
+    pipeline = SpeechPipeline(
+        capture=FakeAudioCapture([create_audio_frame()]),
+        normalizer=FakeNormalizer((processing_frame,)),
+        vad=FakeVad(),
+        assembler=FakeAssembler(
+            {id(processing_frame): (segment,)},
+        ),
+        transcription_executor=transcription_executor,
+    )
+
+    await pipeline.start()
+    await pipeline.wait()
+
+    assert transcription_executor.attempted == [segment]
+    assert transcription_executor.submitted == []
+
+
+@pytest.mark.anyio
+async def test_pipeline_starts_and_stops_transcription_executor() -> None:
+    executor = FakeTranscriptionExecutor()
+
+    pipeline = create_pipeline(
+        transcription_executor=executor,
+    )
+
+    await pipeline.start()
+
+    assert executor.started is True
+
+    await pipeline.stop()
+
+    assert executor.stopped is True

@@ -71,6 +71,11 @@ def test_whisper_settings_accepts_valid_values() -> None:
     assert settings.whisper.compute_type is WhisperComputeType.INT8
 
 
+def test_transcription_settings_accepts_valid_values() -> None:
+    settings = SettingsBuilder().build()
+    assert settings.transcription.queue_capacity == 10
+
+
 def test_database_settings_accepts_valid_values() -> None:
     settings = SettingsBuilder().build()
     assert settings.database.path == Path("data/transcripts.db")
@@ -118,7 +123,7 @@ def test_api_settings_rejects_invalid_ports(port: int) -> None:
     ],
 )
 def test_audio_capture_settings_accepts_boundary_values(queue_capacity: int) -> None:
-    settings = SettingsBuilder().with_queue_capacity(queue_capacity).build()
+    settings = SettingsBuilder().with_capture_queue_capacity(queue_capacity).build()
     assert settings.audio.capture.queue_capacity == queue_capacity
 
 
@@ -173,7 +178,19 @@ def test_audio_segmentation_settings_accepts_boundary_values(
 )
 def test_audio_capture_settings_rejects_invalid_values(queue_capacity: int) -> None:
     with pytest.raises(ValidationError):
-        SettingsBuilder().with_queue_capacity(queue_capacity).build()
+        SettingsBuilder().with_capture_queue_capacity(queue_capacity).build()
+
+
+@pytest.mark.parametrize(
+    "queue_capacity",
+    [
+        0,
+        10_001,
+    ],
+)
+def test_transcription_settings_rejects_invalid_values(queue_capacity: int) -> None:
+    with pytest.raises(ValidationError):
+        SettingsBuilder().with_transcription_queue_capacity(queue_capacity).build()
 
 
 @pytest.mark.parametrize(

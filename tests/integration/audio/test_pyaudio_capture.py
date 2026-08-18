@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import winsound
 
 import pytest
 
@@ -32,6 +33,7 @@ async def test_real_pyaudio_capture_receives_wasapi_loopback_frames() -> None:
                 frames.append(frame)
 
         collector = asyncio.create_task(collect_frames())
+        await asyncio.to_thread(winsound.Beep, 37, int(CAPTURE_DURATION_SECONDS * 10))
 
         await asyncio.sleep(CAPTURE_DURATION_SECONDS)
     finally:

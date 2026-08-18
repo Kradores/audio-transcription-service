@@ -76,6 +76,12 @@ class AudioSettings(BaseConfigurationModel):
     segmentation: AudioSegmentationSettings
 
 
+class TranscriptionSettings(BaseConfigurationModel):
+    """Configuration for asynchronous transcription execution."""
+
+    queue_capacity: Annotated[int, Field(ge=1, le=10_000)]
+
+
 class VadSettings(BaseConfigurationModel):
     """Configuration parameters for Voice Activity Detection (VAD)."""
 
@@ -105,6 +111,7 @@ class Settings(BaseConfigurationModel):
     api: ApiSettings
     logging: LoggingSettings
     audio: AudioSettings
+    transcription: TranscriptionSettings
     vad: VadSettings
     whisper: WhisperSettings
     database: DatabaseSettings
@@ -120,4 +127,5 @@ __all__ = [
     "Settings",
     "VadSettings",
     "WhisperSettings",
+    "TranscriptionSettings",
 ]

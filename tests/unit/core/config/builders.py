@@ -37,6 +37,7 @@ def valid_configuration_document() -> dict[str, Any]:
                 "max_duration_seconds": 5,
             },
         },
+        "transcription": {"queue_capacity": 10},
         "vad": {
             "enabled": True,
             "speech_threshold": 0.5,
@@ -81,7 +82,7 @@ class SettingsBuilder:
         self._document["audio"]["processing"]["channels"] = channels
         return self
 
-    def with_queue_capacity(self, capacity: int) -> SettingsBuilder:
+    def with_capture_queue_capacity(self, capacity: int) -> SettingsBuilder:
         self._document["audio"]["capture"]["queue_capacity"] = capacity
         return self
 
@@ -131,6 +132,10 @@ class SettingsBuilder:
 
     def with_whisper_compute_type(self, compute_type: str) -> SettingsBuilder:
         self._document["whisper"]["compute_type"] = compute_type
+        return self
+
+    def with_transcription_queue_capacity(self, capacity: int) -> SettingsBuilder:
+        self._document["transcription"]["queue_capacity"] = capacity
         return self
 
 

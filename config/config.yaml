@@ -11,7 +11,7 @@ logging:
 
 audio:
   capture:
-    queue_capacity: 500
+    queue_capacity: 100
 
   processing:
     sample_rate: 16000
@@ -22,6 +22,9 @@ audio:
     post_roll_ms: 200
     target_duration_seconds: 3
     max_duration_seconds: 5
+
+transcription:
+  queue_capacity: 10
 
 vad:
   enabled: true

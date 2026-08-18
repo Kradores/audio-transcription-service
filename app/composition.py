@@ -14,10 +14,14 @@ from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.audio.resampler import SoXRResamplerFactory
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
-from app.core.config.models import AudioProcessingSettings, AudioSegmentationSettings, Settings
+from app.core.config.models import (
+    AudioProcessingSettings,
+    AudioSegmentationSettings,
+    Settings,
+)
 from app.core.logging import configure_logging
 from app.services.speech_pipeline import SpeechPipeline
-from app.storage.protocols import TranscriptRecorder
+from app.services.transcription_executor import TranscriptionExecutor, TranscriptionExecutorImpl
 from app.storage.recorder import TranscriptRecorderImpl
 from app.storage.sqlite import SQLiteTranscriptRepository
 from app.transcription.faster_whisper import FasterWhisperTranscriber
@@ -39,7 +43,6 @@ def create_application(
     capture = create_capture(settings.audio.capture.queue_capacity)
     normalizer = create_normalizer(settings.audio.processing)
     vad = create_vad(settings)
-    transcriber = create_transcriber(settings)
 
     if vad is None:
         raise ValueError("Speech pipeline requires VAD to be enabled")
@@ -53,28 +56,25 @@ def create_application(
 
     database = sqlite3.connect(database_path)
 
-    repository = SQLiteTranscriptRepository(database)
-    repository.initialize()
-
-    recorder = TranscriptRecorderImpl(repository)
+    transcription_executor = create_transcription_executor(
+        database=database,
+        settings=settings,
+    )
 
     pipeline = create_speech_pipeline(
         capture=capture,
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
-        transcriber=transcriber,
-        recorder=recorder,
+        transcription_executor=transcription_executor,
     )
 
     return Application(
         settings=settings,
         capture=capture,
         normalizer=normalizer,
-        transcriber=transcriber,
         pipeline=pipeline,
         database=database,
-        recorder=recorder,
     )
 
 
@@ -141,6 +141,24 @@ def create_transcriber(settings: Settings) -> Transcriber:
     return FasterWhisperTranscriber(model)
 
 
+def create_transcription_executor(
+        *,
+        database: sqlite3.Connection,
+        settings: Settings,
+) -> TranscriptionExecutor:
+    transcriber = create_transcriber(settings)
+    repository = SQLiteTranscriptRepository(database)
+    repository.initialize()
+
+    recorder = TranscriptRecorderImpl(repository)
+
+    return TranscriptionExecutorImpl(
+        transcriber=transcriber,
+        on_result=recorder.record,
+        queue_capacity=settings.transcription.queue_capacity,
+    )
+
+
 def create_speech_assembler(settings: AudioSegmentationSettings) -> SpeechSegmentAssembler:
     return SpeechSegmentAssemblerImpl(
         settings=settings,
@@ -153,8 +171,7 @@ def create_speech_pipeline(
     normalizer: AudioNormalizer,
     vad: AudioVad,
     assembler: SpeechSegmentAssembler,
-    transcriber: Transcriber,
-    recorder: TranscriptRecorder,
+    transcription_executor: TranscriptionExecutor,
 ) -> SpeechPipeline:
     """Create the application speech-processing pipeline."""
 
@@ -163,6 +180,5 @@ def create_speech_pipeline(
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
-        transcriber=transcriber,
-        on_result=recorder.record,
+        transcription_executor=transcription_executor,
     )
