@@ -299,3 +299,201 @@ async def test_executor_stop_is_safe_when_called_multiple_times() -> None:
     await executor.start()
     await executor.stop()
     await executor.stop()
+
+
+@pytest.mark.anyio
+async def test_executor_stats_track_accepted_submissions() -> None:
+    executor = TranscriptionExecutorImpl(
+        transcriber=FakeTranscriber(),
+        on_result=lambda _: None,
+        queue_capacity=10,
+    )
+
+    await executor.start()
+
+    assert executor.submit(create_segment(0.0)) is True
+    assert executor.submit(create_segment(1.0)) is True
+
+    await executor.stop()
+
+    stats = executor.stats
+
+    assert stats.accepted == 2
+
+
+@pytest.mark.anyio
+async def test_executor_stats_track_rejected_submissions() -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingTranscriber:
+        def transcribe(self, segment: SpeechSegment) -> TranscriptionResult:
+            started.set()
+            release.wait()
+
+            return TranscriptionResult(
+                text="text",
+                language="en",
+                confidence=None,
+                start=segment.timestamp,
+                end=segment.timestamp + segment.duration,
+            )
+
+    executor = TranscriptionExecutorImpl(
+        transcriber=BlockingTranscriber(),
+        on_result=lambda _: None,
+        queue_capacity=1,
+    )
+
+    await executor.start()
+
+    assert executor.submit(create_segment(0.0)) is True
+
+    await asyncio.to_thread(started.wait)
+
+    assert executor.submit(create_segment(1.0)) is True
+    assert executor.submit(create_segment(2.0)) is False
+    assert executor.submit(create_segment(3.0)) is False
+
+    release.set()
+
+    await executor.stop()
+
+    stats = executor.stats
+
+    assert stats.rejected == 2
+
+
+@pytest.mark.anyio
+async def test_executor_stats_track_completed_transcriptions() -> None:
+    transcriber = FakeTranscriber()
+
+    executor = TranscriptionExecutorImpl(
+        transcriber=transcriber,
+        on_result=lambda _: None,
+        queue_capacity=10,
+    )
+
+    await executor.start()
+
+    assert executor.submit(create_segment(0.0)) is True
+    assert executor.submit(create_segment(1.0)) is True
+    assert executor.submit(create_segment(2.0)) is True
+
+    await executor.stop()
+
+    stats = executor.stats
+
+    assert stats.accepted == 3
+    assert stats.completed == 3
+    assert stats.failed == 0
+
+
+@pytest.mark.anyio
+async def test_executor_stats_track_transcription_failures() -> None:
+    class FailingTranscriber:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def transcribe(self, segment: SpeechSegment) -> TranscriptionResult:
+            self.calls += 1
+
+            if self.calls <= 2:
+                raise RuntimeError("transcription failed")
+
+            return TranscriptionResult(
+                text="text",
+                language="en",
+                confidence=None,
+                start=segment.timestamp,
+                end=segment.timestamp + segment.duration,
+            )
+
+    executor = TranscriptionExecutorImpl(
+        transcriber=FailingTranscriber(),
+        on_result=lambda _: None,
+        queue_capacity=10,
+    )
+
+    await executor.start()
+
+    assert executor.submit(create_segment(0.0)) is True
+    assert executor.submit(create_segment(1.0)) is True
+    assert executor.submit(create_segment(2.0)) is True
+
+    await executor.stop()
+
+    stats = executor.stats
+
+    assert stats.accepted == 3
+    assert stats.completed == 1
+    assert stats.failed == 2
+
+
+@pytest.mark.anyio
+async def test_executor_stats_track_max_queue_depth() -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingTranscriber:
+        def transcribe(self, segment: SpeechSegment) -> TranscriptionResult:
+            started.set()
+            release.wait()
+
+            return TranscriptionResult(
+                text="text",
+                language="en",
+                confidence=None,
+                start=segment.timestamp,
+                end=segment.timestamp + segment.duration,
+            )
+
+    executor = TranscriptionExecutorImpl(
+        transcriber=BlockingTranscriber(),
+        on_result=lambda _: None,
+        queue_capacity=3,
+    )
+
+    await executor.start()
+
+    assert executor.submit(create_segment(0.0)) is True
+
+    await asyncio.to_thread(started.wait)
+
+    assert executor.submit(create_segment(1.0)) is True
+    assert executor.submit(create_segment(2.0)) is True
+    assert executor.submit(create_segment(3.0)) is True
+
+    stats = executor.stats
+
+    assert stats.max_queue_depth == 3
+
+    release.set()
+
+    await executor.stop()
+
+
+@pytest.mark.anyio
+async def test_executor_stats_are_snapshot() -> None:
+    executor = TranscriptionExecutorImpl(
+        transcriber=FakeTranscriber(),
+        on_result=lambda _: None,
+        queue_capacity=10,
+    )
+
+    await executor.start()
+
+    assert executor.submit(create_segment()) is True
+
+    stats_before = executor.stats
+
+    assert stats_before.accepted == 1
+
+    assert executor.submit(create_segment(1.0)) is True
+
+    stats_after = executor.stats
+
+    assert stats_before.accepted == 1
+    assert stats_after.accepted == 2
+
+    await executor.stop()

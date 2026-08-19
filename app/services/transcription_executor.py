@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from dataclasses import dataclass
 from typing import Protocol
 
 from app.audio.contracts import SpeechSegment
@@ -13,9 +14,6 @@ logger = logging.getLogger(__name__)
 
 class _Shutdown:
     """Internal transcription-worker shutdown signal."""
-
-
-
 
 
 class TranscriptionExecutor(Protocol):
@@ -29,6 +27,15 @@ class TranscriptionExecutor(Protocol):
 
     async def stop(self) -> None:
         """Stop the worker after accepted work has been processed."""
+
+
+@dataclass(slots=True)
+class TranscriptionExecutorStats:
+    accepted: int = 0
+    rejected: int = 0
+    completed: int = 0
+    failed: int = 0
+    max_queue_depth: int = 0
 
 
 class TranscriptionExecutorImpl:
@@ -53,6 +60,17 @@ class TranscriptionExecutorImpl:
         self._worker_task: asyncio.Task[None] | None = None
         self._started = False
         self._accepting = False
+        self._stats = TranscriptionExecutorStats()
+
+    @property
+    def stats(self) -> TranscriptionExecutorStats:
+        return TranscriptionExecutorStats(
+            accepted=self._stats.accepted,
+            rejected=self._stats.rejected,
+            completed=self._stats.completed,
+            failed=self._stats.failed,
+            max_queue_depth=self._stats.max_queue_depth,
+        )
 
     async def start(self) -> None:
         """Start accepting segments and launch the worker."""
@@ -82,11 +100,22 @@ class TranscriptionExecutorImpl:
         try:
             self._queue.put_nowait(segment)
         except asyncio.QueueFull:
+            self._stats.rejected += 1
+
             logger.warning(
-                "transcription executor overloaded queue_capacity=%d",
+                "transcription executor overloaded queue_capacity=%d rejected=%d",
                 self._queue.maxsize,
+                self._stats.rejected,
             )
             return False
+
+        self._stats.accepted += 1
+
+        queue_depth = self._queue.qsize()
+        self._stats.max_queue_depth = max(
+            self._stats.max_queue_depth,
+            queue_depth,
+        )
 
         return True
 
@@ -131,6 +160,8 @@ class TranscriptionExecutorImpl:
                     item,
                 )
 
+                self._stats.completed += 1
+
                 logger.info(
                     "transcription completed start=%.3f end=%.3f",
                     result.start,
@@ -147,6 +178,8 @@ class TranscriptionExecutorImpl:
             except Exception:
                 if isinstance(item, _Shutdown):
                     raise
+
+                self._stats.failed += 1
 
                 logger.exception(
                     "transcription execution failed start=%.3f end=%.3f",

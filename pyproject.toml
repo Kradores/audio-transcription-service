@@ -18,6 +18,7 @@ dependencies = [
     "uvicorn>=0.52.1",
     "silero-vad>=6.2.1,<7",
     "faster-whisper>=1.2.1",
+    "pycaw>=20251023",
 ]
 
 [tool.uv.build-backend]

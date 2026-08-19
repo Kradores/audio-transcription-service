@@ -142,9 +142,9 @@ def create_transcriber(settings: Settings) -> Transcriber:
 
 
 def create_transcription_executor(
-        *,
-        database: sqlite3.Connection,
-        settings: Settings,
+    *,
+    database: sqlite3.Connection,
+    settings: Settings,
 ) -> TranscriptionExecutor:
     transcriber = create_transcriber(settings)
     repository = SQLiteTranscriptRepository(database)

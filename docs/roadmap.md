@@ -168,13 +168,13 @@ Success means:
 
 ### Next architectural increment
 
-* ⬜ Decouple real-time audio processing from transcription execution
-* ⬜ Introduce bounded transcription work queue
-* ⬜ Introduce single transcription worker
-* ⬜ Preserve chronological transcription result delivery
-* ⬜ Define transcription queue shutdown semantics
-* ⬜ Define transcription queue overflow behavior
-* ⬜ Add unit and integration coverage for transcription scheduling
+* ✅ Decouple real-time audio processing from transcription execution
+* ✅ Introduce bounded transcription work queue
+* ✅ Introduce single transcription worker
+* ✅ Preserve chronological transcription result delivery
+* ✅ Define transcription queue shutdown semantics
+* ✅ Define transcription queue overflow behavior
+* ✅ Add unit and integration coverage for transcription scheduling
 * ⬜ Re-run real end-to-end workload and verify zero capture-frame loss
 * ⬜ Measure transcription queue pressure and end-to-end latency
 

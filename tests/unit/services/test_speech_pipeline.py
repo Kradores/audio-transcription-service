@@ -95,6 +95,27 @@ class FakeNormalizer:
             self.events.append("normalizer-reset")
 
 
+class SequentialFakeNormalizer:
+    def __init__(
+        self,
+        processing_frames: tuple[ProcessingAudioFrame, ...],
+    ) -> None:
+        self._processing_frames = iter(processing_frames)
+        self.reset_count = 0
+
+    def process(
+        self,
+        frame: AudioFrame,
+    ) -> tuple[ProcessingAudioFrame, ...]:
+        return (next(self._processing_frames),)
+
+    def flush(self) -> tuple[ProcessingAudioFrame, ...]:
+        return ()
+
+    def reset(self) -> None:
+        self.reset_count += 1
+
+
 class FakeVad:
     def __init__(
         self,
@@ -813,3 +834,166 @@ async def test_pipeline_starts_and_stops_transcription_executor() -> None:
     await pipeline.stop()
 
     assert executor.stopped is True
+
+
+@pytest.mark.anyio
+async def test_pipeline_counts_rejected_transcription_segment(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    segment = create_speech_segment()
+
+    executor = FakeTranscriptionExecutor()
+    executor.accept = False
+
+    pipeline = create_pipeline(
+        transcription_executor=executor,
+        segments=(segment,),
+    )
+
+    with caplog.at_level("INFO", logger="app.services.speech_pipeline"):
+        await pipeline.start()
+        await pipeline.wait()
+        await pipeline.stop()
+
+    assert executor.attempted == [segment]
+    assert executor.submitted == []
+
+    messages = [record.getMessage() for record in caplog.records]
+
+    assert any("segments_emitted=1 segments_rejected=1" in message for message in messages)
+
+
+@pytest.mark.anyio
+async def test_pipeline_does_not_deliver_rejected_segment() -> None:
+    segment = create_speech_segment()
+
+    executor = FakeTranscriptionExecutor()
+    executor.accept = False
+
+    pipeline = create_pipeline(
+        transcription_executor=executor,
+        segments=(segment,),
+    )
+
+    await pipeline.start()
+    await pipeline.wait()
+
+    assert executor.attempted == [segment]
+    assert executor.submitted == []
+
+
+@pytest.mark.anyio
+async def test_pipeline_continues_after_transcription_rejection() -> None:
+    processing_frame_one = create_processing_frame(1.0)
+    processing_frame_two = create_processing_frame(2.0)
+
+    segment_one = create_speech_segment()
+    segment_two = create_speech_segment()
+
+    class RejectFirstExecutor(FakeTranscriptionExecutor):
+        def submit(self, segment: SpeechSegment) -> bool:
+            self.attempted.append(segment)
+
+            if len(self.attempted) == 1:
+                return False
+
+            self.submitted.append(segment)
+            return True
+
+    executor = RejectFirstExecutor()
+
+    capture = FakeAudioCapture(
+        [
+            create_audio_frame(),
+            create_audio_frame(),
+        ],
+    )
+
+    normalizer = SequentialFakeNormalizer(
+        (
+            processing_frame_one,
+            processing_frame_two,
+        ),
+    )
+
+    assembler = FakeAssembler(
+        {
+            id(processing_frame_one): (segment_one,),
+            id(processing_frame_two): (segment_two,),
+        },
+    )
+
+    pipeline = SpeechPipeline(
+        capture=capture,
+        normalizer=normalizer,
+        vad=FakeVad(),
+        assembler=assembler,
+        transcription_executor=executor,
+    )
+
+    await pipeline.start()
+    await pipeline.wait()
+
+    assert executor.attempted == [
+        segment_one,
+        segment_two,
+    ]
+
+    assert executor.submitted == [
+        segment_two,
+    ]
+
+
+@pytest.mark.anyio
+async def test_pipeline_reports_rejected_segments_in_final_statistics(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    segment_one = create_speech_segment()
+    segment_two = create_speech_segment()
+
+    class RejectFirstExecutor(FakeTranscriptionExecutor):
+        def submit(self, segment: SpeechSegment) -> bool:
+            self.attempted.append(segment)
+
+            if len(self.attempted) == 1:
+                return False
+
+            self.submitted.append(segment)
+            return True
+
+    executor = RejectFirstExecutor()
+
+    processing_frame_one = create_processing_frame(1.0)
+    processing_frame_two = create_processing_frame(2.0)
+
+    pipeline = SpeechPipeline(
+        capture=FakeAudioCapture(
+            [
+                create_audio_frame(),
+                create_audio_frame(),
+            ],
+        ),
+        normalizer=SequentialFakeNormalizer(
+            (
+                processing_frame_one,
+                processing_frame_two,
+            ),
+        ),
+        vad=FakeVad(),
+        assembler=FakeAssembler(
+            {
+                id(processing_frame_one): (segment_one,),
+                id(processing_frame_two): (segment_two,),
+            },
+        ),
+        transcription_executor=executor,
+    )
+
+    with caplog.at_level("INFO", logger="app.services.speech_pipeline"):
+        await pipeline.start()
+        await pipeline.wait()
+        await pipeline.stop()
+
+    messages = [record.getMessage() for record in caplog.records]
+
+    assert any("segments_emitted=2 segments_rejected=1" in message for message in messages)
