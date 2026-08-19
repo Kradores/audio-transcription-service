@@ -321,18 +321,19 @@ def test_speech_end_collects_configured_post_roll_before_emitting() -> None:
     )
 
 
-def test_post_roll_ignores_additional_vad_events() -> None:
+def test_speech_start_during_post_roll_resumes_speaking_without_emitting() -> None:
     # Arrange
     assembler = SpeechSegmentAssemblerImpl(
         settings=create_settings(
             pre_roll_ms=0,
-            post_roll_ms=100,
+            post_roll_ms=40,
         ),
     )
 
     speech_start_frame = create_frame(0)
     speech_end_frame = create_frame(1)
-    post_roll_frames = [create_frame(index) for index in range(2, 7)]
+    post_roll_frame = create_frame(2)
+    resumed_speech_frame = create_frame(3)
 
     # Act
     assert (
@@ -342,7 +343,6 @@ def test_post_roll_ignores_additional_vad_events() -> None:
         )
         == ()
     )
-
     assert (
         assembler.process(
             speech_end_frame,
@@ -350,43 +350,179 @@ def test_post_roll_ignores_additional_vad_events() -> None:
         )
         == ()
     )
+    assert assembler.process(post_roll_frame, ()) == ()
 
-    # 100 ms = 5 frames.
-    for index, frame in enumerate(post_roll_frames):
-        if index < 4:
-            result = assembler.process(
-                frame,
-                (SpeechStart(timestamp=frame.timestamp),),
-            )
-            assert result == ()
-        else:
-            result = assembler.process(
-                frame,
-                (SpeechStart(timestamp=frame.timestamp),),
-            )
+    result = assembler.process(
+        resumed_speech_frame,
+        (SpeechStart(timestamp=resumed_speech_frame.timestamp),),
+    )
+
+    # Assert
+    assert result == ()
+
+
+def test_post_roll_resume_preserves_accumulated_audio() -> None:
+    # Arrange
+    assembler = SpeechSegmentAssemblerImpl(
+        settings=create_settings(
+            pre_roll_ms=0,
+            post_roll_ms=40,
+        ),
+    )
+
+    frames = [create_frame(index) for index in range(7)]
+
+    # Act
+    assert (
+        assembler.process(
+            frames[0],
+            (SpeechStart(timestamp=frames[0].timestamp),),
+        )
+        == ()
+    )
+    assert (
+        assembler.process(
+            frames[1],
+            (SpeechEnd(timestamp=frames[1].timestamp),),
+        )
+        == ()
+    )
+    assert assembler.process(frames[2], ()) == ()
+    assert (
+        assembler.process(
+            frames[3],
+            (SpeechStart(timestamp=frames[3].timestamp),),
+        )
+        == ()
+    )
+    assert (
+        assembler.process(
+            frames[4],
+            (SpeechEnd(timestamp=frames[4].timestamp),),
+        )
+        == ()
+    )
+    assert assembler.process(frames[5], ()) == ()
+
+    result = assembler.process(frames[6], ())
 
     # Assert
     assert len(result) == 1
 
     segment = result[0]
 
-    expected_frames = [
-        speech_start_frame,
-        speech_end_frame,
-        *post_roll_frames,
-    ]
-
-    expected_audio = np.concatenate(
-        [frame.audio for frame in expected_frames],
-        axis=0,
-    )
-
-    assert segment.timestamp == speech_start_frame.timestamp
-    assert segment.duration == (len(expected_frames) * PROCESSING_FRAME_DURATION_SECONDS)
-
+    assert segment.timestamp == frames[0].timestamp
+    assert segment.duration == len(frames) * PROCESSING_FRAME_DURATION_SECONDS
     np.testing.assert_array_equal(
         segment.audio,
-        expected_audio,
+        np.concatenate([frame.audio for frame in frames], axis=0),
+    )
+
+
+def test_resumed_speech_end_receives_fresh_configured_post_roll() -> None:
+    # Arrange
+    assembler = SpeechSegmentAssemblerImpl(
+        settings=create_settings(
+            pre_roll_ms=0,
+            post_roll_ms=100,
+        ),
+    )
+
+    frames = [create_frame(index) for index in range(11)]
+
+    # Act
+    assert (
+        assembler.process(
+            frames[0],
+            (SpeechStart(timestamp=frames[0].timestamp),),
+        )
+        == ()
+    )
+    assert (
+        assembler.process(
+            frames[1],
+            (SpeechEnd(timestamp=frames[1].timestamp),),
+        )
+        == ()
+    )
+    assert assembler.process(frames[2], ()) == ()
+    assert assembler.process(frames[3], ()) == ()
+    assert (
+        assembler.process(
+            frames[4],
+            (SpeechStart(timestamp=frames[4].timestamp),),
+        )
+        == ()
+    )
+    assert (
+        assembler.process(
+            frames[5],
+            (SpeechEnd(timestamp=frames[5].timestamp),),
+        )
+        == ()
+    )
+
+    for frame in frames[6:10]:
+        assert assembler.process(frame, ()) == ()
+
+    result = assembler.process(frames[10], ())
+
+    # Assert
+    assert len(result) == 1
+    assert result[0].duration == len(frames) * PROCESSING_FRAME_DURATION_SECONDS
+
+
+def test_resumed_speech_respects_max_duration() -> None:
+    # Arrange
+    assembler = SpeechSegmentAssemblerImpl(
+        settings=create_settings(
+            pre_roll_ms=0,
+            post_roll_ms=200,
+            target_duration_seconds=1,
+            max_duration_seconds=1,
+        ),
+    )
+
+    frames = [create_frame(index) for index in range(50)]
+
+    # Act
+    results: list[SpeechSegment] = []
+
+    results.extend(
+        assembler.process(
+            frames[0],
+            (SpeechStart(timestamp=frames[0].timestamp),),
+        ),
+    )
+
+    for frame in frames[1:44]:
+        results.extend(assembler.process(frame, ()))
+
+    results.extend(
+        assembler.process(
+            frames[44],
+            (SpeechEnd(timestamp=frames[44].timestamp),),
+        ),
+    )
+    results.extend(
+        assembler.process(
+            frames[45],
+            (SpeechStart(timestamp=frames[45].timestamp),),
+        ),
+    )
+
+    for frame in frames[46:]:
+        results.extend(assembler.process(frame, ()))
+
+    # Assert
+    assert len(results) == 1
+
+    segment = results[0]
+
+    assert segment.duration == 1.0
+    np.testing.assert_array_equal(
+        segment.audio,
+        np.concatenate([frame.audio for frame in frames], axis=0),
     )
 
 

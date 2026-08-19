@@ -49,7 +49,7 @@ class SpeechSegmentAssemblerImpl:
         if self._state is _AssemblerState.SPEAKING:
             return self._process_speaking(frame, events)
 
-        return self._process_post_roll(frame)
+        return self._process_post_roll(frame, events)
 
     def reset(self) -> None:
         self._clear_state()
@@ -114,8 +114,24 @@ class SpeechSegmentAssemblerImpl:
     def _process_post_roll(
         self,
         frame: ProcessingAudioFrame,
+        events: tuple[SpeechStart | SpeechEnd, ...],
     ) -> tuple[SpeechSegment, ...]:
         self._segment_frames.append(frame)
+
+        speech_start = next(
+            (event for event in events if isinstance(event, SpeechStart)),
+            None,
+        )
+
+        if speech_start is not None:
+            self._post_roll_frames = 0
+            self._state = _AssemblerState.SPEAKING
+
+            if len(self._segment_frames) >= self._max_segment_frames():
+                return self._complete_segment(continue_speaking=True)
+
+            return ()
+
         self._post_roll_frames += 1
 
         required_frames = self._settings.post_roll_ms // PROCESSING_FRAME_DURATION_MS

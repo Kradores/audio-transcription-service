@@ -18,10 +18,10 @@ audio:
     channels: 1
 
   segmentation:
-    pre_roll_ms: 200
-    post_roll_ms: 200
+    pre_roll_ms: 60
+    post_roll_ms: 60
     target_duration_seconds: 3
-    max_duration_seconds: 5
+    max_duration_seconds: 10
 
 transcription:
   queue_capacity: 10
