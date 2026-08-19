@@ -278,3 +278,50 @@ single worker cannot maintain the required throughput.
 
 The capture transport remains responsible for buffering native audio frames.
 It is not used as the primary buffering mechanism for transcription latency.
+
+
+## Windows default-output recovery
+
+The Windows `PyAudioCapture` implementation follows the current Windows
+default output device automatically.
+
+Default render-device changes are detected through a replaceable
+`AudioDeviceMonitor`. The production implementation uses Windows Core Audio
+endpoint notifications through `pycaw`.
+
+```text
+Windows default output changes
+        │
+        ▼
+WindowsAudioDeviceMonitor
+        │
+        │ lightweight notification
+        ▼
+PyAudioCapture
+        │
+        ├── close old stream
+        ├── terminate old PyAudio instance
+        ├── signal capture discontinuity
+        ├── create fresh PyAudio instance
+        ├── rediscover default WASAPI loopback
+        └── open new stream
+        │
+        ▼
+frame delivery resumes
+
+`PyAudioCapture` remains the owner of native audio-device discovery, stream
+lifecycle, and recovery. The device monitor only reports that the Windows
+default output changed.
+PyAudio device indexes are transient and are not treated as persistent device
+identities.
+If Windows temporarily has no usable default output endpoint, capture remains
+alive and retries according to the existing recovery policy.
+Recovery does not guarantee gapless audio across an output-device change.
+Windows may itself take several seconds to transition between endpoints.
+Audio unavailable while Windows is performing that transition cannot be
+captured. Once a usable default endpoint becomes available, capture follows
+it automatically and processing resumes on the existing monotonic timeline.
+A successful recovery creates a capture discontinuity. Before recovered audio
+is processed, SpeechPipeline resets the normalizer, VAD, and speech segment
+assembler so that state from the previous capture continuity domain cannot
+cross into the new one.

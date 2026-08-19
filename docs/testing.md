@@ -221,3 +221,44 @@ The last point is particularly important because we now have a real regression c
 frames_dropped = 0
 ```
 for the controlled workload.
+
+
+### Windows default-output recovery
+
+Default-output recovery is tested at multiple boundaries.
+
+Unit tests verify:
+
+- Windows audio-device monitor lifecycle;
+- filtering for the relevant default render endpoint change;
+- delivery of the endpoint-change notification;
+- capture recovery when the default output changes;
+- PyAudio reinitialization and fresh device discovery;
+- recovery coalescing when multiple recovery signals occur;
+- downstream discontinuity signaling;
+- continued retry when no usable default loopback is immediately available.
+
+Real-hardware validation verifies behavior that cannot be represented reliably
+through mocks alone.
+
+The recovery path has been validated by switching the Windows default output
+in both directions between speakers and Bluetooth headphones with different
+native sample rates.
+
+The expected result is:
+
+- the application remains running;
+- the new default WASAPI loopback endpoint is selected;
+- capture resumes;
+- processing state is reset at the discontinuity;
+- transcription and persistence continue;
+- shutdown remains clean.
+
+The test does not require zero audio loss during the Windows device transition.
+
+Windows may take several seconds to remove, discover, activate, and select
+audio endpoints. Audio unavailable during that operating-system transition is
+outside the capture recovery guarantee.
+
+The important invariant is that once Windows exposes a usable default output
+endpoint, the application recovers automatically without restart.

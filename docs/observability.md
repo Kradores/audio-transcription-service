@@ -46,14 +46,24 @@ available at `DEBUG` level for controlled diagnostic runs.
 The capture boundary logs:
 
 - capture started;
-- selected output device;
-- recovery started;
+- selected output device, including native channel count and sample rate;
+- native capture-frame format;
+- Windows audio-device monitor started and stopped;
+- Windows default output endpoint changes;
+- default-output change signals received by capture;
+- recovery started, including the recovery reason;
 - capture recovered;
 - device becoming inactive;
-- individual dropped-frame events when the bounded transport overflows;
+- dropped-frame events when the bounded transport overflows;
 - capture stopped with the total dropped-frame count.
 
-Capture discontinuities are also surfaced to `SpeechPipeline`, which logs the
+Capture recovery may be triggered either because the current stream becomes
+unusable or because Windows reports that the default output endpoint changed.
+
+The latter is important because the old loopback stream may remain active even
+though Windows is now routing audio to another endpoint.
+
+Capture discontinuities are surfaced to `SpeechPipeline`, which logs the
 processing-state reset.
 
 ### Speech pipeline
@@ -127,6 +137,44 @@ Interpretation:
 Capture discontinuities and dropped frames must be considered when comparing
 these stages because a discontinuity intentionally resets downstream state
 and discards incomplete speech state.
+
+### Device-change interpretation
+
+A timestamp gap around a Windows output-device change does not by itself
+indicate capture failure.
+
+Windows may require several seconds to transition between output endpoints.
+During that interval there may be no usable default endpoint from which the
+application can capture audio.
+
+For recovery diagnostics, distinguish:
+
+```text
+Windows device-transition interval
+        ↓
+default endpoint becomes available
+        ↓
+capture recovery
+        ↓
+frame delivery resumes
+```
+The application's recovery behavior should therefore be evaluated from the
+point at which a usable default endpoint becomes available rather than by
+assuming that the operating-system device switch is instantaneous.
+A successful recovery should be visible as:
+```text
+default audio output changed
+        ↓
+capture default output change signaled
+        ↓
+capture recovery started
+        ↓
+new capture device selected
+        ↓
+capture recovered
+        ↓
+capture discontinuity detected; processing state reset
+```
 
 ## Deliberately not implemented yet
 

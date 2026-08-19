@@ -7,11 +7,13 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from queue import Full, Queue
 from threading import Lock
+from typing import Protocol
 
 import numpy as np
 import pyaudiowpatch
 
 from app.audio.contracts import AudioFormat, AudioFrame
+from app.audio.device_monitor import AudioDeviceMonitor
 from app.audio.protocols import AudioCapture
 
 type Sleep = Callable[[float], Awaitable[None]]
@@ -20,6 +22,40 @@ RECOVERY_MAX_DELAY_SECONDS = 5.0
 RECOVERY_MONITOR_INTERVAL_SECONDS = 0.1
 
 logger = logging.getLogger(__name__)
+
+
+class PyAudioFactory(Protocol):
+    """Create fresh PyAudio instances for capture sessions."""
+
+    def create(self) -> pyaudiowpatch.PyAudio:
+        """Create a fresh PyAudio instance."""
+
+
+class PyAudioFactoryImpl:
+    """Production PyAudio factory."""
+
+    def create(self) -> pyaudiowpatch.PyAudio:
+        return pyaudiowpatch.PyAudio()
+
+
+class WasapiLoopbackDeviceProviderFactory(Protocol):
+    """Create a loopback-device provider for a PyAudio instance."""
+
+    def create(
+        self,
+        audio: pyaudiowpatch.PyAudio,
+    ) -> WasapiLoopbackDeviceProvider:
+        """Create a provider bound to the supplied PyAudio instance."""
+
+
+class WasapiLoopbackDeviceProviderFactoryImpl:
+    """Production loopback-device-provider factory."""
+
+    def create(
+        self,
+        audio: pyaudiowpatch.PyAudio,
+    ) -> WasapiLoopbackDeviceProvider:
+        return WasapiLoopbackDeviceProvider(audio)
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,42 +218,65 @@ class WasapiAudioFrameFactory:
 class PyAudioCapture(AudioCapture):
     def __init__(
         self,
-        audio: pyaudiowpatch.PyAudio,
-        device_provider: WasapiLoopbackDeviceProvider,
+        audio_factory: PyAudioFactory,
+        device_provider_factory: WasapiLoopbackDeviceProviderFactory,
+        device_monitor: AudioDeviceMonitor,
         transport: QueuedAudioCapture,
         sleep: Sleep = asyncio.sleep,
     ) -> None:
-        self._audio = audio
-        self._device_provider = device_provider
+        self._audio_factory = audio_factory
+        self._device_provider_factory = device_provider_factory
+        self._device_monitor = device_monitor
         self._transport = transport
+        self._sleep = sleep
+
+        self._audio: pyaudiowpatch.PyAudio | None = None
+        self._device_provider: WasapiLoopbackDeviceProvider | None = None
         self._format: AudioFormat | None = None
         self._stream: pyaudiowpatch.Stream | None = None
+
         self._lifecycle_task: asyncio.Task[None] | None = None
+        self._event_loop: asyncio.AbstractEventLoop | None = None
+        self._device_change_event = asyncio.Event()
+
         self._started = False
         self._capture_timestamp_origin: float | None = None
-        self._sleep = sleep
         self._discontinuity_handler: Callable[[], None] | None = None
         self._recovery_active = False
         self._capture_frame_duration_logged = False
+
+        self._device_monitor.set_change_handler(
+            self._handle_default_output_changed,
+        )
 
     async def start(self) -> None:
         if self._started:
             return
 
         self._started = True
+        self._event_loop = asyncio.get_running_loop()
+
         self._capture_timestamp_origin = None
         self._recovery_active = False
         self._capture_frame_duration_logged = False
+        self._device_change_event.clear()
+
         await self._transport.start()
 
         try:
-            await self._open_stream()
-        except LookupError:
-            pass
+            self._device_monitor.start()
+
+            with contextlib.suppress(LookupError):
+                await self._open_fresh_stream()
+
         except Exception:
             self._started = False
+            self._event_loop = None
+
+            self._device_monitor.stop()
+            self._dispose_audio_session()
+
             await self._transport.stop()
-            self._audio.terminate()
             raise
 
         logger.info("audio capture started")
@@ -233,23 +292,27 @@ class PyAudioCapture(AudioCapture):
 
         self._started = False
 
+        self._device_monitor.stop()
+        self._event_loop = None
+
         task = self._lifecycle_task
         self._lifecycle_task = None
 
         if task is not None:
             task.cancel()
+
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
-        self._close_stream()
-
-        self._audio.terminate()
+        self._dispose_audio_session()
 
         stats = self._transport.stats()
+
         logger.info(
             "audio capture stopped frames_dropped=%d",
             stats.frames_dropped,
         )
+
         await self._transport.stop()
 
     def frames(self) -> AsyncIterator[AudioFrame]:
@@ -267,40 +330,52 @@ class PyAudioCapture(AudioCapture):
 
         self._discontinuity_handler = handler
 
-    async def _open_stream(self) -> None:
-        device = self._device_provider.get_default()
+    async def _open_fresh_stream(self) -> None:
+        self._dispose_audio_session()
 
-        logger.info(
-            "audio capture device selected name=%r index=%d channels=%d sample_rate=%d",
-            device.name,
-            device.index,
-            device.channels,
-            int(device.sample_rate),
-        )
-
-        audio_format = AudioFormat(
-            sample_rate=int(device.sample_rate),
-            channels=device.channels,
-            sample_type="int16",
-        )
-
-        stream = self._audio.open(
-            rate=int(device.sample_rate),
-            channels=device.channels,
-            format=pyaudiowpatch.paInt16,
-            input=True,
-            input_device_index=device.index,
-            frames_per_buffer=0,
-            start=False,
-            stream_callback=self._on_audio,
-        )
+        audio = self._audio_factory.create()
+        device_provider = self._device_provider_factory.create(audio)
 
         try:
-            stream.start_stream()
+            device = device_provider.get_default()
+
+            logger.info(
+                "audio capture device selected name=%r index=%d channels=%d sample_rate=%d",
+                device.name,
+                device.index,
+                device.channels,
+                int(device.sample_rate),
+            )
+
+            audio_format = AudioFormat(
+                sample_rate=int(device.sample_rate),
+                channels=device.channels,
+                sample_type="int16",
+            )
+
+            stream = audio.open(
+                rate=int(device.sample_rate),
+                channels=device.channels,
+                format=pyaudiowpatch.paInt16,
+                input=True,
+                input_device_index=device.index,
+                frames_per_buffer=0,
+                start=False,
+                stream_callback=self._on_audio,
+            )
+
+            try:
+                stream.start_stream()
+            except Exception:
+                stream.close()
+                raise
+
         except Exception:
-            stream.close()
+            audio.terminate()
             raise
 
+        self._audio = audio
+        self._device_provider = device_provider
         self._format = audio_format
         self._stream = stream
 
@@ -315,6 +390,18 @@ class PyAudioCapture(AudioCapture):
             stream.stop_stream()
         finally:
             stream.close()
+
+    def _dispose_audio_session(self) -> None:
+        self._close_stream()
+
+        audio = self._audio
+
+        self._audio = None
+        self._device_provider = None
+        self._format = None
+
+        if audio is not None:
+            audio.terminate()
 
     def _create_frame(
         self,
@@ -378,15 +465,37 @@ class PyAudioCapture(AudioCapture):
         delay = RECOVERY_INITIAL_DELAY_SECONDS
 
         while self._started:
+            if self._device_change_event.is_set():
+                self._device_change_event.clear()
+
+                self._begin_recovery(
+                    reason="default_output_changed",
+                )
+
+            stream = self._stream
+
+            if stream is not None and not stream.is_active():
+                logger.warning(
+                    "audio capture device became inactive",
+                )
+
+                self._begin_recovery(
+                    reason="stream_inactive",
+                )
+
             if self._stream is None:
                 if not self._recovery_active:
-                    logger.warning("audio capture recovery started")
+                    logger.warning(
+                        "audio capture recovery started reason=device_unavailable",
+                    )
                     self._recovery_active = True
 
                 try:
-                    await self._open_stream()
+                    await self._open_fresh_stream()
+
                 except LookupError:
-                    await asyncio.sleep(delay)
+                    await self._sleep(delay)
+
                     delay = min(
                         delay * 2,
                         RECOVERY_MAX_DELAY_SECONDS,
@@ -394,25 +503,54 @@ class PyAudioCapture(AudioCapture):
                     continue
 
                 delay = RECOVERY_INITIAL_DELAY_SECONDS
+
                 if self._recovery_active:
                     logger.info("audio capture recovered")
                     self._recovery_active = False
 
-            stream = self._stream
+                # Ignore duplicate/default-device notifications that arrived
+                # while the capture session was being rebuilt.
+                self._device_change_event.clear()
 
-            if stream is None:
-                continue
-
-            if not stream.is_active():
-                logger.warning("audio capture device became inactive")
-                self._close_stream()
-
-                handler = self._discontinuity_handler
-                if handler is not None:
-                    handler()
-
-                continue
-
-            await asyncio.sleep(
+            await self._sleep(
                 RECOVERY_MONITOR_INTERVAL_SECONDS,
             )
+
+    def _handle_default_output_changed(
+        self,
+        endpoint_id: str | None,
+    ) -> None:
+        """Signal a default-output change from the monitor callback thread."""
+
+        logger.info(
+            "audio capture default output change signaled endpoint_id=%r",
+            endpoint_id,
+        )
+
+        loop = self._event_loop
+
+        if loop is None:
+            return
+
+        loop.call_soon_threadsafe(
+            self._device_change_event.set,
+        )
+
+    def _begin_recovery(
+        self,
+        *,
+        reason: str,
+    ) -> None:
+        if not self._recovery_active:
+            logger.warning(
+                "audio capture recovery started reason=%s",
+                reason,
+            )
+            self._recovery_active = True
+
+            handler = self._discontinuity_handler
+
+            if handler is not None:
+                handler()
+
+        self._dispose_audio_session()

@@ -42,14 +42,12 @@ class _EndpointNotificationEnumerator(Protocol):
     def RegisterEndpointNotificationCallback(
         self,
         client: object,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def UnregisterEndpointNotificationCallback(
         self,
         client: object,
-    ) -> None:
-        ...
+    ) -> None: ...
 
 
 class WindowsAudioDeviceMonitor:
@@ -72,9 +70,7 @@ class WindowsAudioDeviceMonitor:
             return
 
         if self._handler is None:
-            raise RuntimeError(
-                "audio device change handler is not configured"
-            )
+            raise RuntimeError("audio device change handler is not configured")
 
         enumerator = self._create_enumerator()
         client = _NotificationClient(self._handler)

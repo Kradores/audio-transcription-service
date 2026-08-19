@@ -3,15 +3,20 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import pyaudiowpatch
 from faster_whisper import WhisperModel  # type: ignore[import-untyped]
 from silero_vad import VADIterator, load_silero_vad
 
 from app.application import Application
-from app.audio.capture import PyAudioCapture, QueuedAudioCapture, WasapiLoopbackDeviceProvider
+from app.audio.capture import (
+    PyAudioCapture,
+    PyAudioFactoryImpl,
+    QueuedAudioCapture,
+    WasapiLoopbackDeviceProviderFactoryImpl,
+)
 from app.audio.normalizer import AudioNormalizerImpl
 from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.audio.resampler import SoXRResamplerFactory
+from app.audio.windows_device_monitor import WindowsAudioDeviceMonitor
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
 from app.core.config.models import (
@@ -81,13 +86,15 @@ def create_application(
 def create_capture(queue_capacity: int) -> AudioCapture:
     """Create the configured audio capture."""
 
-    audio = pyaudiowpatch.PyAudio()
-    device_provider = WasapiLoopbackDeviceProvider(audio)
+    audio_factory = PyAudioFactoryImpl()
+    device_provider_factory = WasapiLoopbackDeviceProviderFactoryImpl()
+    device_monitor = WindowsAudioDeviceMonitor()
     transport = QueuedAudioCapture(max_queue_size=queue_capacity)
 
     return PyAudioCapture(
-        audio=audio,
-        device_provider=device_provider,
+        audio_factory=audio_factory,
+        device_provider_factory=device_provider_factory,
+        device_monitor=device_monitor,
         transport=transport,
     )
 

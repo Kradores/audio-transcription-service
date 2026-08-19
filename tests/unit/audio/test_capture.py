@@ -10,17 +10,85 @@ import pytest
 
 from app.audio.capture import (
     PyAudioCapture,
+    PyAudioFactory,
     QueuedAudioCapture,
     WasapiAudioFrameFactory,
     WasapiLoopbackDevice,
+    WasapiLoopbackDeviceProvider,
+    WasapiLoopbackDeviceProviderFactory,
 )
 from app.audio.contracts import AudioFormat, AudioFrame
+from app.audio.device_monitor import AudioDeviceMonitor
+from app.audio.protocols import AudioCapture
 from app.audio.transport import AudioFrameTransport
 from tests.unit.audio.helpers import (
     consume_one,
     consume_stream,
     create_frame,
 )
+
+
+class FakePyAudioFactory:
+    def __init__(
+        self,
+        *instances: pyaudiowpatch.PyAudio,
+    ) -> None:
+        self._instances = list(instances)
+        self.created: list[pyaudiowpatch.PyAudio] = []
+
+    def create(self) -> pyaudiowpatch.PyAudio:
+        if not self._instances:
+            raise AssertionError("No fake PyAudio instance available")
+
+        audio = self._instances.pop(0)
+        self.created.append(audio)
+
+        return audio
+
+
+class FakeDeviceProviderFactory:
+    def __init__(self, *providers: WasapiLoopbackDeviceProvider) -> None:
+        self._providers = list(providers)
+        self.created_with: list[pyaudiowpatch.PyAudio] = []
+
+    def create(
+        self,
+        audio: pyaudiowpatch.PyAudio,
+    ) -> WasapiLoopbackDeviceProvider:
+        self.created_with.append(audio)
+
+        if not self._providers:
+            raise AssertionError("No fake device provider available")
+
+        return self._providers.pop(0)
+
+
+class FakeAudioDeviceMonitor:
+    def __init__(self) -> None:
+        self.started = False
+        self.stopped = False
+        self._handler: Callable[[str | None], None] | None = None
+
+    def set_change_handler(
+        self,
+        handler: Callable[[str | None], None],
+    ) -> None:
+        self._handler = handler
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.stopped = True
+
+    def signal_change(
+        self,
+        endpoint_id: str = "endpoint-123",
+    ) -> None:
+        if self._handler is None:
+            raise AssertionError("change handler was not registered")
+
+        self._handler(endpoint_id)
 
 
 class FakeAudioCapture:
@@ -107,15 +175,36 @@ class BlockingSleep:
         await self.release.wait()
 
 
-recorded_delays: list[float] = []
-
-
-async def immediate_sleep(delay: float) -> None:
-    recorded_delays.append(delay)
-
-
 async def yielding_sleep(delay: float) -> None:
     await asyncio.sleep(0)
+
+
+def create_audio_capture(
+    *,
+    audio_factory: PyAudioFactory | None = None,
+    device_provider_factory: WasapiLoopbackDeviceProviderFactory | None = None,
+    device_monitor: AudioDeviceMonitor | None = None,
+    transport: QueuedAudioCapture | None = None,
+) -> AudioCapture:
+
+    if audio_factory is None:
+        audio_factory = MagicMock()
+
+    if device_provider_factory is None:
+        device_provider_factory = MagicMock()
+
+    if device_monitor is None:
+        device_monitor = MagicMock()
+
+    if transport is None:
+        transport = MagicMock()
+
+    return PyAudioCapture(
+        audio_factory=audio_factory,
+        device_provider_factory=device_provider_factory,
+        device_monitor=device_monitor,
+        transport=transport,
+    )
 
 
 @pytest.mark.anyio
@@ -205,13 +294,16 @@ async def test_start_uses_injected_device_provider() -> None:
     device_provider = MagicMock()
     device_provider.get_default.return_value = device
 
-    transport = QueuedAudioCapture(max_queue_size=4)
     audio.open.return_value = stream
 
+    monitor = FakeAudioDeviceMonitor()
+
     capture = PyAudioCapture(
-        audio=audio,
-        device_provider=device_provider,
-        transport=transport,
+        audio_factory=FakePyAudioFactory(audio),
+        device_provider_factory=FakeDeviceProviderFactory(device_provider),
+        device_monitor=monitor,
+        transport=QueuedAudioCapture(max_queue_size=4),
+        sleep=yielding_sleep,
     )
 
     try:
@@ -231,12 +323,14 @@ async def test_start_enters_recovery_when_no_loopback_device_is_available() -> N
     device_provider = MagicMock()
     device_provider.get_default.side_effect = LookupError
 
-    transport = QueuedAudioCapture(max_queue_size=4)
+    monitor = FakeAudioDeviceMonitor()
 
     capture = PyAudioCapture(
-        audio=audio,
-        device_provider=device_provider,
-        transport=transport,
+        audio_factory=FakePyAudioFactory(audio),
+        device_provider_factory=FakeDeviceProviderFactory(device_provider),
+        device_monitor=monitor,
+        transport=QueuedAudioCapture(max_queue_size=4),
+        sleep=yielding_sleep,
     )
 
     await capture.start()
@@ -276,10 +370,14 @@ async def test_start_opens_default_wasapi_loopback_stream(
     fake_transport.start = AsyncMock()
     fake_transport.stop = AsyncMock()
 
+    monitor = FakeAudioDeviceMonitor()
+
     capture = PyAudioCapture(
-        audio=audio,
-        device_provider=fake_device_provider,
+        audio_factory=FakePyAudioFactory(audio),
+        device_provider_factory=FakeDeviceProviderFactory(fake_device_provider),
+        device_monitor=monitor,
         transport=fake_transport,
+        sleep=yielding_sleep,
     )
 
     try:
@@ -333,10 +431,14 @@ async def test_start_uses_loopback_device_format(
     fake_transport.start = AsyncMock()
     fake_transport.stop = AsyncMock()
 
+    monitor = FakeAudioDeviceMonitor()
+
     capture = PyAudioCapture(
-        audio=audio,
-        device_provider=fake_device_provider,
+        audio_factory=FakePyAudioFactory(audio),
+        device_provider_factory=FakeDeviceProviderFactory(fake_device_provider),
+        device_monitor=monitor,
         transport=fake_transport,
+        sleep=yielding_sleep,
     )
 
     try:
@@ -366,10 +468,14 @@ def test_audio_callback_creates_frame_with_capture_relative_timestamp() -> None:
     fake_device_provider = MagicMock()
     fake_transport = MagicMock()
 
+    monitor = FakeAudioDeviceMonitor()
+
     capture = PyAudioCapture(
-        audio=fake_audio,
-        device_provider=fake_device_provider,
+        audio_factory=FakePyAudioFactory(fake_audio),
+        device_provider_factory=FakeDeviceProviderFactory(fake_device_provider),
+        device_monitor=monitor,
         transport=fake_transport,
+        sleep=yielding_sleep,
     )
 
     capture._format = AudioFormat(
@@ -409,10 +515,14 @@ def test_pyaudio_capture_dependency_boundary() -> None:
     fake_device_provider = MagicMock()
     fake_transport = MagicMock()
 
+    monitor = FakeAudioDeviceMonitor()
+
     capture = PyAudioCapture(
-        audio=fake_audio,
-        device_provider=fake_device_provider,
+        audio_factory=FakePyAudioFactory(fake_audio),
+        device_provider_factory=FakeDeviceProviderFactory(fake_device_provider),
+        device_monitor=monitor,
         transport=fake_transport,
+        sleep=yielding_sleep,
     )
 
     assert capture is not None
@@ -424,10 +534,14 @@ async def test_callback_frame_is_received_by_async_consumer() -> None:
     device_provider = MagicMock()
     transport = QueuedAudioCapture(max_queue_size=4)
 
+    monitor = FakeAudioDeviceMonitor()
+
     capture = PyAudioCapture(
-        audio=audio,
-        device_provider=device_provider,
+        audio_factory=FakePyAudioFactory(audio),
+        device_provider_factory=FakeDeviceProviderFactory(device_provider),
+        device_monitor=monitor,
         transport=transport,
+        sleep=yielding_sleep,
     )
 
     capture._format = AudioFormat(
@@ -494,10 +608,14 @@ async def test_stop_terminates_capture_stream() -> None:
     device_provider = MagicMock()
     device_provider.get_default.side_effect = LookupError
 
+    monitor = FakeAudioDeviceMonitor()
+
     capture = PyAudioCapture(
-        audio=audio,
-        device_provider=device_provider,
+        audio_factory=FakePyAudioFactory(audio),
+        device_provider_factory=FakeDeviceProviderFactory(device_provider),
+        device_monitor=monitor,
         transport=transport,
+        sleep=yielding_sleep,
     )
 
     await capture.start()
@@ -528,10 +646,14 @@ async def test_set_discontinuity_handler_after_start_raises() -> None:
     device_provider = MagicMock()
     device_provider.get_default.return_value = device
 
+    monitor = FakeAudioDeviceMonitor()
+
     capture = PyAudioCapture(
-        audio=MagicMock(),
-        device_provider=device_provider,
+        audio_factory=FakePyAudioFactory(MagicMock()),
+        device_provider_factory=FakeDeviceProviderFactory(device_provider),
+        device_monitor=monitor,
         transport=transport,
+        sleep=yielding_sleep,
     )
 
     await capture.start()
@@ -549,10 +671,14 @@ async def test_set_discontinuity_handler_after_start_raises() -> None:
 def test_set_discontinuity_handler_before_start() -> None:
     def handler() -> None: ...
 
+    monitor = FakeAudioDeviceMonitor()
+
     capture = PyAudioCapture(
-        audio=MagicMock(),
-        device_provider=MagicMock(),
-        transport=MagicMock(),
+        audio_factory=FakePyAudioFactory(MagicMock()),
+        device_provider_factory=FakeDeviceProviderFactory(MagicMock()),
+        device_monitor=monitor,
+        transport=QueuedAudioCapture(max_queue_size=4),
+        sleep=yielding_sleep,
     )
 
     capture.set_discontinuity_handler(handler)
@@ -562,7 +688,6 @@ def test_set_discontinuity_handler_before_start() -> None:
 
 @pytest.mark.anyio
 async def test_inactive_running_stream_invokes_discontinuity_handler() -> None:
-    # Arrange
     transport = QueuedAudioCapture(max_queue_size=4)
 
     device = WasapiLoopbackDevice(
@@ -575,14 +700,17 @@ async def test_inactive_running_stream_invokes_discontinuity_handler() -> None:
     first_stream = FakeStream(active=False)
     recovered_stream = FakeStream(active=True)
 
-    audio = MagicMock()
-    audio.open.side_effect = [
-        first_stream,
-        recovered_stream,
-    ]
+    first_audio = MagicMock()
+    second_audio = MagicMock()
 
-    device_provider = MagicMock()
-    device_provider.get_default.return_value = device
+    first_audio.open.return_value = first_stream
+    second_audio.open.return_value = recovered_stream
+
+    first_provider = MagicMock()
+    first_provider.get_default.return_value = device
+
+    second_provider = MagicMock()
+    second_provider.get_default.return_value = device
 
     discontinuity_event = asyncio.Event()
     discontinuities: list[int] = []
@@ -592,15 +720,21 @@ async def test_inactive_running_stream_invokes_discontinuity_handler() -> None:
         discontinuity_event.set()
 
     capture = PyAudioCapture(
-        audio=audio,
-        device_provider=device_provider,
+        audio_factory=FakePyAudioFactory(
+            first_audio,
+            second_audio,
+        ),
+        device_provider_factory=FakeDeviceProviderFactory(
+            first_provider,
+            second_provider,
+        ),
+        device_monitor=FakeAudioDeviceMonitor(),
         transport=transport,
         sleep=yielding_sleep,
     )
 
     capture.set_discontinuity_handler(on_discontinuity)
 
-    # Act
     await capture.start()
 
     try:
@@ -609,34 +743,51 @@ async def test_inactive_running_stream_invokes_discontinuity_handler() -> None:
             timeout=1.0,
         )
 
-        # Assert
+        for _ in range(20):
+            if capture._stream is recovered_stream:
+                break
+
+            await asyncio.sleep(0)
+
         assert discontinuities == [1]
+
         assert first_stream.stop_called
         assert first_stream.close_called
+        first_audio.terminate.assert_called_once_with()
+
         assert recovered_stream.start_called
-        assert audio.open.call_count == 2
         assert capture._stream is recovered_stream
+
     finally:
         await capture.stop()
 
 
 @pytest.mark.anyio
 async def test_initial_lookup_error_does_not_invoke_discontinuity_handler() -> None:
-    # Arrange
-    transport = QueuedAudioCapture(max_queue_size=4)
+    first_audio = MagicMock()
+    second_audio = MagicMock()
 
-    audio = MagicMock()
-    device_provider = MagicMock()
-    device_provider.get_default.side_effect = LookupError
+    first_provider = MagicMock()
+    first_provider.get_default.side_effect = LookupError
 
-    sleep = AsyncMock()
+    second_provider = MagicMock()
+    second_provider.get_default.side_effect = LookupError
+
+    sleep = BlockingSleep()
 
     discontinuities: list[int] = []
 
     capture = PyAudioCapture(
-        audio=audio,
-        device_provider=device_provider,
-        transport=transport,
+        audio_factory=FakePyAudioFactory(
+            first_audio,
+            second_audio,
+        ),
+        device_provider_factory=FakeDeviceProviderFactory(
+            first_provider,
+            second_provider,
+        ),
+        device_monitor=FakeAudioDeviceMonitor(),
+        transport=QueuedAudioCapture(max_queue_size=4),
         sleep=sleep,
     )
 
@@ -644,15 +795,21 @@ async def test_initial_lookup_error_does_not_invoke_discontinuity_handler() -> N
         lambda: discontinuities.append(1),
     )
 
-    # Act
     await capture.start()
 
-    await asyncio.sleep(0)
+    try:
+        await asyncio.wait_for(
+            sleep.called.wait(),
+            timeout=1.0,
+        )
 
-    # Assert
-    assert discontinuities == []
+        assert discontinuities == []
 
-    await capture.stop()
+        first_audio.terminate.assert_called_once_with()
+        second_audio.terminate.assert_called_once_with()
+
+    finally:
+        await capture.stop()
 
 
 @pytest.mark.anyio
@@ -660,10 +817,14 @@ async def test_close_stream_clears_stream_reference() -> None:
     # Arrange
     stream = FakeStream(active=False)
 
+    monitor = FakeAudioDeviceMonitor()
+
     capture = PyAudioCapture(
-        audio=MagicMock(),
-        device_provider=MagicMock(),
-        transport=MagicMock(),
+        audio_factory=FakePyAudioFactory(MagicMock()),
+        device_provider_factory=FakeDeviceProviderFactory(MagicMock()),
+        device_monitor=monitor,
+        transport=QueuedAudioCapture(max_queue_size=4),
+        sleep=yielding_sleep,
     )
     capture._stream = stream
 
@@ -681,10 +842,14 @@ def test_capture_timestamp_origin_survives_stream_recovery() -> None:
     submit = MagicMock()
     fake_transport.submit = submit
 
+    monitor = FakeAudioDeviceMonitor()
+
     capture = PyAudioCapture(
-        audio=MagicMock(spec=pyaudiowpatch.PyAudio),
-        device_provider=MagicMock(),
+        audio_factory=FakePyAudioFactory(MagicMock()),
+        device_provider_factory=FakeDeviceProviderFactory(MagicMock()),
+        device_monitor=monitor,
         transport=fake_transport,
+        sleep=yielding_sleep,
     )
 
     capture._format = AudioFormat(
@@ -726,3 +891,219 @@ def test_capture_timestamp_origin_survives_stream_recovery() -> None:
     recovered_frame = submit.call_args_list[2].args[0]
 
     assert recovered_frame.timestamp == 1.0
+
+
+@pytest.mark.anyio
+async def test_start_starts_audio_device_monitor() -> None:
+    audio = MagicMock()
+
+    device = WasapiLoopbackDevice(
+        index=42,
+        name="Speakers [Loopback]",
+        channels=2,
+        sample_rate=48_000,
+    )
+
+    provider = MagicMock()
+    provider.get_default.return_value = device
+
+    stream = FakeStream(active=True)
+    audio.open.return_value = stream
+
+    monitor = FakeAudioDeviceMonitor()
+
+    capture = PyAudioCapture(
+        audio_factory=FakePyAudioFactory(audio),
+        device_provider_factory=FakeDeviceProviderFactory(provider),
+        device_monitor=monitor,
+        transport=QueuedAudioCapture(max_queue_size=4),
+        sleep=yielding_sleep,
+    )
+
+    try:
+        await capture.start()
+
+        assert monitor.started
+    finally:
+        await capture.stop()
+
+
+@pytest.mark.anyio
+async def test_stop_stops_audio_device_monitor() -> None:
+    audio = MagicMock()
+
+    provider = MagicMock()
+    provider.get_default.side_effect = LookupError
+
+    monitor = FakeAudioDeviceMonitor()
+
+    capture = PyAudioCapture(
+        audio_factory=FakePyAudioFactory(audio),
+        device_provider_factory=FakeDeviceProviderFactory(provider),
+        device_monitor=monitor,
+        transport=QueuedAudioCapture(max_queue_size=4),
+        sleep=yielding_sleep,
+    )
+
+    await capture.start()
+    await capture.stop()
+
+    assert monitor.stopped
+
+
+@pytest.mark.anyio
+async def test_default_output_change_recreates_pyaudio_and_stream() -> None:
+    first_audio = MagicMock()
+    second_audio = MagicMock()
+
+    first_stream = FakeStream(active=True)
+    second_stream = FakeStream(active=True)
+
+    first_audio.open.return_value = first_stream
+    second_audio.open.return_value = second_stream
+
+    first_device = WasapiLoopbackDevice(
+        index=16,
+        name="Headphones [Loopback]",
+        channels=2,
+        sample_rate=44_100,
+    )
+
+    second_device = WasapiLoopbackDevice(
+        index=10,
+        name="Speakers [Loopback]",
+        channels=2,
+        sample_rate=48_000,
+    )
+
+    first_provider = MagicMock()
+    first_provider.get_default.return_value = first_device
+
+    second_provider = MagicMock()
+    second_provider.get_default.return_value = second_device
+
+    audio_factory = FakePyAudioFactory(
+        first_audio,
+        second_audio,
+    )
+
+    provider_factory = FakeDeviceProviderFactory(
+        first_provider,
+        second_provider,
+    )
+
+    monitor = FakeAudioDeviceMonitor()
+
+    discontinuity = asyncio.Event()
+
+    capture = PyAudioCapture(
+        audio_factory=audio_factory,
+        device_provider_factory=provider_factory,
+        device_monitor=monitor,
+        transport=QueuedAudioCapture(max_queue_size=4),
+        sleep=yielding_sleep,
+    )
+
+    capture.set_discontinuity_handler(
+        discontinuity.set,
+    )
+
+    await capture.start()
+
+    try:
+        monitor.signal_change()
+
+        await asyncio.wait_for(
+            discontinuity.wait(),
+            timeout=1.0,
+        )
+
+        for _ in range(20):
+            if capture._stream is second_stream:
+                break
+
+            await asyncio.sleep(0)
+
+        assert capture._stream is second_stream
+
+        assert first_stream.stop_called
+        assert first_stream.close_called
+        first_audio.terminate.assert_called_once_with()
+
+        assert audio_factory.created == [
+            first_audio,
+            second_audio,
+        ]
+
+        assert provider_factory.created_with == [
+            first_audio,
+            second_audio,
+        ]
+
+        second_provider.get_default.assert_called_once_with()
+        assert second_stream.start_called
+
+    finally:
+        await capture.stop()
+
+
+@pytest.mark.anyio
+async def test_repeated_default_output_change_signals_coalesce() -> None:
+    first_audio = MagicMock()
+    second_audio = MagicMock()
+
+    first_stream = FakeStream(active=True)
+    second_stream = FakeStream(active=True)
+
+    first_audio.open.return_value = first_stream
+    second_audio.open.return_value = second_stream
+
+    device = WasapiLoopbackDevice(
+        index=42,
+        name="Device [Loopback]",
+        channels=2,
+        sample_rate=48_000,
+    )
+
+    first_provider = MagicMock()
+    first_provider.get_default.return_value = device
+
+    second_provider = MagicMock()
+    second_provider.get_default.return_value = device
+
+    audio_factory = FakePyAudioFactory(
+        first_audio,
+        second_audio,
+    )
+
+    monitor = FakeAudioDeviceMonitor()
+
+    capture = PyAudioCapture(
+        audio_factory=audio_factory,
+        device_provider_factory=FakeDeviceProviderFactory(
+            first_provider,
+            second_provider,
+        ),
+        device_monitor=monitor,
+        transport=QueuedAudioCapture(max_queue_size=4),
+        sleep=yielding_sleep,
+    )
+
+    await capture.start()
+
+    try:
+        monitor.signal_change()
+        monitor.signal_change()
+        monitor.signal_change()
+
+        for _ in range(20):
+            if capture._stream is second_stream:
+                break
+
+            await asyncio.sleep(0)
+
+        assert capture._stream is second_stream
+        assert len(audio_factory.created) == 2
+
+    finally:
+        await capture.stop()

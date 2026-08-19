@@ -1,7 +1,7 @@
 # ADR-038: Recover WASAPI Loopback Capture on Windows Default Output Device Changes
 
 ## Status
-Accepted
+Accepted — implemented and validated on real Windows audio hardware.
 
 ## Context
 The service captures system audio through a PyAudioWPatch WASAPI loopback stream resolved from the Windows default render device. Real-device testing showed that an open loopback stream is bound to the endpoint selected when the stream was created and does not automatically follow subsequent Windows default-output changes.
@@ -49,9 +49,9 @@ PyAudio device indexes will not be treated as stable device identities. They are
 
 The Windows Core Audio endpoint ID may be retained for observability but will not be mapped or persisted as a PyAudio index.
 
-## Consequences**
+## Consequences
 
-### Positive consequences:
+### Positive consequences
 
 - Capture automatically follows the Windows default output device.
 - No periodic device polling is required.
@@ -62,7 +62,7 @@ The Windows Core Audio endpoint ID may be retained for observability but will no
 - PyAudioWPatch remains replaceable behind the existing abstraction.
 - Recovery works even when the old stream remains active but is no longer the desired default endpoint.
 
-### Negative consequences:
+### Negative consequences
 
 - The project gains a Windows-specific Core Audio dependency, likely `pycaw`.
 - Capture lifecycle becomes somewhat more complex.
@@ -92,6 +92,43 @@ Not selected because PyAudioWPatch does not expose a supported Python-level path
 
 **No automatic recovery**  
 Rejected because changing output devices is normal desktop behavior and silently losing system-audio capture is unacceptable.
+
+## Implementation validation
+
+The decision has been implemented and validated with real Windows audio
+devices.
+
+Runtime testing verified automatic recovery in both directions between:
+
+- Realtek speakers using a 48 kHz WASAPI loopback endpoint;
+- Bluetooth headphones using a 44.1 kHz WASAPI loopback endpoint.
+
+In both directions:
+
+- Windows Core Audio reported the default render endpoint change;
+- the existing capture stream was closed;
+- PyAudio was fully reinitialized;
+- the new default WASAPI loopback endpoint was rediscovered;
+- capture resumed using the new device's native format;
+- downstream processing state was reset at the discontinuity boundary;
+- transcription and persistence continued after recovery;
+- the application remained alive;
+- shutdown remained clean.
+
+A default-output change is not expected to provide gapless capture.
+
+Windows itself may require several seconds to transition between output
+devices while endpoints disappear, become available, and the new default
+endpoint is selected. Audio produced during that operating-system-level
+transition may therefore be unavailable to the application.
+
+The recovery guarantee is:
+
+> Once Windows exposes a usable default output endpoint, capture automatically
+> follows it and resumes without requiring an application restart.
+
+The system does not attempt to synthesize, reconstruct, or bridge audio that
+was unavailable during the device transition.
 
 ## Testing requirements
 

@@ -83,9 +83,7 @@ class AudioNotificationClient(MMNotificationClient):
         new_state_id,
     ) -> None:
         print(
-            "DEVICE STATE CHANGED: "
-            f"device_id={device_id!r} "
-            f"state={new_state}({new_state_id})",
+            f"DEVICE STATE CHANGED: device_id={device_id!r} state={new_state}({new_state_id})",
             flush=True,
         )
 
@@ -120,8 +118,7 @@ class CaptureWorker:
                     continue
 
                 print(
-                    "\nWORKER: default-output change received "
-                    f"device_id={event.device_id!r}",
+                    f"\nWORKER: default-output change received device_id={event.device_id!r}",
                     flush=True,
                 )
 

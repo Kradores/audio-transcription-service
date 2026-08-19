@@ -93,9 +93,7 @@ class AudioNotificationClient(MMNotificationClient):
         new_state_id,
     ):
         print(
-            "DEVICE STATE CHANGED: "
-            f"device_id={device_id!r} "
-            f"state={new_state}({new_state_id})",
+            f"DEVICE STATE CHANGED: device_id={device_id!r} state={new_state}({new_state_id})",
             flush=True,
         )
 
