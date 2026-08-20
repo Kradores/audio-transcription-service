@@ -29,8 +29,14 @@ class FakeWindowsAudioDeviceMonitor(WindowsAudioDeviceMonitor):
     def __init__(
         self,
         enumerator: FakeEnumerator,
+        *,
+        flow: str = "eRender",
+        role: str = "eConsole",
     ) -> None:
-        super().__init__()
+        super().__init__(
+            flow=flow,
+            role=role,
+        )
         self._test_enumerator = enumerator
 
     def _create_enumerator(self) -> FakeEnumerator:
@@ -39,16 +45,26 @@ class FakeWindowsAudioDeviceMonitor(WindowsAudioDeviceMonitor):
 
 def create_monitor(
     enumerator: FakeEnumerator,
+    *,
+    flow: str = "eRender",
+    role: str = "eConsole",
 ) -> WindowsAudioDeviceMonitor:
-    return FakeWindowsAudioDeviceMonitor(enumerator)
+    return FakeWindowsAudioDeviceMonitor(
+        enumerator,
+        flow=flow,
+        role=role,
+    )
 
 
 def test_start_requires_change_handler() -> None:
-    monitor = WindowsAudioDeviceMonitor()
+    monitor = WindowsAudioDeviceMonitor(
+        flow="eRender",
+        role="eConsole",
+    )
 
     with pytest.raises(
         RuntimeError,
-        match="change handler is not configured",
+        match="audio device change handler is not configured",
     ):
         monitor.start()
 
@@ -99,7 +115,10 @@ def test_start_is_idempotent() -> None:
 
 
 def test_stop_before_start_is_harmless() -> None:
-    monitor = WindowsAudioDeviceMonitor()
+    monitor = WindowsAudioDeviceMonitor(
+        flow="eRender",
+        role="eConsole",
+    )
 
     monitor.stop()
 
@@ -183,6 +202,126 @@ def test_non_console_render_changes_are_ignored(
         flow,
         0,
         role,
+        0,
+        "endpoint-123",
+    )
+
+    assert received == []
+
+
+@pytest.mark.parametrize(
+    ("configured_flow", "configured_role"),
+    [
+        ("eRender", "eConsole"),
+        ("eCapture", "eConsole"),
+    ],
+)
+def test_matching_default_device_change_invokes_handler(
+    configured_flow: str,
+    configured_role: str,
+) -> None:
+    enumerator = FakeEnumerator()
+    received: list[str | None] = []
+
+    monitor = create_monitor(
+        enumerator,
+        flow=configured_flow,
+        role=configured_role,
+    )
+    monitor.set_change_handler(received.append)
+    monitor.start()
+
+    client = cast(
+        _NotificationClient,
+        enumerator.registered_client,
+    )
+
+    client.on_default_device_changed(
+        configured_flow,
+        0,
+        configured_role,
+        0,
+        "endpoint-123",
+    )
+
+    assert received == ["endpoint-123"]
+
+
+@pytest.mark.parametrize(
+    ("notification_flow", "notification_role"),
+    [
+        ("eRender", "eMultimedia"),
+        ("eRender", "eCommunications"),
+        ("eCapture", "eConsole"),
+        ("eCapture", "eMultimedia"),
+        ("eCapture", "eCommunications"),
+    ],
+)
+def test_monitor_ignores_non_matching_flow_or_role(
+    notification_flow: str,
+    notification_role: str,
+) -> None:
+    enumerator = FakeEnumerator()
+    received: list[str | None] = []
+
+    monitor = create_monitor(
+        enumerator,
+        flow="eRender",
+        role="eConsole",
+    )
+    monitor.set_change_handler(received.append)
+    monitor.start()
+
+    client = cast(
+        _NotificationClient,
+        enumerator.registered_client,
+    )
+
+    client.on_default_device_changed(
+        notification_flow,
+        0,
+        notification_role,
+        0,
+        "endpoint-123",
+    )
+
+    assert received == []
+
+
+@pytest.mark.parametrize(
+    ("notification_flow", "notification_role"),
+    [
+        ("eRender", "eConsole"),
+        ("eRender", "eMultimedia"),
+        ("eRender", "eCommunications"),
+        ("eCapture", "eMultimedia"),
+        ("eCapture", "eCommunications"),
+    ],
+)
+def test_capture_console_monitor_ignores_other_endpoint_changes(
+    notification_flow: str,
+    notification_role: str,
+) -> None:
+    enumerator = FakeEnumerator()
+    received: list[str | None] = []
+
+    monitor = create_monitor(
+        enumerator,
+        flow="eCapture",
+        role="eConsole",
+    )
+    monitor.set_change_handler(received.append)
+    monitor.start()
+
+    client = cast(
+        _NotificationClient,
+        enumerator.registered_client,
+    )
+
+    client.on_default_device_changed(
+        notification_flow,
+        0,
+        notification_role,
         0,
         "endpoint-123",
     )

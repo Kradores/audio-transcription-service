@@ -5,10 +5,10 @@ from typing import Protocol
 
 
 class AudioDeviceMonitor(Protocol):
-    """Observe changes to the system default audio output device."""
+    """Observe changes to a selected system default audio endpoint."""
 
     def start(self) -> None:
-        """Start monitoring for default output-device changes."""
+        """Start monitoring for selected default-device changes."""
 
     def stop(self) -> None:
         """Stop monitoring."""
@@ -17,4 +17,4 @@ class AudioDeviceMonitor(Protocol):
         self,
         handler: Callable[[str | None], None],
     ) -> None:
-        """Set the handler invoked when the default output device changes."""
+        """Set the handler invoked when the selected default device changes."""

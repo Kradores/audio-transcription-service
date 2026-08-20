@@ -88,7 +88,12 @@ def create_capture(queue_capacity: int) -> AudioCapture:
 
     audio_factory = PyAudioFactoryImpl()
     device_provider_factory = WasapiLoopbackDeviceProviderFactoryImpl()
-    device_monitor = WindowsAudioDeviceMonitor()
+
+    device_monitor = WindowsAudioDeviceMonitor(
+        flow="eRender",
+        role="eConsole",
+    )
+
     transport = QueuedAudioCapture(max_queue_size=queue_capacity)
 
     return PyAudioCapture(

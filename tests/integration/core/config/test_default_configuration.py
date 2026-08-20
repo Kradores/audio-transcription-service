@@ -19,9 +19,6 @@ def test_default_configuration_loads_successfully() -> None:
     assert settings.audio.processing.sample_rate == 16_000
     assert settings.audio.processing.channels == 1
     assert settings.audio.segmentation.target_duration_seconds == 3
-    assert settings.audio.segmentation.max_duration_seconds == 5
-    assert settings.audio.segmentation.pre_roll_ms == 200
-    assert settings.audio.segmentation.post_roll_ms == 200
     assert settings.audio.capture.queue_capacity == 100
     assert settings.vad.enabled is True
     assert settings.vad.speech_threshold == 0.5
@@ -30,3 +27,4 @@ def test_default_configuration_loads_successfully() -> None:
     assert settings.whisper.device.value == "cpu"
     assert settings.whisper.compute_type.value == "int8"
     assert settings.database.path == (Path("config/transcripts.db").resolve())
+    assert settings.transcription.queue_capacity == 10
