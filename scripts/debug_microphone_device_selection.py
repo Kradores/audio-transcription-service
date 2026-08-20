@@ -48,8 +48,7 @@ def inspect_core_audio_defaults() -> None:
         )
 
         print(
-            f"  eCapture / {role.name}: "
-            f"id={device.GetId()!r}",
+            f"  eCapture / {role.name}: id={device.GetId()!r}",
             flush=True,
         )
 

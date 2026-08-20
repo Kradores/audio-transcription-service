@@ -24,6 +24,95 @@ RECOVERY_MONITOR_INTERVAL_SECONDS = 0.1
 logger = logging.getLogger(__name__)
 
 
+class CaptureDevice(Protocol):
+    """Native input device that can be opened for audio capture."""
+
+    @property
+    def index(self) -> int: ...
+    
+    @property
+    def name(self) -> str: ...
+    
+    @property
+    def channels(self) -> int: ...
+    
+    @property
+    def sample_rate(self) -> float: ...
+
+
+class CaptureDeviceProvider(Protocol):
+    """Discover the device used by one capture source."""
+
+    def get_default(self) -> CaptureDevice:
+        """Return the currently selected capture device."""
+
+
+class CaptureDeviceProviderFactory(Protocol):
+    """Create a device provider bound to a PyAudio instance."""
+
+    def create(
+        self,
+        audio: pyaudiowpatch.PyAudio,
+    ) -> CaptureDeviceProvider:
+        """Create a provider for this PyAudio instance."""
+
+
+@dataclass(frozen=True, slots=True)
+class WasapiInputDevice:
+    index: int
+    name: str
+    channels: int
+    sample_rate: float
+
+
+class WasapiInputDeviceProvider:
+    """Discover the current default input device."""
+
+    def __init__(self, audio: pyaudiowpatch.PyAudio) -> None:
+        self._audio = audio
+
+    def get_default(self) -> CaptureDevice:
+        device = self._audio.get_default_input_device_info()
+
+        channels = int(device["maxInputChannels"])
+        if channels <= 0:
+            raise LookupError(
+                "default input device has no input channels",
+            )
+
+        return WasapiInputDevice(
+            index=int(device["index"]),
+            name=str(device["name"]),
+            channels=channels,
+            sample_rate=float(device["defaultSampleRate"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class WasapiLoopbackDevice:
+    index: int
+    name: str
+    channels: int
+    sample_rate: float
+
+
+class WasapiLoopbackDeviceProvider:
+    """Discovers the current default WASAPI loopback device."""
+
+    def __init__(self, audio: pyaudiowpatch.PyAudio) -> None:
+        self._audio = audio
+
+    def get_default(self) -> CaptureDevice:
+        device = self._audio.get_default_wasapi_loopback()
+
+        return WasapiLoopbackDevice(
+            index=int(device["index"]),
+            name=str(device["name"]),
+            channels=int(device["maxInputChannels"]),
+            sample_rate=float(device["defaultSampleRate"]),
+        )
+
+
 class PyAudioFactory(Protocol):
     """Create fresh PyAudio instances for capture sessions."""
 
@@ -38,24 +127,24 @@ class PyAudioFactoryImpl:
         return pyaudiowpatch.PyAudio()
 
 
-class WasapiLoopbackDeviceProviderFactory(Protocol):
-    """Create a loopback-device provider for a PyAudio instance."""
-
-    def create(
-        self,
-        audio: pyaudiowpatch.PyAudio,
-    ) -> WasapiLoopbackDeviceProvider:
-        """Create a provider bound to the supplied PyAudio instance."""
-
-
 class WasapiLoopbackDeviceProviderFactoryImpl:
     """Production loopback-device-provider factory."""
 
     def create(
         self,
         audio: pyaudiowpatch.PyAudio,
-    ) -> WasapiLoopbackDeviceProvider:
+    ) -> CaptureDeviceProvider:
         return WasapiLoopbackDeviceProvider(audio)
+
+
+class WasapiInputDeviceProviderFactoryImpl:
+    """Production WASAPI input-device-provider factory."""
+
+    def create(
+        self,
+        audio: pyaudiowpatch.PyAudio,
+    ) -> CaptureDeviceProvider:
+        return WasapiInputDeviceProvider(audio)
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,31 +255,6 @@ class QueuedAudioCapture(AudioCapture):
                 return
 
 
-@dataclass(frozen=True, slots=True)
-class WasapiLoopbackDevice:
-    index: int
-    name: str
-    channels: int
-    sample_rate: float
-
-
-class WasapiLoopbackDeviceProvider:
-    """Discovers the current default WASAPI loopback device."""
-
-    def __init__(self, audio: pyaudiowpatch.PyAudio) -> None:
-        self._audio = audio
-
-    def get_default(self) -> WasapiLoopbackDevice:
-        device = self._audio.get_default_wasapi_loopback()
-
-        return WasapiLoopbackDevice(
-            index=int(device["index"]),
-            name=str(device["name"]),
-            channels=int(device["maxInputChannels"]),
-            sample_rate=float(device["defaultSampleRate"]),
-        )
-
-
 class WasapiAudioFrameFactory:
     """Creates AudioFrames from PyAudio callback data."""
 
@@ -219,7 +283,7 @@ class PyAudioCapture(AudioCapture):
     def __init__(
         self,
         audio_factory: PyAudioFactory,
-        device_provider_factory: WasapiLoopbackDeviceProviderFactory,
+        device_provider_factory: CaptureDeviceProviderFactory,
         device_monitor: AudioDeviceMonitor,
         transport: QueuedAudioCapture,
         sleep: Sleep = asyncio.sleep,
@@ -231,7 +295,7 @@ class PyAudioCapture(AudioCapture):
         self._sleep = sleep
 
         self._audio: pyaudiowpatch.PyAudio | None = None
-        self._device_provider: WasapiLoopbackDeviceProvider | None = None
+        self._device_provider: CaptureDeviceProvider | None = None
         self._format: AudioFormat | None = None
         self._stream: pyaudiowpatch.Stream | None = None
 

@@ -14,6 +14,7 @@ class Stream:
 
 class PyAudio:
     def get_default_wasapi_loopback(self) -> dict[str, Any]: ...
+    def get_default_input_device_info(self) -> dict[str, Any]: ...
     def open(
         self,
         *,

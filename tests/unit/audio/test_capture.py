@@ -9,13 +9,16 @@ import pyaudiowpatch
 import pytest
 
 from app.audio.capture import (
+    CaptureDeviceProvider,
+    CaptureDeviceProviderFactory,
     PyAudioCapture,
     PyAudioFactory,
     QueuedAudioCapture,
     WasapiAudioFrameFactory,
+    WasapiInputDevice,
+    WasapiInputDeviceProvider,
+    WasapiInputDeviceProviderFactoryImpl,
     WasapiLoopbackDevice,
-    WasapiLoopbackDeviceProvider,
-    WasapiLoopbackDeviceProviderFactory,
 )
 from app.audio.contracts import AudioFormat, AudioFrame
 from app.audio.device_monitor import AudioDeviceMonitor
@@ -47,14 +50,17 @@ class FakePyAudioFactory:
 
 
 class FakeDeviceProviderFactory:
-    def __init__(self, *providers: WasapiLoopbackDeviceProvider) -> None:
+    def __init__(
+        self,
+        *providers: CaptureDeviceProvider,
+    ) -> None:
         self._providers = list(providers)
         self.created_with: list[pyaudiowpatch.PyAudio] = []
 
     def create(
         self,
         audio: pyaudiowpatch.PyAudio,
-    ) -> WasapiLoopbackDeviceProvider:
+    ) -> CaptureDeviceProvider:
         self.created_with.append(audio)
 
         if not self._providers:
@@ -182,7 +188,7 @@ async def yielding_sleep(delay: float) -> None:
 def create_audio_capture(
     *,
     audio_factory: PyAudioFactory | None = None,
-    device_provider_factory: WasapiLoopbackDeviceProviderFactory | None = None,
+    device_provider_factory: CaptureDeviceProviderFactory | None = None,
     device_monitor: AudioDeviceMonitor | None = None,
     transport: QueuedAudioCapture | None = None,
 ) -> AudioCapture:
@@ -1104,6 +1110,117 @@ async def test_repeated_default_output_change_signals_coalesce() -> None:
 
         assert capture._stream is second_stream
         assert len(audio_factory.created) == 2
+
+    finally:
+        await capture.stop()
+
+
+def test_wasapi_input_device_provider_returns_default_input() -> None:
+    # Arrange
+    audio = MagicMock()
+
+    audio.get_default_input_device_info.return_value = {
+        "index": 15,
+        "name": "Microphone Array (Realtek(R) Audio)",
+        "maxInputChannels": 2,
+        "defaultSampleRate": 48_000.0,
+    }
+
+    provider = WasapiInputDeviceProvider(audio)
+
+    # Act
+    device = provider.get_default()
+
+    # Assert
+    assert device == WasapiInputDevice(
+        index=15,
+        name="Microphone Array (Realtek(R) Audio)",
+        channels=2,
+        sample_rate=48_000.0,
+    )
+
+    audio.get_default_input_device_info.assert_called_once_with()
+
+
+def test_wasapi_input_device_provider_factory_binds_audio_instance() -> None:
+    # Arrange
+    audio = MagicMock()
+    factory = WasapiInputDeviceProviderFactoryImpl()
+
+    # Act
+    provider = factory.create(audio)
+
+    # Assert
+    assert isinstance(provider, WasapiInputDeviceProvider)
+
+
+def test_wasapi_input_device_provider_rejects_device_without_input_channels() -> None:
+    # Arrange
+    audio = MagicMock()
+
+    audio.get_default_input_device_info.return_value = {
+        "index": 15,
+        "name": "Invalid input",
+        "maxInputChannels": 0,
+        "defaultSampleRate": 48_000.0,
+    }
+
+    provider = WasapiInputDeviceProvider(audio)
+
+    # Act / Assert
+    with pytest.raises(
+        LookupError,
+        match="default input device has no input channels",
+    ):
+        provider.get_default()
+
+
+@pytest.mark.anyio
+async def test_start_opens_default_microphone_input_stream() -> None:
+    # Arrange
+    audio = MagicMock()
+    stream = MagicMock()
+    audio.open.return_value = stream
+
+    device = WasapiInputDevice(
+        index=15,
+        name="Microphone Array (Realtek(R) Audio)",
+        channels=2,
+        sample_rate=48_000.0,
+    )
+
+    device_provider = MagicMock(spec=WasapiInputDeviceProvider)
+    device_provider.get_default.return_value = device
+
+    monitor = FakeAudioDeviceMonitor()
+
+    capture = PyAudioCapture(
+        audio_factory=FakePyAudioFactory(audio),
+        device_provider_factory=FakeDeviceProviderFactory(
+            device_provider,
+        ),
+        device_monitor=monitor,
+        transport=QueuedAudioCapture(max_queue_size=4),
+        sleep=yielding_sleep,
+    )
+
+    try:
+        await capture.start()
+
+        device_provider.get_default.assert_called_once_with()
+
+        audio.open.assert_called_once_with(
+            rate=48_000,
+            channels=2,
+            format=pyaudiowpatch.paInt16,
+            input=True,
+            input_device_index=15,
+            frames_per_buffer=0,
+            start=False,
+            stream_callback=capture._on_audio,
+        )
+
+        stream.start_stream.assert_called_once_with()
 
     finally:
         await capture.stop()
