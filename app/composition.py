@@ -16,6 +16,7 @@ from app.audio.capture import (
 from app.audio.normalizer import AudioNormalizerImpl
 from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.audio.resampler import SoXRResamplerFactory
+from app.audio.timeline import MonotonicAudioTimeline
 from app.audio.windows_device_monitor import WindowsAudioDeviceMonitor
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
@@ -42,10 +43,11 @@ def create_application(
     """Create and configure the application."""
 
     settings = ConfigurationLoader(config_path).load()
+    timeline = MonotonicAudioTimeline()
 
     configure_logging(settings.logging)
 
-    capture = create_capture(settings.audio.capture.queue_capacity)
+    capture = create_capture(settings.audio.capture.queue_capacity, timeline)
     normalizer = create_normalizer(settings.audio.processing)
     vad = create_vad(settings)
 
@@ -83,7 +85,7 @@ def create_application(
     )
 
 
-def create_capture(queue_capacity: int) -> AudioCapture:
+def create_capture(queue_capacity: int, timeline: MonotonicAudioTimeline) -> AudioCapture:
     """Create the configured audio capture."""
 
     audio_factory = PyAudioFactoryImpl()
@@ -101,6 +103,7 @@ def create_capture(queue_capacity: int) -> AudioCapture:
         device_provider_factory=device_provider_factory,
         device_monitor=device_monitor,
         transport=transport,
+        timeline=timeline,
     )
 
 

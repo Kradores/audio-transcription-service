@@ -15,6 +15,7 @@ import pyaudiowpatch
 from app.audio.contracts import AudioFormat, AudioFrame
 from app.audio.device_monitor import AudioDeviceMonitor
 from app.audio.protocols import AudioCapture
+from app.audio.timeline import AudioTimeline
 
 type Sleep = Callable[[float], Awaitable[None]]
 RECOVERY_INITIAL_DELAY_SECONDS = 0.1
@@ -29,13 +30,13 @@ class CaptureDevice(Protocol):
 
     @property
     def index(self) -> int: ...
-    
+
     @property
     def name(self) -> str: ...
-    
+
     @property
     def channels(self) -> int: ...
-    
+
     @property
     def sample_rate(self) -> float: ...
 
@@ -282,16 +283,19 @@ class WasapiAudioFrameFactory:
 class PyAudioCapture(AudioCapture):
     def __init__(
         self,
+        *,
         audio_factory: PyAudioFactory,
         device_provider_factory: CaptureDeviceProviderFactory,
         device_monitor: AudioDeviceMonitor,
         transport: QueuedAudioCapture,
+        timeline: AudioTimeline,
         sleep: Sleep = asyncio.sleep,
     ) -> None:
         self._audio_factory = audio_factory
         self._device_provider_factory = device_provider_factory
         self._device_monitor = device_monitor
         self._transport = transport
+        self._timeline = timeline
         self._sleep = sleep
 
         self._audio: pyaudiowpatch.PyAudio | None = None
@@ -304,7 +308,7 @@ class PyAudioCapture(AudioCapture):
         self._device_change_event = asyncio.Event()
 
         self._started = False
-        self._capture_timestamp_origin: float | None = None
+        self._backend_timestamp_offset: float | None = None
         self._discontinuity_handler: Callable[[], None] | None = None
         self._recovery_active = False
         self._capture_frame_duration_logged = False
@@ -320,7 +324,7 @@ class PyAudioCapture(AudioCapture):
         self._started = True
         self._event_loop = asyncio.get_running_loop()
 
-        self._capture_timestamp_origin = None
+        self._backend_timestamp_offset = None
         self._recovery_active = False
         self._capture_frame_duration_logged = False
         self._device_change_event.clear()
@@ -396,6 +400,7 @@ class PyAudioCapture(AudioCapture):
 
     async def _open_fresh_stream(self) -> None:
         self._dispose_audio_session()
+        self._backend_timestamp_offset = None
 
         audio = self._audio_factory.create()
         device_provider = self._device_provider_factory.create(audio)
@@ -481,12 +486,7 @@ class PyAudioCapture(AudioCapture):
             self._format.channels,
         )
 
-        callback_timestamp = time_info["input_buffer_adc_time"]
-
-        if self._capture_timestamp_origin is None:
-            self._capture_timestamp_origin = callback_timestamp
-
-        timestamp = callback_timestamp - self._capture_timestamp_origin
+        timestamp = self._conversation_timestamp(time_info)
 
         return AudioFrame(
             audio=audio,
@@ -618,3 +618,19 @@ class PyAudioCapture(AudioCapture):
                 handler()
 
         self._dispose_audio_session()
+
+    def _conversation_timestamp(
+        self,
+        time_info: dict[str, float],
+    ) -> float:
+        input_time = time_info["input_buffer_adc_time"]
+
+        if self._backend_timestamp_offset is None:
+            backend_now = time_info["current_time"]
+            conversation_now = self._timeline.now()
+
+            self._backend_timestamp_offset = conversation_now - backend_now
+
+        timestamp = input_time + self._backend_timestamp_offset
+
+        return max(0.0, timestamp)
