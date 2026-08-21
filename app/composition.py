@@ -27,6 +27,7 @@ from app.core.config.models import (
     Settings,
 )
 from app.core.logging import configure_logging
+from app.services.conversation_pipeline import ConversationPipeline
 from app.services.speech_pipeline import SpeechPipeline
 from app.services.transcription_executor import TranscriptionExecutor, TranscriptionExecutorImpl
 from app.storage.recorder import TranscriptRecorderImpl
@@ -38,6 +39,8 @@ from app.vad.assembler import SpeechSegmentAssemblerImpl
 from app.vad.protocols import AudioVad, SpeechSegmentAssembler
 from app.vad.silero import SileroVADAdapter
 
+# app/composition.py
+
 
 def create_application(
     config_path: Path = DEFAULT_CONFIGURATION_PATH,
@@ -45,13 +48,75 @@ def create_application(
     """Create and configure the application."""
 
     settings = ConfigurationLoader(config_path).load()
-    timeline = MonotonicAudioTimeline()
-
     configure_logging(settings.logging)
 
-    capture = create_system_audio_capture(
-        queue_capacity=settings.audio.capture.queue_capacity, timeline=timeline
+    timeline = MonotonicAudioTimeline()
+
+    database_path = settings.database.path
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    database = sqlite3.connect(database_path)
+
+    transcription_executor = create_transcription_executor(
+        database=database,
+        settings=settings,
     )
+
+    system_capture = create_system_audio_capture(
+        queue_capacity=settings.audio.capture.queue_capacity,
+        timeline=timeline,
+    )
+    microphone_capture = create_microphone_capture(
+        queue_capacity=settings.audio.capture.queue_capacity,
+        timeline=timeline,
+    )
+
+    system_pipeline = create_source_pipeline(
+        source=AudioSource.SYSTEM_AUDIO,
+        capture=system_capture,
+        settings=settings,
+        transcription_executor=transcription_executor,
+    )
+
+    microphone_pipeline = create_source_pipeline(
+        source=AudioSource.MICROPHONE,
+        capture=microphone_capture,
+        settings=settings,
+        transcription_executor=transcription_executor,
+    )
+
+    conversation_pipeline = create_conversation_pipeline(
+        transcription_executor=transcription_executor,
+        system_pipeline=system_pipeline,
+        microphone_pipeline=microphone_pipeline,
+    )
+
+    return Application(
+        settings=settings,
+        conversation_pipeline=conversation_pipeline,
+        database=database,
+    )
+
+
+def create_conversation_pipeline(
+    *,
+    transcription_executor: TranscriptionExecutor,
+    system_pipeline: SpeechPipeline,
+    microphone_pipeline: SpeechPipeline,
+) -> ConversationPipeline:
+    return ConversationPipeline(
+        transcription_executor=transcription_executor,
+        system_pipeline=system_pipeline,
+        microphone_pipeline=microphone_pipeline,
+    )
+
+
+def create_source_pipeline(
+    *,
+    source: AudioSource,
+    capture: AudioCapture,
+    settings: Settings,
+    transcription_executor: TranscriptionExecutor,
+) -> SpeechPipeline:
     normalizer = create_normalizer(settings.audio.processing)
     vad = create_vad(settings)
 
@@ -62,32 +127,13 @@ def create_application(
         settings=settings.audio.segmentation,
     )
 
-    database_path = settings.database.path
-    database_path.parent.mkdir(parents=True, exist_ok=True)
-
-    database = sqlite3.connect(database_path)
-
-    transcription_executor = create_transcription_executor(
-        database=database,
-        settings=settings,
-    )
-
-    pipeline = create_speech_pipeline(
-        source=AudioSource.SYSTEM_AUDIO,
+    return create_speech_pipeline(
+        source=source,
         capture=capture,
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
         transcription_executor=transcription_executor,
-    )
-
-    return Application(
-        settings=settings,
-        capture=capture,
-        normalizer=normalizer,
-        pipeline=pipeline,
-        transcription_executor=transcription_executor,
-        database=database,
     )
 
 

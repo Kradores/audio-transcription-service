@@ -4,31 +4,25 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.application import Application
-from app.audio.protocols import AudioCapture, AudioNormalizer
-from app.services.transcription_executor import TranscriptionExecutor
+from app.services.conversation_pipeline import ConversationPipeline
 from tests.unit.core.config.builders import SettingsBuilder
 
 
-def create_transcription_executor_mock() -> MagicMock:
-    executor = MagicMock(spec=TranscriptionExecutor)
-    executor.start = AsyncMock()
-    executor.stop = AsyncMock()
-    return executor
+def create_conversation_mock() -> MagicMock:
+    conversation = MagicMock(spec=ConversationPipeline)
+    conversation.start = AsyncMock()
+    conversation.stop = AsyncMock()
+    return conversation
 
 
 def test_application_exposes_provided_settings() -> None:
     # Arrange
     settings = SettingsBuilder().build()
-    capture = MagicMock(spec=AudioCapture)
-    normalizer = MagicMock(spec=AudioNormalizer)
 
     # Act
     application = Application(
         settings=settings,
-        capture=capture,
-        normalizer=normalizer,
-        pipeline=AsyncMock(),
-        transcription_executor=create_transcription_executor_mock(),
+        conversation_pipeline=create_conversation_mock(),
         database=MagicMock(spec=sqlite3.Connection),
     )
 
@@ -36,172 +30,93 @@ def test_application_exposes_provided_settings() -> None:
     assert application.settings is settings
 
 
-def test_application_exposes_provided_audio_capture() -> None:
-    # Arrange
-    settings = SettingsBuilder().build()
-    capture = MagicMock(spec=AudioCapture)
-    normalizer = MagicMock(spec=AudioNormalizer)
-
-    # Act
-    application = Application(
-        settings=settings,
-        capture=capture,
-        normalizer=normalizer,
-        pipeline=AsyncMock(),
-        transcription_executor=create_transcription_executor_mock(),
-        database=MagicMock(spec=sqlite3.Connection),
-    )
-
-    # Assert
-    assert application.capture is capture
-
-
-def test_application_exposes_provided_audio_normalizer() -> None:
-    # Arrange
-    settings = SettingsBuilder().build()
-    capture = MagicMock(spec=AudioCapture)
-    normalizer = MagicMock(spec=AudioNormalizer)
-
-    # Act
-    application = Application(
-        settings=settings,
-        capture=capture,
-        normalizer=normalizer,
-        pipeline=AsyncMock(),
-        transcription_executor=create_transcription_executor_mock(),
-        database=MagicMock(spec=sqlite3.Connection),
-    )
-
-    # Assert
-    assert application.normalizer is normalizer
+# tests/unit/test_application.py
 
 
 @pytest.mark.anyio
-async def test_start_starts_executor_before_pipeline() -> None:
-    # Arrange
-    settings = SettingsBuilder().build()
-    events: list[str] = []
-
-    transcription_executor = create_transcription_executor_mock()
-    pipeline = AsyncMock()
-
-    async def start_executor() -> None:
-        events.append("executor-start")
-
-    async def start_pipeline() -> None:
-        events.append("pipeline-start")
-
-    transcription_executor.start.side_effect = start_executor
-    pipeline.start.side_effect = start_pipeline
+async def test_start_starts_conversation_pipeline() -> None:
+    conversation = create_conversation_mock()
 
     application = Application(
-        settings=settings,
-        capture=MagicMock(),
-        normalizer=MagicMock(),
-        pipeline=pipeline,
-        transcription_executor=transcription_executor,
+        settings=SettingsBuilder().build(),
+        conversation_pipeline=conversation,
         database=MagicMock(spec=sqlite3.Connection),
     )
 
-    # Act
     await application.start()
 
-    # Assert
-    assert events == [
-        "executor-start",
-        "pipeline-start",
-    ]
+    conversation.start.assert_awaited_once()
+
+
+# tests/unit/test_application.py
 
 
 @pytest.mark.anyio
-async def test_stop_stops_pipeline_then_executor_before_closing_database() -> None:
-    # Arrange
-    settings = SettingsBuilder().build()
+async def test_stop_stops_conversation_before_closing_database() -> None:
     events: list[str] = []
 
-    pipeline = AsyncMock()
-    transcription_executor = create_transcription_executor_mock()
+    conversation = create_conversation_mock()
 
-    async def stop_pipeline() -> None:
-        events.append("pipeline-stop")
+    async def stop_conversation() -> None:
+        events.append("conversation-stop")
 
-    async def stop_executor() -> None:
-        events.append("executor-stop")
-
-    pipeline.stop.side_effect = stop_pipeline
-    transcription_executor.stop.side_effect = stop_executor
+    conversation.stop.side_effect = stop_conversation
 
     database = MagicMock(spec=sqlite3.Connection)
     database.close.side_effect = lambda: events.append("database-close")
 
     application = Application(
-        settings=settings,
-        capture=MagicMock(),
-        normalizer=MagicMock(),
-        pipeline=pipeline,
-        transcription_executor=transcription_executor,
+        settings=SettingsBuilder().build(),
+        conversation_pipeline=conversation,
         database=database,
     )
 
-    # Act
     await application.stop()
 
-    # Assert
     assert events == [
-        "pipeline-stop",
-        "executor-stop",
+        "conversation-stop",
         "database-close",
     ]
+
+
+# tests/unit/test_application.py
+
+
+@pytest.mark.anyio
+async def test_stop_closes_database_when_conversation_stop_fails() -> None:
+    conversation = create_conversation_mock()
+    conversation.stop.side_effect = RuntimeError(
+        "conversation shutdown failed",
+    )
+
+    database = MagicMock(spec=sqlite3.Connection)
+
+    application = Application(
+        settings=SettingsBuilder().build(),
+        conversation_pipeline=conversation,
+        database=database,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="conversation shutdown failed",
+    ):
+        await application.stop()
+
+    database.close.assert_called_once_with()
 
 
 @pytest.mark.anyio
 async def test_stop_closes_database() -> None:
     settings = SettingsBuilder().build()
-    pipeline = AsyncMock()
     database = MagicMock(spec=sqlite3.Connection)
 
     application = Application(
         settings=settings,
-        capture=MagicMock(),
-        normalizer=MagicMock(),
-        pipeline=pipeline,
-        transcription_executor=create_transcription_executor_mock(),
+        conversation_pipeline=create_conversation_mock(),
         database=database,
     )
 
     await application.stop()
 
-    pipeline.stop.assert_awaited_once()
     database.close.assert_called_once_with()
-
-
-@pytest.mark.anyio
-async def test_stop_stops_pipeline_before_closing_database() -> None:
-    settings = SettingsBuilder().build()
-    events: list[str] = []
-
-    pipeline = AsyncMock()
-
-    async def stop_pipeline() -> None:
-        events.append("pipeline-stop")
-
-    pipeline.stop.side_effect = stop_pipeline
-
-    database = MagicMock(spec=sqlite3.Connection)
-    database.close.side_effect = lambda: events.append("database-close")
-
-    application = Application(
-        settings=settings,
-        capture=MagicMock(),
-        normalizer=MagicMock(),
-        pipeline=pipeline,
-        transcription_executor=create_transcription_executor_mock(),
-        database=database,
-    )
-
-    await application.stop()
-
-    assert events == [
-        "pipeline-stop",
-        "database-close",
-    ]

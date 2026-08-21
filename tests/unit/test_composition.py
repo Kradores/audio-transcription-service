@@ -23,7 +23,7 @@ from app.composition import (
     create_transcriber,
     create_vad,
 )
-from app.services.speech_pipeline import SpeechPipeline
+from app.services.transcription_executor import TranscriptionExecutor
 from app.transcription.contracts import AudioSource
 from app.transcription.faster_whisper import FasterWhisperTranscriber
 from app.vad.protocols import AudioVad
@@ -221,30 +221,6 @@ def test_create_transcriber_passes_configured_whisper_settings() -> None:
     )
 
 
-@patch("app.composition.create_vad")
-@patch("app.composition.create_speech_pipeline")
-def test_create_application_wires_speech_pipeline(
-    create_speech_pipeline: MagicMock,
-    create_vad: MagicMock,
-    tmp_path: Path,
-) -> None:
-    # Arrange
-    document = valid_configuration_document()
-    config_path = write_configuration(tmp_path, document)
-
-    vad = MagicMock()
-    pipeline = MagicMock()
-
-    create_vad.return_value = vad
-    create_speech_pipeline.return_value = pipeline
-
-    # Act
-    application = create_application(config_path)
-
-    # Assert
-    assert application.pipeline is pipeline
-
-
 def test_create_speech_pipeline_wires_dependencies() -> None:
     capture = MagicMock()
     normalizer = MagicMock()
@@ -272,30 +248,6 @@ def test_create_speech_pipeline_wires_dependencies() -> None:
         assembler=assembler,
         transcription_executor=transcription_executor,
     )
-
-
-def test_create_application_builds_production_persistence_graph(
-    tmp_path: Path,
-) -> None:
-    # Arrange
-    document = valid_configuration_document()
-    document["database"]["path"] = "transcripts.db"
-    config_path = write_configuration(tmp_path, document)
-
-    vad = MagicMock(spec=AudioVad)
-    capture = MagicMock(spec=AudioCapture)
-
-    with (
-        patch("app.composition.create_system_audio_capture", return_value=capture),
-        patch("app.composition.create_vad", return_value=vad),
-    ):
-        # Act
-        application = create_application(config_path)
-
-    # Assert
-    assert isinstance(application, Application)
-    assert isinstance(application.pipeline, SpeechPipeline)
-    assert application.capture is capture
 
 
 def test_create_microphone_capture_returns_pyaudio_capture() -> None:
@@ -365,7 +317,7 @@ def test_captures_can_share_same_timeline() -> None:
     assert microphone_capture._timeline is timeline
 
 
-def test_create_application_shares_transcription_executor_with_pipeline(
+def test_create_application_builds_one_conversation_pipeline(
     tmp_path: Path,
 ) -> None:
     # Arrange
@@ -374,7 +326,6 @@ def test_create_application_shares_transcription_executor_with_pipeline(
 
     capture = MagicMock(spec=AudioCapture)
     vad = MagicMock(spec=AudioVad)
-    transcription_executor = MagicMock()
 
     with (
         patch(
@@ -386,60 +337,54 @@ def test_create_application_shares_transcription_executor_with_pipeline(
             return_value=vad,
         ),
         patch(
-            "app.composition.create_transcription_executor",
-            return_value=transcription_executor,
-        ),
-        patch("app.composition.create_speech_pipeline") as create_pipeline,
+            "app.composition.create_conversation_pipeline",
+        ) as conversation_pipeline,
         patch("app.composition.Application") as application_type,
     ):
         # Act
         create_application(config_path)
 
     # Assert
-    create_pipeline.assert_called_once()
-
-    assert create_pipeline.call_args.kwargs["transcription_executor"] is transcription_executor
-
+    conversation_pipeline.assert_called_once()
     application_type.assert_called_once()
 
-    assert application_type.call_args.kwargs["transcription_executor"] is transcription_executor
 
-
-def test_create_application_wires_shared_executor_and_pipeline(
+def test_create_application_builds_two_source_pipelines_with_shared_executor(
     tmp_path: Path,
 ) -> None:
     # Arrange
     document = valid_configuration_document()
     config_path = write_configuration(tmp_path, document)
 
-    capture = MagicMock(spec=AudioCapture)
-    vad = MagicMock(spec=AudioVad)
-    transcription_executor = MagicMock()
+    system_capture = MagicMock(spec=AudioCapture)
+    microphone_capture = MagicMock(spec=AudioCapture)
+    transcription_executor = MagicMock(spec=TranscriptionExecutor)
 
     with (
         patch(
             "app.composition.create_system_audio_capture",
-            return_value=capture,
+            return_value=system_capture,
         ),
         patch(
-            "app.composition.create_vad",
-            return_value=vad,
+            "app.composition.create_microphone_capture",
+            return_value=microphone_capture,
         ),
         patch(
             "app.composition.create_transcription_executor",
             return_value=transcription_executor,
         ),
-        patch("app.composition.create_speech_pipeline") as create_pipeline,
-        patch("app.composition.Application") as application_type,
+        patch("app.composition.create_source_pipeline") as create_source,
     ):
-        # Act
         create_application(config_path)
 
-    # Assert
-    pipeline = create_pipeline.return_value
+    calls = create_source.call_args_list
 
-    assert create_pipeline.call_args.kwargs["transcription_executor"] is transcription_executor
+    assert len(calls) == 2
 
-    assert application_type.call_args.kwargs["transcription_executor"] is transcription_executor
+    assert calls[0].kwargs["source"] is AudioSource.SYSTEM_AUDIO
+    assert calls[0].kwargs["capture"] is system_capture
+    assert calls[0].kwargs["transcription_executor"] is transcription_executor
 
-    assert application_type.call_args.kwargs["pipeline"] is pipeline
+    assert calls[1].kwargs["source"] is AudioSource.MICROPHONE
+    assert calls[1].kwargs["capture"] is microphone_capture
+    assert calls[1].kwargs["transcription_executor"] is transcription_executor
