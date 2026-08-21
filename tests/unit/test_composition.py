@@ -24,6 +24,7 @@ from app.composition import (
     create_vad,
 )
 from app.services.speech_pipeline import SpeechPipeline
+from app.transcription.contracts import AudioSource
 from app.transcription.faster_whisper import FasterWhisperTranscriber
 from app.vad.protocols import AudioVad
 from app.vad.silero import SileroVADAdapter
@@ -244,7 +245,7 @@ def test_create_application_wires_speech_pipeline(
     assert application.pipeline is pipeline
 
 
-def test_create_speech_pipeline_wires_recorder() -> None:
+def test_create_speech_pipeline_wires_dependencies() -> None:
     capture = MagicMock()
     normalizer = MagicMock()
     vad = MagicMock()
@@ -253,6 +254,7 @@ def test_create_speech_pipeline_wires_recorder() -> None:
 
     with patch("app.composition.SpeechPipeline") as pipeline_type:
         result = create_speech_pipeline(
+            source=AudioSource.SYSTEM_AUDIO,
             capture=capture,
             normalizer=normalizer,
             vad=vad,
@@ -263,6 +265,7 @@ def test_create_speech_pipeline_wires_recorder() -> None:
     assert result is pipeline_type.return_value
 
     pipeline_type.assert_called_once_with(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=capture,
         normalizer=normalizer,
         vad=vad,

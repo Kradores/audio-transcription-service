@@ -4,7 +4,7 @@ import pytest
 
 from app.storage.protocols import TranscriptRepository
 from app.storage.recorder import TranscriptRecorderImpl
-from app.transcription.contracts import TranscriptionResult
+from app.transcription.contracts import AudioSource, SourcedTranscriptionResult, TranscriptionResult
 
 
 def test_recorder_passes_exact_result_to_repository() -> None:
@@ -12,12 +12,15 @@ def test_recorder_passes_exact_result_to_repository() -> None:
     repository = MagicMock(spec=TranscriptRepository)
     recorder = TranscriptRecorderImpl(repository)
 
-    result = TranscriptionResult(
-        text="hello world",
-        language="en",
-        confidence=0.95,
-        start=10.0,
-        end=12.0,
+    result = SourcedTranscriptionResult(
+        source=AudioSource.SYSTEM_AUDIO,
+        result=TranscriptionResult(
+            text="hello world",
+            language="en",
+            confidence=0.95,
+            start=10.0,
+            end=12.0,
+        ),
     )
 
     # Act
@@ -32,12 +35,15 @@ def test_recorder_does_not_modify_result() -> None:
     repository = MagicMock(spec=TranscriptRepository)
     recorder = TranscriptRecorderImpl(repository)
 
-    result = TranscriptionResult(
-        text="hello world",
-        language="en",
-        confidence=0.95,
-        start=10.0,
-        end=12.0,
+    result = SourcedTranscriptionResult(
+        source=AudioSource.SYSTEM_AUDIO,
+        result=TranscriptionResult(
+            text="hello world",
+            language="en",
+            confidence=0.95,
+            start=10.0,
+            end=12.0,
+        ),
     )
 
     # Act
@@ -54,12 +60,15 @@ def test_recorder_propagates_repository_failure() -> None:
 
     recorder = TranscriptRecorderImpl(repository)
 
-    result = TranscriptionResult(
-        text="hello world",
-        language="en",
-        confidence=None,
-        start=10.0,
-        end=12.0,
+    result = SourcedTranscriptionResult(
+        source=AudioSource.SYSTEM_AUDIO,
+        result=TranscriptionResult(
+            text="hello world",
+            language="en",
+            confidence=None,
+            start=10.0,
+            end=12.0,
+        ),
     )
 
     # Act / Assert
@@ -71,12 +80,16 @@ def test_recorder_logs_success(caplog: pytest.LogCaptureFixture) -> None:
     # Arrange
     repository = MagicMock(spec=TranscriptRepository)
     recorder = TranscriptRecorderImpl(repository)
-    result = TranscriptionResult(
-        text="hello world",
-        language="en",
-        confidence=None,
-        start=10.0,
-        end=12.0,
+
+    result = SourcedTranscriptionResult(
+        source=AudioSource.SYSTEM_AUDIO,
+        result=TranscriptionResult(
+            text="hello world",
+            language="en",
+            confidence=None,
+            start=10.0,
+            end=12.0,
+        ),
     )
 
     # Act
@@ -85,7 +98,7 @@ def test_recorder_logs_success(caplog: pytest.LogCaptureFixture) -> None:
 
     # Assert
     assert any(
-        "transcript recorded start=10.000 end=12.000" in record.getMessage()
+        "transcript recorded source=system_audio start=10.000 end=12.000" in record.getMessage()
         for record in caplog.records
     )
 
@@ -95,12 +108,16 @@ def test_recorder_logs_failure(caplog: pytest.LogCaptureFixture) -> None:
     repository = MagicMock(spec=TranscriptRepository)
     repository.insert.side_effect = RuntimeError("repository failed")
     recorder = TranscriptRecorderImpl(repository)
-    result = TranscriptionResult(
-        text="hello world",
-        language="en",
-        confidence=None,
-        start=10.0,
-        end=12.0,
+
+    result = SourcedTranscriptionResult(
+        source=AudioSource.SYSTEM_AUDIO,
+        result=TranscriptionResult(
+            text="hello world",
+            language="en",
+            confidence=None,
+            start=10.0,
+            end=12.0,
+        ),
     )
 
     # Act / Assert
@@ -111,6 +128,7 @@ def test_recorder_logs_failure(caplog: pytest.LogCaptureFixture) -> None:
         recorder.record(result)
 
     assert any(
-        "failed to record transcript start=10.000 end=12.000" in record.getMessage()
+        "failed to record transcript source=system_audio start=10.000 end=12.000"
+        in record.getMessage()
         for record in caplog.records
     )

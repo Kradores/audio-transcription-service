@@ -6,8 +6,11 @@ import logging
 from dataclasses import dataclass
 from typing import Protocol
 
-from app.audio.contracts import SpeechSegment
-from app.transcription.protocols import Transcriber, TranscriptionResultHandler
+from app.transcription.contracts import SourcedTranscriptionResult, TranscriptionWorkItem
+from app.transcription.protocols import (
+    SourcedTranscriptionResultHandler,
+    Transcriber,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +25,7 @@ class TranscriptionExecutor(Protocol):
     async def start(self) -> None:
         """Start the transcription worker."""
 
-    def submit(self, segment: SpeechSegment) -> bool:
+    def submit(self, item: TranscriptionWorkItem) -> bool:
         """Submit a speech segment without blocking the caller."""
 
     async def stop(self) -> None:
@@ -46,7 +49,7 @@ class TranscriptionExecutorImpl:
     def __init__(
         self,
         transcriber: Transcriber,
-        on_result: TranscriptionResultHandler,
+        on_result: SourcedTranscriptionResultHandler,
         queue_capacity: int,
     ) -> None:
         if queue_capacity < 1:
@@ -54,7 +57,7 @@ class TranscriptionExecutorImpl:
 
         self._transcriber = transcriber
         self._on_result = on_result
-        self._queue: asyncio.Queue[SpeechSegment | _Shutdown] = asyncio.Queue(
+        self._queue: asyncio.Queue[TranscriptionWorkItem | _Shutdown] = asyncio.Queue(
             maxsize=queue_capacity,
         )
         self._worker_task: asyncio.Task[None] | None = None
@@ -91,19 +94,20 @@ class TranscriptionExecutorImpl:
             self._queue.maxsize,
         )
 
-    def submit(self, segment: SpeechSegment) -> bool:
-        """Submit a segment without blocking the real-time pipeline."""
+    def submit(self, item: TranscriptionWorkItem) -> bool:
+        """Submit a transcription work item without blocking the real-time pipeline."""
 
         if not self._accepting:
             return False
 
         try:
-            self._queue.put_nowait(segment)
+            self._queue.put_nowait(item)
         except asyncio.QueueFull:
             self._stats.rejected += 1
 
             logger.warning(
-                "transcription executor overloaded queue_capacity=%d rejected=%d",
+                "transcription executor overloaded source=%s queue_capacity=%d rejected=%d",
+                item.source.value,
                 self._queue.maxsize,
                 self._stats.rejected,
             )
@@ -157,23 +161,30 @@ class TranscriptionExecutorImpl:
 
                 result = await asyncio.to_thread(
                     self._transcriber.transcribe,
-                    item,
+                    item.segment,
                 )
 
                 self._stats.completed += 1
 
                 logger.info(
-                    "transcription completed start=%.3f end=%.3f",
+                    "transcription completed source=%s start=%.3f end=%.3f",
+                    item.source.value,
                     result.start,
                     result.end,
                 )
                 logger.debug(
-                    "transcription result language=%s text=%r",
+                    "transcription result source=%s language=%s text=%r",
+                    item.source.value,
                     result.language,
                     result.text,
                 )
 
-                self._on_result(result)
+                self._on_result(
+                    SourcedTranscriptionResult(
+                        source=item.source,
+                        result=result,
+                    )
+                )
 
             except Exception:
                 if isinstance(item, _Shutdown):
@@ -183,8 +194,8 @@ class TranscriptionExecutorImpl:
 
                 logger.exception(
                     "transcription execution failed start=%.3f end=%.3f",
-                    item.timestamp,
-                    item.timestamp + item.duration,
+                    item.segment.timestamp,
+                    item.segment.timestamp + item.segment.duration,
                 )
 
             finally:

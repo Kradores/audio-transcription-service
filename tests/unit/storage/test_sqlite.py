@@ -6,7 +6,7 @@ from collections.abc import Generator
 import pytest
 
 from app.storage.sqlite import SQLiteTranscriptRepository
-from app.transcription.contracts import TranscriptionResult
+from app.transcription.contracts import AudioSource, SourcedTranscriptionResult, TranscriptionResult
 
 
 @pytest.fixture
@@ -75,12 +75,15 @@ def test_insert_persists_transcription_result(
     connection: sqlite3.Connection,
 ) -> None:
     # Arrange
-    result = TranscriptionResult(
-        text="hello world",
-        language="en",
-        confidence=0.95,
-        start=10.5,
-        end=12.75,
+    result = SourcedTranscriptionResult(
+        source=AudioSource.SYSTEM_AUDIO,
+        result=TranscriptionResult(
+            text="hello world",
+            language="en",
+            confidence=0.95,
+            start=10.5,
+            end=12.75,
+        ),
     )
 
     # Act
@@ -90,6 +93,7 @@ def test_insert_persists_transcription_result(
     row = connection.execute(
         """
         SELECT
+            source,
             start_time,
             end_time,
             language,
@@ -100,6 +104,7 @@ def test_insert_persists_transcription_result(
     ).fetchone()
 
     assert row == (
+        "system_audio",
         10.5,
         12.75,
         "en",
@@ -113,12 +118,15 @@ def test_insert_generates_id_and_created_at(
     connection: sqlite3.Connection,
 ) -> None:
     # Arrange
-    result = TranscriptionResult(
-        text="hello",
-        language="en",
-        confidence=None,
-        start=1.0,
-        end=2.0,
+    result = SourcedTranscriptionResult(
+        source=AudioSource.SYSTEM_AUDIO,
+        result=TranscriptionResult(
+            text="hello",
+            language="en",
+            confidence=None,
+            start=1.0,
+            end=2.0,
+        ),
     )
 
     # Act
@@ -144,12 +152,15 @@ def test_insert_persists_null_confidence(
     connection: sqlite3.Connection,
 ) -> None:
     # Arrange
-    result = TranscriptionResult(
-        text="hello",
-        language="en",
-        confidence=None,
-        start=1.0,
-        end=2.0,
+    result = SourcedTranscriptionResult(
+        source=AudioSource.SYSTEM_AUDIO,
+        result=TranscriptionResult(
+            text="hello",
+            language="en",
+            confidence=None,
+            start=1.0,
+            end=2.0,
+        ),
     )
 
     # Act
@@ -166,19 +177,26 @@ def test_insert_is_append_only(
     connection: sqlite3.Connection,
 ) -> None:
     # Arrange
-    first = TranscriptionResult(
-        text="first",
-        language="en",
-        confidence=0.8,
-        start=1.0,
-        end=2.0,
+    first = SourcedTranscriptionResult(
+        source=AudioSource.SYSTEM_AUDIO,
+        result=TranscriptionResult(
+            text="first",
+            language="en",
+            confidence=0.8,
+            start=1.0,
+            end=2.0,
+        ),
     )
-    second = TranscriptionResult(
-        text="second",
-        language="en",
-        confidence=0.9,
-        start=2.0,
-        end=3.0,
+
+    second = SourcedTranscriptionResult(
+        source=AudioSource.SYSTEM_AUDIO,
+        result=TranscriptionResult(
+            text="second",
+            language="en",
+            confidence=0.9,
+            start=2.0,
+            end=3.0,
+        ),
     )
 
     # Act
@@ -209,12 +227,15 @@ def test_insert_propagates_database_failure(
 
     connection.close()
 
-    result = TranscriptionResult(
-        text="hello",
-        language="en",
-        confidence=None,
-        start=1.0,
-        end=2.0,
+    result = SourcedTranscriptionResult(
+        source=AudioSource.SYSTEM_AUDIO,
+        result=TranscriptionResult(
+            text="hello",
+            language="en",
+            confidence=None,
+            start=1.0,
+            end=2.0,
+        ),
     )
 
     # Act / Assert
@@ -229,12 +250,15 @@ def test_insert_commits_transaction(
     repository = SQLiteTranscriptRepository(connection)
     repository.initialize()
 
-    result = TranscriptionResult(
-        text="hello",
-        language="en",
-        confidence=None,
-        start=1.0,
-        end=2.0,
+    result = SourcedTranscriptionResult(
+        source=AudioSource.SYSTEM_AUDIO,
+        result=TranscriptionResult(
+            text="hello",
+            language="en",
+            confidence=None,
+            start=1.0,
+            end=2.0,
+        ),
     )
 
     # Act

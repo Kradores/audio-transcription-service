@@ -19,6 +19,7 @@ from app.composition import (
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
 from app.services.speech_pipeline import SpeechPipeline
+from app.transcription.contracts import AudioSource
 
 FIXTURE_PATH = Path(__file__).parents[2] / "fixtures" / "audio" / "english_speech.wav"
 
@@ -99,6 +100,7 @@ async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None
     )
 
     pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=capture,
         normalizer=normalizer,
         vad=vad,
@@ -115,6 +117,7 @@ async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None
     rows = database.execute(
         """
         SELECT
+            source,
             start_time,
             end_time,
             language,
@@ -127,6 +130,7 @@ async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None
     database.close()
 
     assert rows
-    assert all(row[2] == "en" for row in rows)
-    assert all(row[3].strip() for row in rows)
-    assert all(row[1] >= row[0] for row in rows)
+    assert all(row[3] == "en" for row in rows)
+    assert all(row[4].strip() for row in rows)
+    assert all(row[2] >= row[1] for row in rows)
+    assert all(row[0] == AudioSource.SYSTEM_AUDIO for row in rows)

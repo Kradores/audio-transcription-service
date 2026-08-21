@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
+
+from app.audio.contracts import SpeechSegment
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,3 +28,20 @@ class TranscriptionResult:
 
         if self.confidence is not None and not 0.0 <= self.confidence <= 1.0:
             raise ValueError("confidence must be between 0.0 and 1.0")
+
+
+class AudioSource(StrEnum):
+    SYSTEM_AUDIO = "system_audio"
+    MICROPHONE = "microphone"
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptionWorkItem:
+    source: AudioSource
+    segment: SpeechSegment
+
+
+@dataclass(frozen=True, slots=True)
+class SourcedTranscriptionResult:
+    source: AudioSource
+    result: TranscriptionResult

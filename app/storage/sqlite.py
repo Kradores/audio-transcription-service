@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
-from app.transcription.contracts import TranscriptionResult
+from app.transcription.contracts import SourcedTranscriptionResult
 
 
 class SQLiteTranscriptRepository:
@@ -20,6 +20,7 @@ class SQLiteTranscriptRepository:
             CREATE TABLE IF NOT EXISTS transcripts (
                 id INTEGER PRIMARY KEY,
                 created_at TEXT NOT NULL,
+                source TEXT NOT NULL,
                 start_time REAL NOT NULL,
                 end_time REAL NOT NULL,
                 language TEXT NOT NULL,
@@ -30,25 +31,28 @@ class SQLiteTranscriptRepository:
         )
         self._connection.commit()
 
-    def insert(self, result: TranscriptionResult) -> None:
+    def insert(self, sourced: SourcedTranscriptionResult) -> None:
         """Append a transcription result to persistent storage."""
 
+        result = sourced.result
         created_at = datetime.now(UTC).isoformat()
 
         self._connection.execute(
             """
             INSERT INTO transcripts (
                 created_at,
+                source,
                 start_time,
                 end_time,
                 language,
                 confidence,
                 text
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 created_at,
+                sourced.source.value,
                 result.start,
                 result.end,
                 result.language,

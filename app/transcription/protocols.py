@@ -6,9 +6,9 @@ from typing import Protocol
 import numpy as np
 
 from app.audio.contracts import SpeechSegment
-from app.transcription.contracts import TranscriptionResult
+from app.transcription.contracts import SourcedTranscriptionResult, TranscriptionResult
 
-type TranscriptionResultHandler = Callable[[TranscriptionResult], None]
+type SourcedTranscriptionResultHandler = Callable[[SourcedTranscriptionResult], None]
 
 
 class WhisperSegmentProtocol(Protocol):

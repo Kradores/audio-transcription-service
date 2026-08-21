@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from app.audio.contracts import ProcessingAudioFrame
 from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.services.transcription_executor import TranscriptionExecutor
+from app.transcription.contracts import AudioSource, TranscriptionWorkItem
 from app.vad.protocols import AudioVad, SpeechSegmentAssembler
 
 logger = logging.getLogger(__name__)
@@ -28,12 +29,15 @@ class SpeechPipeline:
 
     def __init__(
         self,
+        *,
+        source: AudioSource,
         capture: AudioCapture,
         normalizer: AudioNormalizer,
         vad: AudioVad,
         assembler: SpeechSegmentAssembler,
         transcription_executor: TranscriptionExecutor,
     ) -> None:
+        self._source = source
         self._capture = capture
         self._normalizer = normalizer
         self._vad = vad
@@ -168,7 +172,12 @@ class SpeechPipeline:
                 segment.timestamp + segment.duration,
             )
 
-            accepted = self._transcription_executor.submit(segment)
+            accepted = self._transcription_executor.submit(
+                TranscriptionWorkItem(
+                    source=self._source,
+                    segment=segment,
+                )
+            )
 
             if not accepted:
                 self._stats.segments_rejected += 1

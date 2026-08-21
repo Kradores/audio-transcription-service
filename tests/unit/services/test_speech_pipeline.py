@@ -16,6 +16,7 @@ from app.audio.contracts import (
 )
 from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.services.speech_pipeline import SpeechPipeline
+from app.transcription.contracts import AudioSource, TranscriptionWorkItem
 from app.vad.protocols import AudioVad, SpeechSegmentAssembler
 
 SAMPLE_RATE = 16_000
@@ -178,8 +179,8 @@ class FakeAssembler:
 
 class FakeTranscriptionExecutor:
     def __init__(self) -> None:
-        self.attempted: list[SpeechSegment] = []
-        self.submitted: list[SpeechSegment] = []
+        self.attempted: list[TranscriptionWorkItem] = []
+        self.submitted: list[TranscriptionWorkItem] = []
         self.accept = True
         self.started = False
         self.stopped = False
@@ -187,13 +188,13 @@ class FakeTranscriptionExecutor:
     async def start(self) -> None:
         self.started = True
 
-    def submit(self, segment: SpeechSegment) -> bool:
-        self.attempted.append(segment)
+    def submit(self, item: TranscriptionWorkItem) -> bool:
+        self.attempted.append(item)
 
         if not self.accept:
             return False
 
-        self.submitted.append(segment)
+        self.submitted.append(item)
         return True
 
     async def stop(self) -> None:
@@ -271,6 +272,12 @@ def create_speech_segment() -> SpeechSegment:
     )
 
 
+def create_transcription_work_item(
+    source: AudioSource = AudioSource.SYSTEM_AUDIO,
+) -> TranscriptionWorkItem:
+    return TranscriptionWorkItem(source=source, segment=create_speech_segment())
+
+
 def create_pipeline(
     *,
     capture: AudioCapture | None = None,
@@ -279,6 +286,7 @@ def create_pipeline(
     assembler: SpeechSegmentAssembler | None = None,
     transcription_executor: FakeTranscriptionExecutor | None = None,
     segments: tuple[SpeechSegment, ...] = (),
+    source: AudioSource = AudioSource.SYSTEM_AUDIO,
 ) -> SpeechPipeline:
     processing_frame = create_processing_frame()
 
@@ -302,6 +310,7 @@ def create_pipeline(
         transcription_executor = FakeTranscriptionExecutor()
 
     return SpeechPipeline(
+        source=source,
         capture=capture,
         normalizer=normalizer,
         vad=vad,
@@ -315,19 +324,20 @@ async def test_pipeline_processes_frame_through_all_stages() -> None:
     # Arrange
     captured_frame = create_audio_frame()
     processing_frame = create_processing_frame()
-    segment = create_speech_segment()
+    item = create_transcription_work_item()
 
     capture = FakeAudioCapture([captured_frame])
     normalizer = FakeNormalizer((processing_frame,))
     vad = FakeVad()
     assembler = FakeAssembler(
         {
-            id(processing_frame): (segment,),
+            id(processing_frame): (item.segment,),
         }
     )
     transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=capture,
         normalizer=normalizer,
         vad=vad,
@@ -348,7 +358,7 @@ async def test_pipeline_processes_frame_through_all_stages() -> None:
     assert normalizer.processed == [captured_frame]
     assert vad.processed == [processing_frame]
     assert assembler.processed == [processing_frame]
-    assert transcription_executor.submitted == [segment]
+    assert transcription_executor.submitted == [item]
     assert transcription_executor.started
     assert transcription_executor.stopped
 
@@ -370,6 +380,7 @@ async def test_pipeline_processes_all_normalized_frames() -> None:
     transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=capture,
         normalizer=normalizer,
         vad=vad,
@@ -386,11 +397,11 @@ async def test_pipeline_processes_all_normalized_frames() -> None:
 
 
 @pytest.mark.anyio
-async def test_pipeline_submits_all_segments_from_one_processing_frame() -> None:
+async def test_pipeline_submits_all_items_from_one_processing_frame() -> None:
     processing_frame = create_processing_frame()
 
-    segment_one = create_speech_segment()
-    segment_two = create_speech_segment()
+    item_one = create_transcription_work_item()
+    item_two = create_transcription_work_item()
 
     capture = FakeAudioCapture([create_audio_frame()])
     normalizer = FakeNormalizer((processing_frame,))
@@ -398,14 +409,15 @@ async def test_pipeline_submits_all_segments_from_one_processing_frame() -> None
     assembler = FakeAssembler(
         {
             id(processing_frame): (
-                segment_one,
-                segment_two,
+                item_one.segment,
+                item_two.segment,
             ),
         }
     )
     transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=capture,
         normalizer=normalizer,
         vad=vad,
@@ -417,8 +429,8 @@ async def test_pipeline_submits_all_segments_from_one_processing_frame() -> None
     await pipeline.wait()
 
     assert transcription_executor.submitted == [
-        segment_one,
-        segment_two,
+        item_one,
+        item_two,
     ]
 
 
@@ -437,6 +449,7 @@ async def test_pipeline_processes_frames_emitted_by_normalizer_flush() -> None:
     transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=capture,
         normalizer=normalizer,
         vad=vad,
@@ -534,6 +547,7 @@ async def test_pipeline_discontinuity_callback_only_marks_pending_reset() -> Non
     transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=capture,
         normalizer=normalizer,
         vad=vad,
@@ -568,6 +582,7 @@ async def test_pipeline_discontinuity_resets_processing_components() -> None:
     transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=capture,
         normalizer=normalizer,
         vad=vad,
@@ -613,6 +628,7 @@ async def test_pipeline_resets_before_first_post_discontinuity_frame() -> None:
     transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=capture,
         normalizer=normalizer,
         vad=vad,
@@ -655,6 +671,7 @@ async def test_pipeline_handles_multiple_discontinuities() -> None:
     transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=capture,
         normalizer=normalizer,
         vad=vad,
@@ -694,6 +711,7 @@ async def test_pipeline_coalesces_multiple_pending_discontinuities() -> None:
     transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=capture,
         normalizer=normalizer,
         vad=vad,
@@ -731,6 +749,7 @@ async def test_pipeline_discontinuity_does_not_submit_transcription() -> None:
     transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=capture,
         normalizer=normalizer,
         vad=vad,
@@ -770,6 +789,7 @@ async def test_pipeline_logs_vad_segments_and_final_statistics(
     transcription_executor = FakeTranscriptionExecutor()
 
     pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=capture,
         normalizer=FakeNormalizer((processing_frame,)),
         vad=VadWithEvents(),
@@ -795,19 +815,20 @@ async def test_pipeline_logs_vad_segments_and_final_statistics(
 
 
 @pytest.mark.anyio
-async def test_pipeline_continues_when_transcription_executor_rejects_segment() -> None:
+async def test_pipeline_continues_when_transcription_executor_rejects_item() -> None:
     processing_frame = create_processing_frame()
-    segment = create_speech_segment()
+    item = create_transcription_work_item()
 
     transcription_executor = FakeTranscriptionExecutor()
     transcription_executor.accept = False
 
     pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=FakeAudioCapture([create_audio_frame()]),
         normalizer=FakeNormalizer((processing_frame,)),
         vad=FakeVad(),
         assembler=FakeAssembler(
-            {id(processing_frame): (segment,)},
+            {id(processing_frame): (item.segment,)},
         ),
         transcription_executor=transcription_executor,
     )
@@ -815,7 +836,7 @@ async def test_pipeline_continues_when_transcription_executor_rejects_segment() 
     await pipeline.start()
     await pipeline.wait()
 
-    assert transcription_executor.attempted == [segment]
+    assert transcription_executor.attempted == [item]
     assert transcription_executor.submitted == []
 
 
@@ -837,17 +858,17 @@ async def test_pipeline_starts_and_stops_transcription_executor() -> None:
 
 
 @pytest.mark.anyio
-async def test_pipeline_counts_rejected_transcription_segment(
+async def test_pipeline_counts_rejected_transcription_item(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    segment = create_speech_segment()
+    item = create_transcription_work_item()
 
     executor = FakeTranscriptionExecutor()
     executor.accept = False
 
     pipeline = create_pipeline(
         transcription_executor=executor,
-        segments=(segment,),
+        segments=(item.segment,),
     )
 
     with caplog.at_level("INFO", logger="app.services.speech_pipeline"):
@@ -855,7 +876,7 @@ async def test_pipeline_counts_rejected_transcription_segment(
         await pipeline.wait()
         await pipeline.stop()
 
-    assert executor.attempted == [segment]
+    assert executor.attempted == [item]
     assert executor.submitted == []
 
     messages = [record.getMessage() for record in caplog.records]
@@ -865,20 +886,20 @@ async def test_pipeline_counts_rejected_transcription_segment(
 
 @pytest.mark.anyio
 async def test_pipeline_does_not_deliver_rejected_segment() -> None:
-    segment = create_speech_segment()
+    item = create_transcription_work_item()
 
     executor = FakeTranscriptionExecutor()
     executor.accept = False
 
     pipeline = create_pipeline(
         transcription_executor=executor,
-        segments=(segment,),
+        segments=(item.segment,),
     )
 
     await pipeline.start()
     await pipeline.wait()
 
-    assert executor.attempted == [segment]
+    assert executor.attempted == [item]
     assert executor.submitted == []
 
 
@@ -887,17 +908,17 @@ async def test_pipeline_continues_after_transcription_rejection() -> None:
     processing_frame_one = create_processing_frame(1.0)
     processing_frame_two = create_processing_frame(2.0)
 
-    segment_one = create_speech_segment()
-    segment_two = create_speech_segment()
+    item_one = create_transcription_work_item()
+    item_two = create_transcription_work_item()
 
     class RejectFirstExecutor(FakeTranscriptionExecutor):
-        def submit(self, segment: SpeechSegment) -> bool:
-            self.attempted.append(segment)
+        def submit(self, item: TranscriptionWorkItem) -> bool:
+            self.attempted.append(item)
 
             if len(self.attempted) == 1:
                 return False
 
-            self.submitted.append(segment)
+            self.submitted.append(item)
             return True
 
     executor = RejectFirstExecutor()
@@ -918,12 +939,13 @@ async def test_pipeline_continues_after_transcription_rejection() -> None:
 
     assembler = FakeAssembler(
         {
-            id(processing_frame_one): (segment_one,),
-            id(processing_frame_two): (segment_two,),
+            id(processing_frame_one): (item_one.segment,),
+            id(processing_frame_two): (item_two.segment,),
         },
     )
 
     pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=capture,
         normalizer=normalizer,
         vad=FakeVad(),
@@ -935,12 +957,12 @@ async def test_pipeline_continues_after_transcription_rejection() -> None:
     await pipeline.wait()
 
     assert executor.attempted == [
-        segment_one,
-        segment_two,
+        item_one,
+        item_two,
     ]
 
     assert executor.submitted == [
-        segment_two,
+        item_two,
     ]
 
 
@@ -948,17 +970,17 @@ async def test_pipeline_continues_after_transcription_rejection() -> None:
 async def test_pipeline_reports_rejected_segments_in_final_statistics(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    segment_one = create_speech_segment()
-    segment_two = create_speech_segment()
+    item_one = create_transcription_work_item()
+    item_two = create_transcription_work_item()
 
     class RejectFirstExecutor(FakeTranscriptionExecutor):
-        def submit(self, segment: SpeechSegment) -> bool:
-            self.attempted.append(segment)
+        def submit(self, item: TranscriptionWorkItem) -> bool:
+            self.attempted.append(item)
 
             if len(self.attempted) == 1:
                 return False
 
-            self.submitted.append(segment)
+            self.submitted.append(item)
             return True
 
     executor = RejectFirstExecutor()
@@ -967,6 +989,7 @@ async def test_pipeline_reports_rejected_segments_in_final_statistics(
     processing_frame_two = create_processing_frame(2.0)
 
     pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=FakeAudioCapture(
             [
                 create_audio_frame(),
@@ -982,8 +1005,8 @@ async def test_pipeline_reports_rejected_segments_in_final_statistics(
         vad=FakeVad(),
         assembler=FakeAssembler(
             {
-                id(processing_frame_one): (segment_one,),
-                id(processing_frame_two): (segment_two,),
+                id(processing_frame_one): (item_one.segment,),
+                id(processing_frame_two): (item_two.segment,),
             },
         ),
         transcription_executor=executor,
@@ -997,3 +1020,38 @@ async def test_pipeline_reports_rejected_segments_in_final_statistics(
     messages = [record.getMessage() for record in caplog.records]
 
     assert any("segments_emitted=2 segments_rejected=1" in message for message in messages)
+
+
+@pytest.mark.anyio
+async def test_pipeline_attaches_source_to_transcription_work_item() -> None:
+    # Arrange
+    processing_frame = create_processing_frame()
+    segment = create_speech_segment()
+
+    transcription_executor = FakeTranscriptionExecutor()
+
+    pipeline = SpeechPipeline(
+        source=AudioSource.MICROPHONE,
+        capture=FakeAudioCapture([create_audio_frame()]),
+        normalizer=FakeNormalizer((processing_frame,)),
+        vad=FakeVad(),
+        assembler=FakeAssembler(
+            {
+                id(processing_frame): (segment,),
+            }
+        ),
+        transcription_executor=transcription_executor,
+    )
+
+    # Act
+    await pipeline.start()
+    await pipeline.wait()
+    await pipeline.stop()
+
+    # Assert
+    assert transcription_executor.submitted == [
+        TranscriptionWorkItem(
+            source=AudioSource.MICROPHONE,
+            segment=segment,
+        )
+    ]

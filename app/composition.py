@@ -31,6 +31,7 @@ from app.services.speech_pipeline import SpeechPipeline
 from app.services.transcription_executor import TranscriptionExecutor, TranscriptionExecutorImpl
 from app.storage.recorder import TranscriptRecorderImpl
 from app.storage.sqlite import SQLiteTranscriptRepository
+from app.transcription.contracts import AudioSource
 from app.transcription.faster_whisper import FasterWhisperTranscriber
 from app.transcription.protocols import Transcriber
 from app.vad.assembler import SpeechSegmentAssemblerImpl
@@ -72,6 +73,7 @@ def create_application(
     )
 
     pipeline = create_speech_pipeline(
+        source=AudioSource.SYSTEM_AUDIO,
         capture=capture,
         normalizer=normalizer,
         vad=vad,
@@ -205,6 +207,7 @@ def create_speech_assembler(settings: AudioSegmentationSettings) -> SpeechSegmen
 
 def create_speech_pipeline(
     *,
+    source: AudioSource,
     capture: AudioCapture,
     normalizer: AudioNormalizer,
     vad: AudioVad,
@@ -214,6 +217,7 @@ def create_speech_pipeline(
     """Create the application speech-processing pipeline."""
 
     return SpeechPipeline(
+        source=source,
         capture=capture,
         normalizer=normalizer,
         vad=vad,
