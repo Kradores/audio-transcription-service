@@ -308,13 +308,13 @@ class PyAudioCapture(AudioCapture):
         self._device_change_event = asyncio.Event()
 
         self._started = False
-        self._backend_timestamp_offset: float | None = None
+        self._next_frame_timestamp: float | None = None
         self._discontinuity_handler: Callable[[], None] | None = None
         self._recovery_active = False
         self._capture_frame_duration_logged = False
 
         self._device_monitor.set_change_handler(
-            self._handle_default_output_changed,
+            self._handle_default_device_changed,
         )
 
     async def start(self) -> None:
@@ -324,7 +324,7 @@ class PyAudioCapture(AudioCapture):
         self._started = True
         self._event_loop = asyncio.get_running_loop()
 
-        self._backend_timestamp_offset = None
+        self._next_frame_timestamp = None
         self._recovery_active = False
         self._capture_frame_duration_logged = False
         self._device_change_event.clear()
@@ -400,7 +400,7 @@ class PyAudioCapture(AudioCapture):
 
     async def _open_fresh_stream(self) -> None:
         self._dispose_audio_session()
-        self._backend_timestamp_offset = None
+        self._next_frame_timestamp = None
 
         audio = self._audio_factory.create()
         device_provider = self._device_provider_factory.create(audio)
@@ -476,7 +476,6 @@ class PyAudioCapture(AudioCapture):
         self,
         in_data: bytes,
         frame_count: int,
-        time_info: dict[str, float],
     ) -> AudioFrame:
         if self._format is None:
             raise RuntimeError("capture format is not initialized")
@@ -486,7 +485,10 @@ class PyAudioCapture(AudioCapture):
             self._format.channels,
         )
 
-        timestamp = self._conversation_timestamp(time_info)
+        timestamp = self._next_timestamp(
+            frame_count=frame_count,
+            sample_rate=self._format.sample_rate,
+        )
 
         return AudioFrame(
             audio=audio,
@@ -501,6 +503,8 @@ class PyAudioCapture(AudioCapture):
         time_info: dict[str, float],
         status_flags: int,
     ) -> tuple[None, int]:
+        del time_info, status_flags
+
         if not self._capture_frame_duration_logged:
             if self._format is None:
                 raise RuntimeError("capture format is not initialized")
@@ -518,7 +522,6 @@ class PyAudioCapture(AudioCapture):
         frame = self._create_frame(
             in_data=in_data,
             frame_count=frame_count,
-            time_info=time_info,
         )
 
         self._transport.submit(frame)
@@ -533,7 +536,7 @@ class PyAudioCapture(AudioCapture):
                 self._device_change_event.clear()
 
                 self._begin_recovery(
-                    reason="default_output_changed",
+                    reason="default_device_changed",
                 )
 
             stream = self._stream
@@ -580,14 +583,14 @@ class PyAudioCapture(AudioCapture):
                 RECOVERY_MONITOR_INTERVAL_SECONDS,
             )
 
-    def _handle_default_output_changed(
+    def _handle_default_device_changed(
         self,
         endpoint_id: str | None,
     ) -> None:
-        """Signal a default-output change from the monitor callback thread."""
+        """Signal a default-device change from the monitor callback thread."""
 
         logger.info(
-            "audio capture default output change signaled endpoint_id=%r",
+            "audio capture default device change signaled endpoint_id=%r",
             endpoint_id,
         )
 
@@ -619,18 +622,22 @@ class PyAudioCapture(AudioCapture):
 
         self._dispose_audio_session()
 
-    def _conversation_timestamp(
+    def _next_timestamp(
         self,
-        time_info: dict[str, float],
+        *,
+        frame_count: int,
+        sample_rate: int,
     ) -> float:
-        input_time = time_info["input_buffer_adc_time"]
+        frame_duration = frame_count / sample_rate
 
-        if self._backend_timestamp_offset is None:
-            backend_now = time_info["current_time"]
-            conversation_now = self._timeline.now()
+        if self._next_frame_timestamp is None:
+            timestamp = max(
+                0.0,
+                self._timeline.now() - frame_duration,
+            )
+        else:
+            timestamp = self._next_frame_timestamp
 
-            self._backend_timestamp_offset = conversation_now - backend_now
+        self._next_frame_timestamp = timestamp + frame_duration
 
-        timestamp = input_time + self._backend_timestamp_offset
-
-        return max(0.0, timestamp)
+        return timestamp

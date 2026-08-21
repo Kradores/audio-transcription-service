@@ -469,62 +469,6 @@ async def test_start_uses_loopback_device_format(
     fake_transport.stop.assert_awaited_once_with()
 
 
-def test_audio_callback_maps_backend_timestamp_to_conversation_timeline() -> None:
-    samples = np.array(
-        [
-            [100, 200],
-            [300, 400],
-        ],
-        dtype=np.int16,
-    )
-
-    fake_audio = MagicMock(spec=pyaudiowpatch.PyAudio)
-    fake_device_provider = MagicMock()
-    fake_transport = MagicMock()
-    fake_timeline = FakeAudioTimeline(0.0)
-
-    monitor = FakeAudioDeviceMonitor()
-
-    capture = create_audio_capture(
-        audio_factory=FakePyAudioFactory(fake_audio),
-        device_provider_factory=FakeDeviceProviderFactory(fake_device_provider),
-        device_monitor=monitor,
-        transport=fake_transport,
-        timeline=fake_timeline,
-        sleep=yielding_sleep,
-    )
-
-    capture._format = AudioFormat(
-        sample_rate=48_000,
-        channels=2,
-        sample_type="int16",
-    )
-
-    capture._on_audio(
-        in_data=samples.tobytes(),
-        frame_count=2,
-        time_info={"input_buffer_adc_time": 123.5, "current_time": 123.5},
-        status_flags=0,
-    )
-
-    capture._on_audio(
-        in_data=samples.tobytes(),
-        frame_count=2,
-        time_info={"input_buffer_adc_time": 123.52, "current_time": 123.52},
-        status_flags=0,
-    )
-
-    first_frame = fake_transport.submit.call_args_list[0].args[0]
-    second_frame = fake_transport.submit.call_args_list[1].args[0]
-
-    assert first_frame.timestamp == 0.0
-    assert second_frame.timestamp == pytest.approx(0.02)
-
-    assert first_frame.format.sample_rate == 48_000
-    assert first_frame.format.channels == 2
-    np.testing.assert_array_equal(first_frame.audio, samples)
-
-
 def test_pyaudio_capture_dependency_boundary() -> None:
     """Test that PyAudioCapture can be instantiated."""
     capture = create_audio_capture()
@@ -827,7 +771,12 @@ def test_conversation_timeline_survives_stream_recovery() -> None:
     fake_transport.submit = submit
     fake_timeline = FakeAudioTimeline(10.0)
 
+    monitor = FakeAudioDeviceMonitor()
+
     capture = create_audio_capture(
+        audio_factory=FakePyAudioFactory(MagicMock()),
+        device_provider_factory=FakeDeviceProviderFactory(MagicMock()),
+        device_monitor=monitor,
         transport=fake_transport,
         timeline=fake_timeline,
         sleep=yielding_sleep,
@@ -839,43 +788,33 @@ def test_conversation_timeline_survives_stream_recovery() -> None:
         sample_type="int16",
     )
 
-    samples = np.zeros((2, 2), dtype=np.int16)
+    samples = np.zeros((480, 2), dtype=np.int16)
 
-    # First native stream.
     capture._on_audio(
         in_data=samples.tobytes(),
-        frame_count=2,
-        time_info={
-            "input_buffer_adc_time": 99.98,
-            "current_time": 100.0,
-        },
+        frame_count=480,
+        time_info={},
         status_flags=0,
     )
 
     first_frame = submit.call_args_list[0].args[0]
 
-    assert first_frame.timestamp == pytest.approx(9.98)
+    assert first_frame.timestamp == pytest.approx(9.99)
 
-    # Simulate opening a fresh native stream during recovery.
-    capture._backend_timestamp_offset = None
-
-    # The conversation itself has continued.
+    # Simulate a fresh native stream after recovery.
+    capture._next_frame_timestamp = None
     fake_timeline.current = 20.0
 
-    # The new PortAudio instance may have a completely different clock.
     capture._on_audio(
         in_data=samples.tobytes(),
-        frame_count=2,
-        time_info={
-            "input_buffer_adc_time": 1.98,
-            "current_time": 2.0,
-        },
+        frame_count=480,
+        time_info={},
         status_flags=0,
     )
 
     recovered_frame = submit.call_args_list[1].args[0]
 
-    assert recovered_frame.timestamp == pytest.approx(19.98)
+    assert recovered_frame.timestamp == pytest.approx(19.99)
 
 
 @pytest.mark.anyio
@@ -1202,20 +1141,78 @@ async def test_start_opens_default_microphone_input_stream() -> None:
         await capture.stop()
 
 
-def test_callback_maps_backend_timestamp_to_conversation_timeline() -> None:
-    # Arrange
-    submit = MagicMock(return_value=True)
-    transport = MagicMock()
-    transport.submit = submit
+def test_two_captures_share_conversation_timeline() -> None:
+    timeline = FakeAudioTimeline(2.0)
 
-    timeline = FakeAudioTimeline(now=5.0)
+    system_transport = MagicMock()
+    microphone_transport = MagicMock()
+
+    system_capture = create_audio_capture(
+        audio_factory=FakePyAudioFactory(MagicMock()),
+        device_provider_factory=FakeDeviceProviderFactory(MagicMock()),
+        device_monitor=FakeAudioDeviceMonitor(),
+        transport=system_transport,
+        timeline=timeline,
+        sleep=yielding_sleep,
+    )
+
+    microphone_capture = create_audio_capture(
+        audio_factory=FakePyAudioFactory(MagicMock()),
+        device_provider_factory=FakeDeviceProviderFactory(MagicMock()),
+        device_monitor=FakeAudioDeviceMonitor(),
+        transport=microphone_transport,
+        timeline=timeline,
+        sleep=yielding_sleep,
+    )
+
+    system_capture._format = AudioFormat(
+        sample_rate=48_000,
+        channels=2,
+        sample_type="int16",
+    )
+
+    microphone_capture._format = AudioFormat(
+        sample_rate=48_000,
+        channels=1,
+        sample_type="int16",
+    )
+
+    system_audio = np.zeros((480, 2), dtype=np.int16)
+    microphone_audio = np.zeros((480, 1), dtype=np.int16)
+
+    system_capture._on_audio(
+        in_data=system_audio.tobytes(),
+        frame_count=480,
+        time_info={},
+        status_flags=0,
+    )
+
+    timeline.current = 5.0
+
+    microphone_capture._on_audio(
+        in_data=microphone_audio.tobytes(),
+        frame_count=480,
+        time_info={},
+        status_flags=0,
+    )
+
+    system_frame = system_transport.submit.call_args.args[0]
+    microphone_frame = microphone_transport.submit.call_args.args[0]
+
+    assert system_frame.timestamp == pytest.approx(1.99)
+    assert microphone_frame.timestamp == pytest.approx(4.99)
+
+
+def test_audio_callback_advances_timestamp_by_frame_duration() -> None:
+    fake_transport = MagicMock()
+    fake_timeline = FakeAudioTimeline(5.0)
 
     capture = create_audio_capture(
         audio_factory=FakePyAudioFactory(MagicMock()),
         device_provider_factory=FakeDeviceProviderFactory(MagicMock()),
         device_monitor=FakeAudioDeviceMonitor(),
-        transport=transport,
-        timeline=timeline,
+        transport=fake_transport,
+        timeline=fake_timeline,
         sleep=yielding_sleep,
     )
 
@@ -1225,115 +1222,40 @@ def test_callback_maps_backend_timestamp_to_conversation_timeline() -> None:
         sample_type="int16",
     )
 
-    samples = np.zeros((2, 2), dtype=np.int16)
+    samples = np.zeros((480, 2), dtype=np.int16)
 
-    # Act
     capture._on_audio(
         in_data=samples.tobytes(),
-        frame_count=2,
-        time_info={
-            "input_buffer_adc_time": 99.98,
-            "current_time": 100.0,
-        },
+        frame_count=480,
+        time_info={},
         status_flags=0,
     )
 
     capture._on_audio(
         in_data=samples.tobytes(),
-        frame_count=2,
-        time_info={
-            "input_buffer_adc_time": 100.00,
-            "current_time": 100.02,
-        },
+        frame_count=480,
+        time_info={},
         status_flags=0,
     )
 
-    # Assert
-    first_frame = submit.call_args_list[0].args[0]
-    second_frame = submit.call_args_list[1].args[0]
+    first_frame = fake_transport.submit.call_args_list[0].args[0]
+    second_frame = fake_transport.submit.call_args_list[1].args[0]
 
-    assert first_frame.timestamp == pytest.approx(4.98)
+    assert first_frame.timestamp == pytest.approx(4.99)
     assert second_frame.timestamp == pytest.approx(5.00)
 
 
-def test_two_captures_share_conversation_timeline() -> None:
-    # Arrange
-    timeline = FakeAudioTimeline(now=2.0)
-
-    system_submit = MagicMock(return_value=True)
-    system_transport = MagicMock()
-    system_transport.submit = system_submit
-
-    microphone_submit = MagicMock(return_value=True)
-    microphone_transport = MagicMock()
-    microphone_transport.submit = microphone_submit
-
-    system_capture = create_audio_capture(
-        transport=system_transport,
-        timeline=timeline,
-    )
-    microphone_capture = create_audio_capture(
-        transport=microphone_transport,
-        timeline=timeline,
-    )
-
-    system_capture._format = AudioFormat(
-        sample_rate=48_000,
-        channels=2,
-        sample_type="int16",
-    )
-    microphone_capture._format = AudioFormat(
-        sample_rate=48_000,
-        channels=1,
-        sample_type="int16",
-    )
-
-    system_audio = np.zeros((2, 2), dtype=np.int16)
-    microphone_audio = np.zeros((2, 1), dtype=np.int16)
-
-    # System begins around conversation time 2.0.
-    system_capture._on_audio(
-        in_data=system_audio.tobytes(),
-        frame_count=2,
-        time_info={
-            "input_buffer_adc_time": 99.98,
-            "current_time": 100.0,
-        },
-        status_flags=0,
-    )
-
-    # Microphone begins three seconds later.
-    timeline.current = 5.0
-
-    microphone_capture._on_audio(
-        in_data=microphone_audio.tobytes(),
-        frame_count=2,
-        time_info={
-            "input_buffer_adc_time": 499.98,
-            "current_time": 500.0,
-        },
-        status_flags=0,
-    )
-
-    # Assert
-    system_frame = system_submit.call_args.args[0]
-    microphone_frame = microphone_submit.call_args.args[0]
-
-    assert system_frame.timestamp == pytest.approx(1.98)
-    assert microphone_frame.timestamp == pytest.approx(4.98)
-
-
-def test_recovered_stream_reanchors_to_same_conversation_timeline() -> None:
-    # Arrange
-    timeline = FakeAudioTimeline(now=10.0)
-
-    submit = MagicMock(return_value=True)
-    transport = MagicMock()
-    transport.submit = submit
+def test_active_stream_timestamp_progression_ignores_callback_timing_jitter() -> None:
+    fake_transport = MagicMock()
+    fake_timeline = FakeAudioTimeline(5.0)
 
     capture = create_audio_capture(
-        transport=transport,
-        timeline=timeline,
+        audio_factory=FakePyAudioFactory(MagicMock()),
+        device_provider_factory=FakeDeviceProviderFactory(MagicMock()),
+        device_monitor=FakeAudioDeviceMonitor(),
+        transport=fake_transport,
+        timeline=fake_timeline,
+        sleep=yielding_sleep,
     )
 
     capture._format = AudioFormat(
@@ -1342,37 +1264,104 @@ def test_recovered_stream_reanchors_to_same_conversation_timeline() -> None:
         sample_type="int16",
     )
 
-    samples = np.zeros((2, 2), dtype=np.int16)
+    samples = np.zeros((480, 2), dtype=np.int16)
 
     capture._on_audio(
         in_data=samples.tobytes(),
-        frame_count=2,
-        time_info={
-            "input_buffer_adc_time": 99.98,
-            "current_time": 100.0,
-        },
+        frame_count=480,
+        time_info={},
         status_flags=0,
     )
 
-    first_frame = submit.call_args.args[0]
-
-    assert first_frame.timestamp == pytest.approx(9.98)
-
-    # Simulate opening a fresh native stream.
-    capture._backend_timestamp_offset = None
-
-    timeline.current = 20.0
+    # Simulate delayed callback scheduling.
+    fake_timeline.current = 5.037
 
     capture._on_audio(
         in_data=samples.tobytes(),
-        frame_count=2,
-        time_info={
-            "input_buffer_adc_time": 1.98,
-            "current_time": 2.0,
-        },
+        frame_count=480,
+        time_info={},
         status_flags=0,
     )
 
-    recovered_frame = submit.call_args.args[0]
+    first_frame = fake_transport.submit.call_args_list[0].args[0]
+    second_frame = fake_transport.submit.call_args_list[1].args[0]
 
-    assert recovered_frame.timestamp == pytest.approx(19.98)
+    assert first_frame.timestamp == pytest.approx(4.99)
+    assert second_frame.timestamp == pytest.approx(5.00)
+
+
+def test_timestamp_progression_uses_actual_frame_count() -> None:
+    fake_transport = MagicMock()
+    fake_timeline = FakeAudioTimeline(10.0)
+
+    capture = create_audio_capture(
+        audio_factory=FakePyAudioFactory(MagicMock()),
+        device_provider_factory=FakeDeviceProviderFactory(MagicMock()),
+        device_monitor=FakeAudioDeviceMonitor(),
+        transport=fake_transport,
+        timeline=fake_timeline,
+        sleep=yielding_sleep,
+    )
+
+    capture._format = AudioFormat(
+        sample_rate=44_100,
+        channels=2,
+        sample_type="int16",
+    )
+
+    samples = np.zeros((576, 2), dtype=np.int16)
+
+    capture._on_audio(
+        in_data=samples.tobytes(),
+        frame_count=576,
+        time_info={},
+        status_flags=0,
+    )
+
+    capture._on_audio(
+        in_data=samples.tobytes(),
+        frame_count=576,
+        time_info={},
+        status_flags=0,
+    )
+
+    first_frame = fake_transport.submit.call_args_list[0].args[0]
+    second_frame = fake_transport.submit.call_args_list[1].args[0]
+
+    duration = 576 / 44_100
+
+    assert first_frame.timestamp == pytest.approx(10.0 - duration)
+    assert second_frame.timestamp == pytest.approx(10.0)
+
+
+def test_first_frame_timestamp_is_clamped_to_zero() -> None:
+    fake_transport = MagicMock()
+    fake_timeline = FakeAudioTimeline(0.0)
+
+    capture = create_audio_capture(
+        audio_factory=FakePyAudioFactory(MagicMock()),
+        device_provider_factory=FakeDeviceProviderFactory(MagicMock()),
+        device_monitor=FakeAudioDeviceMonitor(),
+        transport=fake_transport,
+        timeline=fake_timeline,
+        sleep=yielding_sleep,
+    )
+
+    capture._format = AudioFormat(
+        sample_rate=48_000,
+        channels=2,
+        sample_type="int16",
+    )
+
+    samples = np.zeros((480, 2), dtype=np.int16)
+
+    capture._on_audio(
+        in_data=samples.tobytes(),
+        frame_count=480,
+        time_info={},
+        status_flags=0,
+    )
+
+    frame = fake_transport.submit.call_args.args[0]
+
+    assert frame.timestamp == 0.0
