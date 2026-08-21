@@ -5,6 +5,7 @@ import sqlite3
 from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.core.config.models import Settings
 from app.services.speech_pipeline import SpeechPipeline
+from app.services.transcription_executor import TranscriptionExecutor
 
 
 class Application:
@@ -16,12 +17,14 @@ class Application:
         capture: AudioCapture,
         normalizer: AudioNormalizer,
         pipeline: SpeechPipeline,
+        transcription_executor: TranscriptionExecutor,
         database: sqlite3.Connection,
     ) -> None:
         self._settings = settings
         self._capture = capture
         self._normalizer = normalizer
         self._pipeline = pipeline
+        self._transcription_executor = transcription_executor
         self._database = database
 
     @property
@@ -51,10 +54,12 @@ class Application:
     async def start(self) -> None:
         """Start the application."""
 
+        await self._transcription_executor.start()
         await self._pipeline.start()
 
     async def stop(self) -> None:
         """Stop the application and release owned resources."""
 
         await self._pipeline.stop()
+        await self._transcription_executor.stop()
         self._database.close()

@@ -56,11 +56,10 @@ class SpeechPipeline:
         )
 
     async def start(self) -> None:
-        """Start transcription execution, capture, and pipeline processing."""
+        """Start capture and pipeline processing."""
         if self._started:
             raise RuntimeError("pipeline has already been started")
 
-        await self._transcription_executor.start()
         await self._capture.start()
 
         self._stats = _SpeechPipelineStats()
@@ -75,7 +74,7 @@ class SpeechPipeline:
         )
 
     async def stop(self) -> None:
-        """Stop the pipeline and drain accepted transcription work."""
+        """Stop capture and pipeline processing."""
         if not self._started:
             return
 
@@ -90,8 +89,6 @@ class SpeechPipeline:
 
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-
-        await self._transcription_executor.stop()
 
         logger.info(
             "speech pipeline stopped captured_frames=%d processing_frames=%d "

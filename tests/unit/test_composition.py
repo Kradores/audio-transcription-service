@@ -363,3 +363,83 @@ def test_captures_can_share_same_timeline() -> None:
 
     assert system_capture._timeline is timeline
     assert microphone_capture._timeline is timeline
+
+
+def test_create_application_shares_transcription_executor_with_pipeline(
+    tmp_path: Path,
+) -> None:
+    # Arrange
+    document = valid_configuration_document()
+    config_path = write_configuration(tmp_path, document)
+
+    capture = MagicMock(spec=AudioCapture)
+    vad = MagicMock(spec=AudioVad)
+    transcription_executor = MagicMock()
+
+    with (
+        patch(
+            "app.composition.create_system_audio_capture",
+            return_value=capture,
+        ),
+        patch(
+            "app.composition.create_vad",
+            return_value=vad,
+        ),
+        patch(
+            "app.composition.create_transcription_executor",
+            return_value=transcription_executor,
+        ),
+        patch("app.composition.create_speech_pipeline") as create_pipeline,
+        patch("app.composition.Application") as application_type,
+    ):
+        # Act
+        create_application(config_path)
+
+    # Assert
+    create_pipeline.assert_called_once()
+
+    assert create_pipeline.call_args.kwargs["transcription_executor"] is transcription_executor
+
+    application_type.assert_called_once()
+
+    assert application_type.call_args.kwargs["transcription_executor"] is transcription_executor
+
+
+def test_create_application_wires_shared_executor_and_pipeline(
+    tmp_path: Path,
+) -> None:
+    # Arrange
+    document = valid_configuration_document()
+    config_path = write_configuration(tmp_path, document)
+
+    capture = MagicMock(spec=AudioCapture)
+    vad = MagicMock(spec=AudioVad)
+    transcription_executor = MagicMock()
+
+    with (
+        patch(
+            "app.composition.create_system_audio_capture",
+            return_value=capture,
+        ),
+        patch(
+            "app.composition.create_vad",
+            return_value=vad,
+        ),
+        patch(
+            "app.composition.create_transcription_executor",
+            return_value=transcription_executor,
+        ),
+        patch("app.composition.create_speech_pipeline") as create_pipeline,
+        patch("app.composition.Application") as application_type,
+    ):
+        # Act
+        create_application(config_path)
+
+    # Assert
+    pipeline = create_pipeline.return_value
+
+    assert create_pipeline.call_args.kwargs["transcription_executor"] is transcription_executor
+
+    assert application_type.call_args.kwargs["transcription_executor"] is transcription_executor
+
+    assert application_type.call_args.kwargs["pipeline"] is pipeline

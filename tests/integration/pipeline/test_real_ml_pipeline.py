@@ -109,9 +109,13 @@ async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None
     )
 
     # Act
+    await transcription_executor.start()
+
     await pipeline.start()
     await pipeline.wait()
     await pipeline.stop()
+
+    await transcription_executor.stop()
 
     # Assert
     rows = database.execute(

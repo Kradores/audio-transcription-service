@@ -359,8 +359,6 @@ async def test_pipeline_processes_frame_through_all_stages() -> None:
     assert vad.processed == [processing_frame]
     assert assembler.processed == [processing_frame]
     assert transcription_executor.submitted == [item]
-    assert transcription_executor.started
-    assert transcription_executor.stopped
 
 
 @pytest.mark.anyio
@@ -841,23 +839,6 @@ async def test_pipeline_continues_when_transcription_executor_rejects_item() -> 
 
 
 @pytest.mark.anyio
-async def test_pipeline_starts_and_stops_transcription_executor() -> None:
-    executor = FakeTranscriptionExecutor()
-
-    pipeline = create_pipeline(
-        transcription_executor=executor,
-    )
-
-    await pipeline.start()
-
-    assert executor.started is True
-
-    await pipeline.stop()
-
-    assert executor.stopped is True
-
-
-@pytest.mark.anyio
 async def test_pipeline_counts_rejected_transcription_item(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -1055,3 +1036,31 @@ async def test_pipeline_attaches_source_to_transcription_work_item() -> None:
             segment=segment,
         )
     ]
+
+
+# tests/unit/services/test_speech_pipeline.py
+
+
+@pytest.mark.anyio
+async def test_pipeline_does_not_manage_transcription_executor_lifecycle() -> None:
+    # Arrange
+    capture = FakeAudioCapture([])
+    transcription_executor = FakeTranscriptionExecutor()
+
+    pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
+        capture=capture,
+        normalizer=FakeNormalizer(()),
+        vad=FakeVad(),
+        assembler=FakeAssembler({}),
+        transcription_executor=transcription_executor,
+    )
+
+    # Act
+    await pipeline.start()
+    await pipeline.wait()
+    await pipeline.stop()
+
+    # Assert
+    assert not transcription_executor.started
+    assert not transcription_executor.stopped

@@ -86,6 +86,7 @@ def create_application(
         capture=capture,
         normalizer=normalizer,
         pipeline=pipeline,
+        transcription_executor=transcription_executor,
         database=database,
     )
 
