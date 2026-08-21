@@ -7,7 +7,7 @@ import pytest
 
 from app.audio.capture import PyAudioCapture
 from app.audio.timeline import MonotonicAudioTimeline
-from app.composition import create_capture
+from app.composition import create_system_audio_capture
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
 
@@ -21,7 +21,9 @@ async def test_real_pyaudio_capture_receives_wasapi_loopback_frames() -> None:
     # Arrange
     settings = ConfigurationLoader(DEFAULT_CONFIGURATION_PATH).load()
     timeline = MonotonicAudioTimeline()
-    capture = create_capture(settings.audio.capture.queue_capacity, timeline)
+    capture = create_system_audio_capture(
+        queue_capacity=settings.audio.capture.queue_capacity, timeline=timeline
+    )
 
     frames = []
 

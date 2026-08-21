@@ -11,12 +11,13 @@ from app.audio.capture import (
     PyAudioCapture,
     PyAudioFactoryImpl,
     QueuedAudioCapture,
+    WasapiInputDeviceProviderFactoryImpl,
     WasapiLoopbackDeviceProviderFactoryImpl,
 )
 from app.audio.normalizer import AudioNormalizerImpl
 from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.audio.resampler import SoXRResamplerFactory
-from app.audio.timeline import MonotonicAudioTimeline
+from app.audio.timeline import AudioTimeline, MonotonicAudioTimeline
 from app.audio.windows_device_monitor import WindowsAudioDeviceMonitor
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
@@ -47,7 +48,9 @@ def create_application(
 
     configure_logging(settings.logging)
 
-    capture = create_capture(settings.audio.capture.queue_capacity, timeline)
+    capture = create_system_audio_capture(
+        queue_capacity=settings.audio.capture.queue_capacity, timeline=timeline
+    )
     normalizer = create_normalizer(settings.audio.processing)
     vad = create_vad(settings)
 
@@ -85,24 +88,44 @@ def create_application(
     )
 
 
-def create_capture(queue_capacity: int, timeline: MonotonicAudioTimeline) -> AudioCapture:
-    """Create the configured audio capture."""
-
-    audio_factory = PyAudioFactoryImpl()
-    device_provider_factory = WasapiLoopbackDeviceProviderFactoryImpl()
-
-    device_monitor = WindowsAudioDeviceMonitor(
-        flow="eRender",
-        role="eConsole",
-    )
-
-    transport = QueuedAudioCapture(max_queue_size=queue_capacity)
+def create_system_audio_capture(
+    *,
+    queue_capacity: int,
+    timeline: AudioTimeline,
+) -> AudioCapture:
+    """Create Windows system-audio loopback capture."""
 
     return PyAudioCapture(
-        audio_factory=audio_factory,
-        device_provider_factory=device_provider_factory,
-        device_monitor=device_monitor,
-        transport=transport,
+        audio_factory=PyAudioFactoryImpl(),
+        device_provider_factory=WasapiLoopbackDeviceProviderFactoryImpl(),
+        device_monitor=WindowsAudioDeviceMonitor(
+            flow="eRender",
+            role="eConsole",
+        ),
+        transport=QueuedAudioCapture(
+            max_queue_size=queue_capacity,
+        ),
+        timeline=timeline,
+    )
+
+
+def create_microphone_capture(
+    *,
+    queue_capacity: int,
+    timeline: AudioTimeline,
+) -> AudioCapture:
+    """Create Windows default-microphone capture."""
+
+    return PyAudioCapture(
+        audio_factory=PyAudioFactoryImpl(),
+        device_provider_factory=WasapiInputDeviceProviderFactoryImpl(),
+        device_monitor=WindowsAudioDeviceMonitor(
+            flow="eCapture",
+            role="eConsole",
+        ),
+        transport=QueuedAudioCapture(
+            max_queue_size=queue_capacity,
+        ),
         timeline=timeline,
     )
 

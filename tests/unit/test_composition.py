@@ -1,16 +1,25 @@
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
 from app.application import Application
+from app.audio.capture import (
+    PyAudioCapture,
+    WasapiInputDeviceProviderFactoryImpl,
+    WasapiLoopbackDeviceProviderFactoryImpl,
+)
 from app.audio.contracts import AudioFormat, AudioFrame
 from app.audio.protocols import AudioCapture
+from app.audio.timeline import MonotonicAudioTimeline
 from app.composition import (
     create_application,
+    create_microphone_capture,
     create_normalizer,
     create_speech_pipeline,
+    create_system_audio_capture,
     create_transcriber,
     create_vad,
 )
@@ -274,7 +283,7 @@ def test_create_application_builds_production_persistence_graph(
     capture = MagicMock(spec=AudioCapture)
 
     with (
-        patch("app.composition.create_capture", return_value=capture),
+        patch("app.composition.create_system_audio_capture", return_value=capture),
         patch("app.composition.create_vad", return_value=vad),
     ):
         # Act
@@ -284,3 +293,70 @@ def test_create_application_builds_production_persistence_graph(
     assert isinstance(application, Application)
     assert isinstance(application.pipeline, SpeechPipeline)
     assert application.capture is capture
+
+
+def test_create_microphone_capture_returns_pyaudio_capture() -> None:
+    timeline = MonotonicAudioTimeline()
+
+    capture = create_microphone_capture(
+        queue_capacity=100,
+        timeline=timeline,
+    )
+
+    assert isinstance(capture, PyAudioCapture)
+
+
+def test_create_microphone_capture_uses_input_device_provider() -> None:
+    timeline = MonotonicAudioTimeline()
+
+    capture = cast(
+        PyAudioCapture,
+        create_microphone_capture(
+            queue_capacity=100,
+            timeline=timeline,
+        ),
+    )
+
+    assert isinstance(
+        capture._device_provider_factory,
+        WasapiInputDeviceProviderFactoryImpl,
+    )
+
+
+def test_create_system_audio_capture_uses_loopback_device_provider() -> None:
+    timeline = MonotonicAudioTimeline()
+
+    capture = cast(
+        PyAudioCapture,
+        create_system_audio_capture(
+            queue_capacity=100,
+            timeline=timeline,
+        ),
+    )
+
+    assert isinstance(
+        capture._device_provider_factory,
+        WasapiLoopbackDeviceProviderFactoryImpl,
+    )
+
+
+def test_captures_can_share_same_timeline() -> None:
+    timeline = MonotonicAudioTimeline()
+
+    system_capture = cast(
+        PyAudioCapture,
+        create_system_audio_capture(
+            queue_capacity=100,
+            timeline=timeline,
+        ),
+    )
+    microphone_capture = cast(
+        PyAudioCapture,
+        create_microphone_capture(
+            queue_capacity=100,
+            timeline=timeline,
+        ),
+    )
+
+    assert system_capture._timeline is timeline
+    assert microphone_capture._timeline is timeline
