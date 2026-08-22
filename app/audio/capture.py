@@ -21,6 +21,7 @@ type Sleep = Callable[[float], Awaitable[None]]
 RECOVERY_INITIAL_DELAY_SECONDS = 0.1
 RECOVERY_MAX_DELAY_SECONDS = 5.0
 RECOVERY_MONITOR_INTERVAL_SECONDS = 0.1
+DEFAULT_DEVICE_SETTLE_SECONDS = 0.25
 
 logger = logging.getLogger(__name__)
 
@@ -306,6 +307,7 @@ class PyAudioCapture(AudioCapture):
         self._lifecycle_task: asyncio.Task[None] | None = None
         self._event_loop: asyncio.AbstractEventLoop | None = None
         self._device_change_event = asyncio.Event()
+        self._device_change_generation = 0
 
         self._started = False
         self._next_frame_timestamp: float | None = None
@@ -328,6 +330,7 @@ class PyAudioCapture(AudioCapture):
         self._recovery_active = False
         self._capture_frame_duration_logged = False
         self._device_change_event.clear()
+        self._device_change_generation = 0
 
         await self._transport.start()
 
@@ -533,11 +536,18 @@ class PyAudioCapture(AudioCapture):
 
         while self._started:
             if self._device_change_event.is_set():
-                self._device_change_event.clear()
+                # we need to wait
+                # because windows creates many on/off notifications on a device change
+                await self._wait_for_default_device_settle()
+
+                if not self._started:
+                    return
 
                 self._begin_recovery(
                     reason="default_device_changed",
                 )
+
+                continue
 
             stream = self._stream
 
@@ -550,6 +560,11 @@ class PyAudioCapture(AudioCapture):
                     reason="stream_inactive",
                 )
 
+                await self._sleep(
+                    RECOVERY_MONITOR_INTERVAL_SECONDS,
+                )
+                continue
+
             if self._stream is None:
                 if not self._recovery_active:
                     logger.warning(
@@ -557,10 +572,24 @@ class PyAudioCapture(AudioCapture):
                     )
                     self._recovery_active = True
 
+                    handler = self._discontinuity_handler
+
+                    if handler is not None:
+                        handler()
+
                 try:
                     await self._open_fresh_stream()
 
-                except LookupError:
+                except (LookupError, OSError) as exc:
+                    logger.warning(
+                        "audio capture recovery failed; retrying error_type=%s error=%r delay=%.3f",
+                        type(exc).__name__,
+                        exc,
+                        delay,
+                    )
+
+                    self._dispose_audio_session()
+
                     await self._sleep(delay)
 
                     delay = min(
@@ -575,9 +604,11 @@ class PyAudioCapture(AudioCapture):
                     logger.info("audio capture recovered")
                     self._recovery_active = False
 
-                # Ignore duplicate/default-device notifications that arrived
-                # while the capture session was being rebuilt.
-                self._device_change_event.clear()
+                # A newer Windows endpoint notification arrived while the
+                # native session was being rebuilt. Process it immediately
+                # rather than waiting for the normal monitor interval.
+                if self._device_change_event.is_set():
+                    continue
 
             await self._sleep(
                 RECOVERY_MONITOR_INTERVAL_SECONDS,
@@ -587,8 +618,6 @@ class PyAudioCapture(AudioCapture):
         self,
         endpoint_id: str | None,
     ) -> None:
-        """Signal a default-device change from the monitor callback thread."""
-
         logger.info(
             "audio capture default device change signaled endpoint_id=%r",
             endpoint_id,
@@ -600,8 +629,27 @@ class PyAudioCapture(AudioCapture):
             return
 
         loop.call_soon_threadsafe(
-            self._device_change_event.set,
+            self._signal_default_device_changed,
         )
+
+    def _signal_default_device_changed(self) -> None:
+        if not self._started:
+            return
+
+        self._device_change_generation += 1
+        self._device_change_event.set()
+
+    async def _wait_for_default_device_settle(self) -> None:
+        """Wait until no default-device notification arrives for 250 ms."""
+
+        while self._started:
+            generation = self._device_change_generation
+
+            await self._sleep(DEFAULT_DEVICE_SETTLE_SECONDS)
+
+            if generation == self._device_change_generation:
+                self._device_change_event.clear()
+                return
 
     def _begin_recovery(
         self,
