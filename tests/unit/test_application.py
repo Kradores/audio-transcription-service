@@ -12,6 +12,7 @@ def create_conversation_mock() -> MagicMock:
     conversation = MagicMock(spec=ConversationPipeline)
     conversation.start = AsyncMock()
     conversation.stop = AsyncMock()
+    conversation.wait = AsyncMock()
     return conversation
 
 
@@ -120,3 +121,21 @@ async def test_stop_closes_database() -> None:
     await application.stop()
 
     database.close.assert_called_once_with()
+
+
+@pytest.mark.anyio
+async def test_wait_waits_for_conversation_pipeline() -> None:
+    # Arrange
+    conversation = create_conversation_mock()
+
+    application = Application(
+        settings=SettingsBuilder().build(),
+        conversation_pipeline=conversation,
+        database=MagicMock(spec=sqlite3.Connection),
+    )
+
+    # Act
+    await application.wait()
+
+    # Assert
+    conversation.wait.assert_awaited_once()

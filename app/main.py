@@ -19,6 +19,9 @@ async def run_application(
     application = create_application(config_path)
     event = shutdown_event or asyncio.Event()
 
+    application_wait: asyncio.Task[None] | None = None
+    shutdown_wait: asyncio.Task[bool] | None = None
+
     try:
         await application.start()
 
@@ -27,8 +30,36 @@ async def run_application(
             application.settings.application.name,
         )
 
-        await event.wait()
+        application_wait = asyncio.create_task(
+            application.wait(),
+            name="application-wait",
+        )
+        shutdown_wait = asyncio.create_task(
+            event.wait(),
+            name="application-shutdown-wait",
+        )
+
+        done, _ = await asyncio.wait(
+            {application_wait, shutdown_wait},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        if application_wait in done:
+            await application_wait
+
     finally:
+        for waiter in (application_wait, shutdown_wait):
+            if waiter is not None and not waiter.done():
+                waiter.cancel()
+
+        waiters = [waiter for waiter in (application_wait, shutdown_wait) if waiter is not None]
+
+        if waiters:
+            await asyncio.gather(
+                *waiters,
+                return_exceptions=True,
+            )
+
         await application.stop()
 
 

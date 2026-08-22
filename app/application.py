@@ -37,3 +37,7 @@ class Application:
             await self._conversation_pipeline.stop()
         finally:
             self._database.close()
+
+    async def wait(self) -> None:
+        """Wait for an unexpected application runtime termination."""
+        await self._conversation_pipeline.wait()

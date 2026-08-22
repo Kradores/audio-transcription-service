@@ -18,6 +18,12 @@ async def test_run_application_starts_and_stops_application(
 
     shutdown_event = asyncio.Event()
     shutdown_event.set()
+    runtime_finished = asyncio.Event()
+
+    async def wait_for_runtime() -> None:
+        await runtime_finished.wait()
+
+    application.wait = AsyncMock(side_effect=wait_for_runtime)
 
     with patch(
         "app.main.create_application",
@@ -43,6 +49,12 @@ async def test_run_application_stops_application_when_cancelled(
     application.stop = AsyncMock()
 
     shutdown_event = asyncio.Event()
+    runtime_finished = asyncio.Event()
+
+    async def wait_for_runtime() -> None:
+        await runtime_finished.wait()
+
+    application.wait = AsyncMock(side_effect=wait_for_runtime)
 
     with patch(
         "app.main.create_application",
@@ -63,4 +75,37 @@ async def test_run_application_stops_application_when_cancelled(
             await task
 
     application.start.assert_awaited_once()
+    application.stop.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_run_application_propagates_runtime_failure_and_stops_application(
+    tmp_path: Path,
+) -> None:
+    # Arrange
+    application = MagicMock()
+    application.start = AsyncMock()
+    application.wait = AsyncMock(
+        side_effect=RuntimeError("pipeline failed"),
+    )
+    application.stop = AsyncMock()
+
+    shutdown_event = asyncio.Event()
+
+    # Act / Assert
+    with (
+        patch(
+            "app.main.create_application",
+            return_value=application,
+        ),
+        pytest.raises(
+            RuntimeError,
+            match="pipeline failed",
+        ),
+    ):
+        await run_application(
+            tmp_path / "config.yaml",
+            shutdown_event=shutdown_event,
+        )
+
     application.stop.assert_awaited_once()

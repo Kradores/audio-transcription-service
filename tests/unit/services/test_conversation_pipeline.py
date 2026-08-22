@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -204,3 +205,97 @@ async def test_stop_before_start_is_harmless() -> None:
     system_pipeline.stop.assert_not_awaited()
     microphone_pipeline.stop.assert_not_awaited()
     executor.stop.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_wait_propagates_system_pipeline_failure() -> None:
+    # Arrange
+    executor = create_executor_mock()
+    system_pipeline = create_pipeline_mock()
+    microphone_pipeline = create_pipeline_mock()
+
+    system_pipeline.wait.side_effect = RuntimeError(
+        "system processing failed",
+    )
+
+    microphone_blocked = asyncio.Event()
+
+    async def wait_for_microphone() -> None:
+        await microphone_blocked.wait()
+
+    microphone_pipeline.wait.side_effect = wait_for_microphone
+
+    conversation = ConversationPipeline(
+        transcription_executor=executor,
+        system_pipeline=system_pipeline,
+        microphone_pipeline=microphone_pipeline,
+    )
+
+    # Act / Assert
+    with pytest.raises(
+        RuntimeError,
+        match="system processing failed",
+    ):
+        await conversation.wait()
+
+
+@pytest.mark.anyio
+async def test_wait_propagates_microphone_pipeline_failure() -> None:
+    # Arrange
+    executor = create_executor_mock()
+    system_pipeline = create_pipeline_mock()
+    microphone_pipeline = create_pipeline_mock()
+
+    microphone_pipeline.wait.side_effect = RuntimeError(
+        "microphone processing failed",
+    )
+
+    system_blocked = asyncio.Event()
+
+    async def wait_for_system() -> None:
+        await system_blocked.wait()
+
+    system_pipeline.wait.side_effect = wait_for_system
+
+    conversation = ConversationPipeline(
+        transcription_executor=executor,
+        system_pipeline=system_pipeline,
+        microphone_pipeline=microphone_pipeline,
+    )
+
+    # Act / Assert
+    with pytest.raises(
+        RuntimeError,
+        match="microphone processing failed",
+    ):
+        await conversation.wait()
+
+
+@pytest.mark.anyio
+async def test_wait_rejects_unexpected_source_completion() -> None:
+    # Arrange
+    executor = create_executor_mock()
+    system_pipeline = create_pipeline_mock()
+    microphone_pipeline = create_pipeline_mock()
+
+    system_pipeline.wait.return_value = None
+
+    microphone_blocked = asyncio.Event()
+
+    async def wait_for_microphone() -> None:
+        await microphone_blocked.wait()
+
+    microphone_pipeline.wait.side_effect = wait_for_microphone
+
+    conversation = ConversationPipeline(
+        transcription_executor=executor,
+        system_pipeline=system_pipeline,
+        microphone_pipeline=microphone_pipeline,
+    )
+
+    # Act / Assert
+    with pytest.raises(
+        RuntimeError,
+        match="system_audio",
+    ):
+        await conversation.wait()

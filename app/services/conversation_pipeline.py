@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from app.services.speech_pipeline import SpeechPipeline
@@ -94,4 +95,53 @@ class ConversationPipeline:
             raise ExceptionGroup(
                 "conversation pipeline shutdown failed",
                 errors,
+            )
+
+    async def wait(self) -> None:
+        """Wait for an unexpected source-pipeline termination."""
+
+        system_wait = asyncio.create_task(
+            self._system_pipeline.wait(),
+            name="system-speech-pipeline-wait",
+        )
+        microphone_wait = asyncio.create_task(
+            self._microphone_pipeline.wait(),
+            name="microphone-speech-pipeline-wait",
+        )
+
+        waiters = {
+            system_wait: "system_audio",
+            microphone_wait: "microphone",
+        }
+
+        try:
+            done, _ = await asyncio.wait(
+                waiters,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            completed = next(iter(done))
+            source = waiters[completed]
+
+            try:
+                await completed
+            except Exception:
+                logger.exception(
+                    "conversation source pipeline failed source=%s",
+                    source,
+                )
+                raise
+
+            raise RuntimeError(
+                f"conversation source pipeline stopped unexpectedly: {source}",
+            )
+
+        finally:
+            for waiter in waiters:
+                if not waiter.done():
+                    waiter.cancel()
+
+            await asyncio.gather(
+                *waiters,
+                return_exceptions=True,
             )
