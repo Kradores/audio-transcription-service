@@ -803,8 +803,9 @@ async def test_pipeline_logs_vad_segments_and_final_statistics(
 
     # Assert
     messages = [record.getMessage() for record in caplog.records]
-    assert any("VAD SpeechStart source=system_audio timestamp=12.000" in message 
-        for message in messages)
+    assert any(
+        "VAD SpeechStart source=system_audio timestamp=12.000" in message for message in messages
+    )
     assert any("speech segment emitted source=system_audio id=1" in message for message in messages)
     assert any(
         "speech pipeline stopped source=system_audio captured_frames=1 processing_frames=1 "

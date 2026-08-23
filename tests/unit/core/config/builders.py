@@ -37,7 +37,16 @@ def valid_configuration_document() -> dict[str, Any]:
                 "max_duration_seconds": 5,
             },
         },
-        "transcription": {"queue_capacity": 10},
+        "transcription": {
+            "queue_capacity": 10,
+            "aggregation": {
+                "enabled": True,
+                "target_duration_seconds": 5.0,
+                "max_duration_seconds": 10.0,
+                "max_gap_seconds": 1.5,
+                "max_wait_seconds": 2.0,
+            },
+        },
         "vad": {
             "enabled": True,
             "speech_threshold": 0.5,
@@ -136,6 +145,38 @@ class SettingsBuilder:
 
     def with_transcription_queue_capacity(self, capacity: int) -> SettingsBuilder:
         self._document["transcription"]["queue_capacity"] = capacity
+        return self
+
+    def with_aggregation_enabled(self, enabled: bool) -> SettingsBuilder:
+        self._document["transcription"]["aggregation"]["enabled"] = enabled
+        return self
+
+    def with_aggregation_target_duration_seconds(
+        self,
+        seconds: float,
+    ) -> SettingsBuilder:
+        self._document["transcription"]["aggregation"]["target_duration_seconds"] = seconds
+        return self
+
+    def with_aggregation_max_duration_seconds(
+        self,
+        seconds: float,
+    ) -> SettingsBuilder:
+        self._document["transcription"]["aggregation"]["max_duration_seconds"] = seconds
+        return self
+
+    def with_aggregation_max_gap_seconds(
+        self,
+        seconds: float,
+    ) -> SettingsBuilder:
+        self._document["transcription"]["aggregation"]["max_gap_seconds"] = seconds
+        return self
+
+    def with_aggregation_max_wait_seconds(
+        self,
+        seconds: float,
+    ) -> SettingsBuilder:
+        self._document["transcription"]["aggregation"]["max_wait_seconds"] = seconds
         return self
 
 

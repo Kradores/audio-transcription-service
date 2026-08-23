@@ -26,6 +26,13 @@ audio:
 transcription:
   queue_capacity: 10
 
+  aggregation:
+    enabled: true
+    target_duration_seconds: 5.0
+    max_duration_seconds: 10.0
+    max_gap_seconds: 1.5
+    max_wait_seconds: 2.0
+
 vad:
   enabled: true
   speech_threshold: 0.5

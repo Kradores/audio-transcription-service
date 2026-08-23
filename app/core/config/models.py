@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.core.config.enums import (
     ApplicationEnvironment,
@@ -76,12 +76,6 @@ class AudioSettings(BaseConfigurationModel):
     segmentation: AudioSegmentationSettings
 
 
-class TranscriptionSettings(BaseConfigurationModel):
-    """Configuration for asynchronous transcription execution."""
-
-    queue_capacity: Annotated[int, Field(ge=1, le=10_000)]
-
-
 class VadSettings(BaseConfigurationModel):
     """Configuration parameters for Voice Activity Detection (VAD)."""
 
@@ -102,6 +96,30 @@ class DatabaseSettings(BaseConfigurationModel):
     """Configuration settings for the local file-based database path."""
 
     path: Path
+
+
+class TranscriptionAggregationSettings(BaseConfigurationModel):
+    """Configuration for speech-segment aggregation before transcription."""
+
+    enabled: bool
+    target_duration_seconds: Annotated[float, Field(gt=0.0)]
+    max_duration_seconds: Annotated[float, Field(gt=0.0)]
+    max_gap_seconds: Annotated[float, Field(ge=0.0)]
+    max_wait_seconds: Annotated[float, Field(ge=0.0)]
+
+    @model_validator(mode="after")
+    def validate_target_does_not_exceed_maximum(self) -> Self:
+        if self.target_duration_seconds > self.max_duration_seconds:
+            raise ValueError("target_duration_seconds must not exceed max_duration_seconds")
+
+        return self
+
+
+class TranscriptionSettings(BaseConfigurationModel):
+    """Configuration for asynchronous transcription execution."""
+
+    queue_capacity: Annotated[int, Field(ge=1, le=10_000)]
+    aggregation: TranscriptionAggregationSettings
 
 
 class Settings(BaseConfigurationModel):
@@ -128,4 +146,5 @@ __all__ = [
     "VadSettings",
     "WhisperSettings",
     "TranscriptionSettings",
+    "TranscriptionAggregationSettings",
 ]
