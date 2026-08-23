@@ -18,7 +18,7 @@ from app.core.config.models import (
     Settings,
 )
 
-from .builders import SettingsBuilder
+from .builders import SettingsBuilder, valid_configuration_document
 
 
 def test_application_settings_accepts_valid_values() -> None:
@@ -310,3 +310,68 @@ def test_settings_nested_validation() -> None:
 
     with pytest.raises(ValidationError):
         Settings.model_validate(document)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("target_duration_seconds", 0.0),
+        ("target_duration_seconds", -0.1),
+        ("max_duration_seconds", 0.0),
+        ("max_duration_seconds", -0.1),
+        ("max_gap_seconds", -0.1),
+        ("max_wait_seconds", -0.1),
+    ],
+)
+def test_transcription_aggregation_rejects_invalid_durations(
+    field: str,
+    value: float,
+) -> None:
+    document = valid_configuration_document()
+    document["transcription"]["aggregation"][field] = value
+
+    with pytest.raises(ValidationError):
+        Settings.model_validate(document)
+
+
+def test_transcription_aggregation_allows_zero_gap() -> None:
+    settings = (
+        SettingsBuilder()
+        .with_aggregation_max_gap_seconds(0.0)
+        .build()
+    )
+
+    assert settings.transcription.aggregation.max_gap_seconds == 0.0
+
+
+def test_transcription_aggregation_allows_zero_wait() -> None:
+    settings = (
+        SettingsBuilder()
+        .with_aggregation_max_wait_seconds(0.0)
+        .build()
+    )
+
+    assert settings.transcription.aggregation.max_wait_seconds == 0.0
+
+
+def test_transcription_aggregation_rejects_target_above_maximum() -> None:
+    document = valid_configuration_document()
+    document["transcription"]["aggregation"]["target_duration_seconds"] = 10.1
+    document["transcription"]["aggregation"]["max_duration_seconds"] = 10.0
+
+    with pytest.raises(
+        ValidationError,
+        match="target_duration_seconds must not exceed max_duration_seconds",
+    ):
+        Settings.model_validate(document)
+
+
+def test_transcription_aggregation_accepts_target_equal_to_maximum() -> None:
+    document = valid_configuration_document()
+    document["transcription"]["aggregation"]["target_duration_seconds"] = 10.0
+    document["transcription"]["aggregation"]["max_duration_seconds"] = 10.0
+
+    settings = Settings.model_validate(document)
+
+    assert settings.transcription.aggregation.target_duration_seconds == 10.0
+    assert settings.transcription.aggregation.max_duration_seconds == 10.0
