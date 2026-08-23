@@ -45,3 +45,20 @@ class TranscriptionWorkItem:
 class SourcedTranscriptionResult:
     source: AudioSource
     result: TranscriptionResult
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptionSegmentAggregatorStats:
+    segments_received: int
+    segments_emitted: int
+    segments_combined: int
+
+    output_seconds_total: float
+    output_seconds_max: float
+
+    @property
+    def output_seconds_average(self) -> float:
+        if self.segments_emitted == 0:
+            return 0.0
+
+        return self.output_seconds_total / self.segments_emitted

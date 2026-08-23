@@ -335,21 +335,13 @@ def test_transcription_aggregation_rejects_invalid_durations(
 
 
 def test_transcription_aggregation_allows_zero_gap() -> None:
-    settings = (
-        SettingsBuilder()
-        .with_aggregation_max_gap_seconds(0.0)
-        .build()
-    )
+    settings = SettingsBuilder().with_aggregation_max_gap_seconds(0.0).build()
 
     assert settings.transcription.aggregation.max_gap_seconds == 0.0
 
 
 def test_transcription_aggregation_allows_zero_wait() -> None:
-    settings = (
-        SettingsBuilder()
-        .with_aggregation_max_wait_seconds(0.0)
-        .build()
-    )
+    settings = SettingsBuilder().with_aggregation_max_wait_seconds(0.0).build()
 
     assert settings.transcription.aggregation.max_wait_seconds == 0.0
 

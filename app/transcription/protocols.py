@@ -6,7 +6,11 @@ from typing import Protocol
 import numpy as np
 
 from app.audio.contracts import SpeechSegment
-from app.transcription.contracts import SourcedTranscriptionResult, TranscriptionResult
+from app.transcription.contracts import (
+    SourcedTranscriptionResult,
+    TranscriptionResult,
+    TranscriptionSegmentAggregatorStats,
+)
 
 type SourcedTranscriptionResultHandler = Callable[[SourcedTranscriptionResult], None]
 
@@ -38,3 +42,26 @@ class Transcriber(Protocol):
 
     def transcribe(self, segment: SpeechSegment) -> TranscriptionResult:
         """Transcribe one speech segment."""
+
+
+class TranscriptionSegmentAggregator(Protocol):
+    """Aggregate completed speech segments before transcription execution."""
+
+    @property
+    def stats(self) -> TranscriptionSegmentAggregatorStats:
+        """Return an immutable snapshot of aggregation statistics."""
+
+    def process(
+        self,
+        segment: SpeechSegment,
+    ) -> tuple[SpeechSegment, ...]:
+        """Process one completed semantic speech segment."""
+
+    def advance(
+        self,
+        timestamp: float,
+    ) -> tuple[SpeechSegment, ...]:
+        """Advance the source timeline and emit expired pending speech."""
+
+    def flush(self) -> tuple[SpeechSegment, ...]:
+        """Emit completed speech currently held by the aggregator."""
