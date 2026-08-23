@@ -18,8 +18,8 @@ audio:
     channels: 1
 
   segmentation:
-    pre_roll_ms: 60
-    post_roll_ms: 60
+    pre_roll_ms: 80
+    post_roll_ms: 80
     target_duration_seconds: 3
     max_duration_seconds: 10
 
