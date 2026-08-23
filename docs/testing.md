@@ -262,3 +262,144 @@ outside the capture recovery guarantee.
 
 The important invariant is that once Windows exposes a usable default output
 endpoint, the application recovers automatically without restart.
+
+
+## Realistic runtime and performance validation
+
+Unit and integration tests protect deterministic behavior, but they do not
+establish whether the complete local transcription service can keep up with a
+real conversation on target hardware.
+
+Performance and backpressure decisions must therefore include controlled
+real-runtime validation.
+
+### Long-running conversation test
+
+For transcription-throughput investigations, run a realistic two-sided
+conversation for at least 10–30 minutes.
+
+The test should exercise:
+
+```text
+system audio
++
+microphone
++
+independent source pipelines
++
+shared transcription executor
++
+Faster-Whisper
++
+SQLite persistence
+```
+
+The test is considered diagnostic rather than a deterministic automated test.
+
+Record the following runtime configuration:
+
+```text
+Whisper model
+Whisper device
+compute type
+transcription queue capacity
+segmentation target duration
+segmentation maximum duration
+VAD configuration
+machine/hardware used
+```
+
+At shutdown, preserve the final statistics from:
+
+```text
+SpeechPipeline(source=system_audio)
+SpeechPipeline(source=microphone)
+TranscriptionExecutor
+```
+
+The pipeline summaries should provide:
+
+```text
+captured_frames
+processing_frames
+segments_emitted
+segments_rejected
+short_segments
+avg_segment_duration
+max_segment_duration
+```
+
+The executor summary should provide:
+
+```text
+submitted
+completed
+rejected
+failed
+queue_high_water_mark
+avg_queue_wait
+max_queue_wait
+avg_transcription_duration
+max_transcription_duration
+```
+
+### What the test is intended to answer
+
+The test should provide enough evidence to determine:
+
+1. whether either capture path drops frames;
+2. how many speech segments each source produces;
+3. how frequently segments shorter than one second are produced;
+4. whether either source disproportionately contributes to executor load;
+5. whether the executor reaches queue capacity;
+6. whether accepted work spends significant time waiting;
+7. whether transcription duration is stable or varies under machine load;
+8. how many segments are rejected;
+9. whether graceful shutdown drains all accepted work.
+
+### Throughput comparisons
+
+When comparing performance strategies, change one major variable at a time.
+
+Examples:
+
+```text
+baseline single worker
+vs.
+segment aggregation
+
+baseline single worker
+vs.
+two workers
+
+aggregation only
+vs.
+aggregation + multiple workers
+```
+
+Use the same or comparable conversation/audio workload where practical.
+
+Do not select a throughput strategy solely because one synthetic benchmark is
+faster.
+
+The service runs on user hardware alongside other applications, so stability,
+resource usage, rejection rate, and queue latency are all relevant.
+
+### Success criteria
+
+There is currently no fixed universal performance threshold.
+
+The immediate goal is to collect enough evidence to choose between:
+
+```text
+segment aggregation
+additional worker capacity
+combination of both
+```
+
+without compromising the existing guarantees:
+
+- real-time capture must remain non-blocking;
+- queues remain bounded;
+- sustained overload must not crash the service;
+- capture and transcription pressure remain independently observable.

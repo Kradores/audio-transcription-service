@@ -1,6 +1,6 @@
 # Roadmap
 
-## 🎯 Current Goal — First Real Transcript
+## 🎯 Goal — First Real Transcript
 
 The current milestone is to run the complete application on Windows and
 produce the first real persisted transcript.
@@ -179,7 +179,7 @@ Success means:
 * ✅ Measure transcription queue pressure and end-to-end latency
 
 
-## Current milestone — Reliable system-audio transcription [2026-08-19]
+## Milestone — Reliable system-audio transcription [2026-08-19]
 
 Status: ✅ Complete
 
@@ -211,115 +211,238 @@ system-audio side of a conversation.
 
 ---
 
-## Next milestone — Complete conversation capture
+## 🎯 Current Goal — Reliable Real-Time Conversation Transcription [2026-08-23]
 
-### Goal
-
-Capture and transcribe both sides of a real call:
+The service can now capture and persist both sides of a real Windows
+conversation:
 
 ```text
-Remote participant
-        ↓
-Windows system audio / WASAPI loopback
-        ↓
-transcription
-
-Local participant
-        ↓
-microphone
-        ↓
-transcription
-```
-System-audio capture alone is insufficient for the intended use case because
-the local user's microphone speech is normally not present in the loopback
-stream.
-The next milestone is therefore to add microphone capture while preserving
-the existing real-time, recovery, segmentation, transcription, and
-persistence guarantees.
-
-**Step 1 — Define multi-source audio architecture**
-Before implementation, decide:
-- how system-audio and microphone capture coexist;
-- whether each source owns an independent normalization/VAD/segmentation path;
-- how audio-source identity is represented;
-- how both sources share transcription execution;
-- how timestamps from both sources relate to one common conversation timeline;
-- how source identity reaches persisted transcript records;
-- how microphone-device selection and recovery behave.
-
-Target conceptual flow:
-```
-System Audio Capture ──→ processing ──→ segments ──┐
-                                                   │
-                                                   ▼
-                                         Transcription Executor
-                                                   │
-                                                   ▼
-                                           Transcript Storage
-                                                   ▲
-                                                   │
-Microphone Capture ───→ processing ──→ segments ───┘
-```
-No implementation should begin until ownership and lifecycle semantics for
-the two capture sources are clear.
-
-**Step 2 — Introduce microphone capture**
-Implement microphone/input-device capture behind the existing audio
-abstractions where appropriate.
-Requirements:
-- continuous native microphone capture;
-- bounded, non-blocking frame transport;
-- timestamps compatible with the conversation timeline;
-- clean start/stop lifecycle;
-- device-loss recovery;
-- observable device selection and recovery;
-- no microphone-specific behavior leaking into VAD or transcription.
-
-**Step 3 — Process microphone speech**
-Feed microphone audio through the established processing stages:
-```
-microphone
-    ↓
-normalization
-    ↓
-VAD
-    ↓
-speech segmentation
-    ↓
-transcription executor
+System audio ──────┐
+                   │
+                   ▼
+            SpeechPipeline
+                   │
+                   ┐
+                   │
+                   ▼
+        shared TranscriptionExecutor
+                   │
+                   ▼
+            Faster-Whisper
+                   │
+                   ▼
+           TranscriptRecorder
+                   │
+                   ▼
+                 SQLite
+                   ▲
+                   │
+                   ┘
+            SpeechPipeline
+                   ▲
+                   │
+Microphone ────────┘
 ```
 
-**Step 4 — Preserve transcript source identity**
-A persisted transcript must identify where the speech originated.
-At minimum distinguish:
-- system audio;
-- microphone.
-This prepares the transcript for later reconstruction of an actual
-conversation rather than an undifferentiated stream of text.
+System and microphone processing are independent up to the shared
+transcription execution boundary.
 
-**Step 5 — Integrate both sources concurrently**
-Run system-audio and microphone capture simultaneously.
-Verify:
-- neither source blocks the other;
-- transcription remains outside the real-time processing path;
-- overload remains bounded and non-fatal;
-- capture recovery for one source does not unnecessarily reset the other;
-- timestamps remain comparable;
-- shutdown drains accepted transcription work cleanly.
+Source identity and a common conversation timeline are preserved through
+persistence.
 
-**Step 6 — Real-call validation**
-Run an actual call with speech from both participants.
-Verify that the persisted transcript contains:
-- remote speech from system audio;
-- local speech from the microphone;
-- correct chronological timestamps;
-- correct source identity;
-- no systematic missing speech;
-- natural segmentation;
-- acceptable transcription latency;
-- stable long-running behavior.
+### Current runtime status
 
-**Milestone completion criteria**
-The milestone is complete when a real two-person call can be captured and
-persisted as a chronological transcript containing both the remote and local
-sides of the conversation.
+Completed:
+
+- ✅ first real persisted system-audio transcript;
+- ✅ transcription execution decoupled from real-time processing;
+- ✅ bounded non-blocking transcription queue;
+- ✅ overload rejection without crashing the service;
+- ✅ shared conversation timeline;
+- ✅ system-audio and microphone source identity;
+- ✅ two independent source-processing pipelines;
+- ✅ shared transcription executor;
+- ✅ two-sided conversation persistence;
+- ✅ Windows default-output recovery;
+- ✅ Windows default-microphone recovery;
+- ✅ notification-storm debounce / settled-device recovery;
+- ✅ real hardware validation through repeated device switching;
+- ✅ zero capture-frame drops during recent aggressive recovery test;
+- ✅ long-running real two-person conversation test;
+- ✅ per-source segmentation observability;
+- ✅ transcription queue/backlog observability;
+- ✅ queue-wait and transcription-duration statistics;
+- ✅ full quality gate: Ruff, mypy, pytest.
+
+### Current measured limitation
+
+A real approximately 30-minute two-person conversation demonstrated sustained
+transcription overload.
+
+Observed before the new observability instrumentation:
+
+```text
+persisted transcript rows = 421
+rejected speech fragments = 162
+```
+
+The service remained alive and real-time capture continued, which validates the
+runtime overload policy.
+
+However, this rejection level is not acceptable as the long-term transcription
+quality target.
+
+The same test also showed unstable automatic language detection in a
+conversation that was primarily Romanian with smaller amounts of English,
+Spanish, and Russian.
+
+Both issues are now tracked as product/runtime improvements.
+
+---
+
+## Next milestone — Determine the transcription throughput strategy
+
+Before changing transcription concurrency or segmentation behavior, collect
+runtime measurements using the newly added observability.
+
+For each realistic 10–30 minute two-sided conversation, collect:
+
+```text
+system SpeechPipeline:
+    segments_emitted
+    segments_rejected
+    short_segments
+    avg_segment_duration
+    max_segment_duration
+
+microphone SpeechPipeline:
+    segments_emitted
+    segments_rejected
+    short_segments
+    avg_segment_duration
+    max_segment_duration
+
+TranscriptionExecutor:
+    submitted
+    completed
+    rejected
+    failed
+    queue_high_water_mark
+    avg_queue_wait
+    max_queue_wait
+    avg_transcription_duration
+    max_transcription_duration
+```
+
+### Decision to make
+
+Use the measurements to choose between:
+
+```text
+A. segment aggregation / fewer Whisper jobs
+
+B. additional transcription worker capacity
+
+C. a combination of aggregation and additional workers
+```
+
+The decision must account for:
+
+- rejection rate;
+- queue latency;
+- segment-duration distribution;
+- Whisper inference duration;
+- CPU/GPU/RAM contention;
+- transcript ordering requirements;
+- user hardware variability.
+
+Do not increase queue capacity as the primary solution.
+
+A larger queue may temporarily reduce rejection while increasing transcript
+latency, but it does not increase transcription throughput.
+
+Do not add multiple Whisper workers solely because the current queue saturates.
+
+Concurrent workers may improve throughput on some hardware but may also cause
+CPU/GPU contention and make total throughput worse.
+
+Benchmark before deciding.
+
+---
+
+## Following milestone — Language policy
+
+The current per-segment unrestricted automatic language detection performs
+poorly in multilingual conversations where one language dominates.
+
+The first real long-running conversation showed Romanian speech being
+frequently detected/transcribed as unrelated languages.
+
+Investigate a configuration-driven language policy supporting use cases such
+as:
+
+```text
+primary language: Romanian
+
+expected languages:
+- Romanian
+- English
+- Spanish
+- Russian
+```
+
+The transcription implementation must remain generic and must not hard-code
+these specific languages.
+
+Determine whether the eventual policy should support:
+
+```text
+automatic language detection
+fixed language
+preferred/constrained language set
+```
+
+This work should follow the immediate throughput investigation so additional
+language-detection work does not make an already overloaded transcription
+path more expensive without measurement.
+
+---
+
+## Reliability follow-up
+
+Unexpected capture lifecycle failures must eventually propagate to
+`SpeechPipeline` / `ConversationPipeline`.
+
+Expected hardware/device failures already recover automatically.
+
+The remaining gap is an unexpected failure of the internal capture lifecycle
+task that could otherwise leave one source silently inactive while the
+conversation continues.
+
+Address this separately from normal device recovery.
+
+---
+
+## Later investigations
+
+### Duplicate speech across sources
+
+Characterize cases where system playback is also captured by the microphone.
+
+Determine whether the cause is:
+
+- physical speaker-to-microphone echo;
+- headset monitoring;
+- Bluetooth profile behavior;
+- audio-driver routing.
+
+Do not introduce software deduplication until the physical/device behavior is
+understood.
+
+### Bluetooth headset profile changes
+
+Using microphone + playback on some Bluetooth headsets may cause Windows to
+switch to a bidirectional headset profile with reduced playback quality.
+
+This is currently lower priority than transcription completeness and
+reliability.

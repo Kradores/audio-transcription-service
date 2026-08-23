@@ -186,23 +186,29 @@ transcription_executor.submit(segment) is False
 
 This gives us visibility into overload without turning overload into an application failure.
 
-The final pipeline statistics therefore distinguish:
+The source pipeline statistics distinguish:
 
 ```text
 segments_emitted
 segments_rejected
-transcriptions_completed
 ```
 
-For example:
+The shared `TranscriptionExecutor` independently tracks:
 
 ```text
-segments_emitted=20
-segments_rejected=7
-transcriptions_completed=13
+submitted
+completed
+rejected
+failed
 ```
 
-This is materially more useful than simply reporting that "some transcriptions were lost."
+This separation is intentional.
+
+`SpeechPipeline` describes how much transcription work each real-time source
+produced and how much of that work was rejected at submission.
+
+`TranscriptionExecutor` describes the outcome and capacity of the shared
+transcription execution boundary.
 
 ---
 

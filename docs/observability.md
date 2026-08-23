@@ -2,289 +2,641 @@
 
 ## Purpose
 
-The first observability milestone is intentionally diagnostic rather than a
-full metrics/telemetry subsystem.
+Observability is intentionally diagnostic rather than a full telemetry
+platform.
 
-The immediate question is:
+The service must make it possible to distinguish failures and pressure at
+different runtime boundaries without logging every 20 ms audio frame.
 
-> At which processing boundary is live speech being lost?
-
-The runtime path is:
+The current runtime architecture is:
 
 ```text
-AudioCapture
-    ↓
-AudioNormalizer
-    ↓
-Silero VAD
-    ↓
-SpeechSegmentAssembler
-    ↓
-Faster-Whisper
-    ↓
-TranscriptRecorder
-    ↓
-SQLite
+System AudioCapture ─┐
+                     │
+                     ▼
+              SpeechPipeline
+                     │
+                     │ source-tagged work
+                     ▼
+              TranscriptionExecutor
+                     │
+                     ▼
+              Faster-Whisper
+                     │
+                     ▼
+             TranscriptRecorder
+                     │
+                     ▼
+                   SQLite
+
+Microphone AudioCapture
+          │
+          ▼
+   SpeechPipeline
+          │
+          └──────────────► shared TranscriptionExecutor
 ```
 
-Observability must let us compare what crossed each boundary without logging
-every 20 ms audio frame.
+The primary diagnostic questions are:
+
+1. Is real-time audio capture healthy?
+2. Is speech segmentation producing reasonable work units?
+3. Is transcription keeping up with those work units?
+4. If not, where is latency or loss occurring?
+5. Is overload affecting one source more than the other?
 
 ## Logging strategy
 
 The application uses the standard-library `logging` package as defined by
-ADR-017. Logs are emitted at meaningful lifecycle and semantic events rather
-than for every processing frame.
+ADR-017.
 
-Normal runtime logs must not include transcript text. Transcript text is
-available at `DEBUG` level for controlled diagnostic runs.
+Logs are emitted for lifecycle events, semantic audio events, recovery,
+backpressure, transcription execution, and persistence.
 
-## Current diagnostic events
+The service deliberately avoids per-frame logging during normal operation.
 
-### Audio capture
+Transcript text is not logged at INFO level.
 
-The capture boundary logs:
+Transcript text may be logged at DEBUG level for controlled diagnostic runs.
+
+---
+
+## Audio capture
+
+Each capture path owns its own native session and bounded frame transport.
+
+Important capture events include:
 
 - capture started;
-- selected output device, including native channel count and sample rate;
+- selected native device;
+- native sample rate and channel count;
 - native capture-frame format;
-- Windows audio-device monitor started and stopped;
-- Windows default output endpoint changes;
-- default-output change signals received by capture;
-- recovery started, including the recovery reason;
+- Windows device monitor started and stopped;
+- matching Windows default-device changes;
+- capture recovery started;
+- capture recovery attempt failed;
 - capture recovered;
-- device becoming inactive;
-- dropped-frame events when the bounded transport overflows;
-- capture stopped with the total dropped-frame count.
+- stream becoming inactive;
+- capture discontinuity;
+- capture stopped;
+- total dropped capture frames.
 
-Capture recovery may be triggered either because the current stream becomes
-unusable or because Windows reports that the default output endpoint changed.
+Capture-frame drops indicate pressure at the real-time capture boundary.
 
-The latter is important because the old loopback stream may remain active even
-though Windows is now routing audio to another endpoint.
+They must not be confused with transcription-segment rejection.
 
-Capture discontinuities are surfaced to `SpeechPipeline`, which logs the
-processing-state reset.
-
-### Speech pipeline
-
-`SpeechPipeline` maintains a small set of runtime counters:
-
-- `captured_frames` — frames received from `AudioCapture`;
-- `processing_frames` — normalized processing frames produced;
-- `segments_emitted` — speech segments emitted by the assembler;
-- `transcriptions_completed` — transcription calls that completed successfully.
-
-At INFO level, the pipeline logs:
-
-- `SpeechStart` and `SpeechEnd` events with timestamps;
-- every emitted speech segment with a pipeline-local sequential ID, start,
-  duration, and end timestamp;
-- every completed transcription with its segment ID and timestamps;
-- final pipeline counters when the pipeline stops.
-
-### Faster-Whisper
-
-The transcriber logs:
-
-- transcription start with segment timestamp and duration;
-- inference completion with segment timestamp, duration, inference duration,
-  and detected language.
-
-The resulting transcript text is logged only at DEBUG level.
-
-### Transcript recorder
-
-The recorder logs:
-
-- successful persistence with transcript timestamps;
-- persistence failures with the exception and transcript timestamps.
-
-A successful recorder call means the repository operation completed
-successfully. SQLite-specific SQL/commit logging is not required at this
-boundary.
-
-## Diagnostic interpretation
-
-The logs should allow an investigation to follow one piece of speech through
-the system:
+A healthy capture shutdown should include:
 
 ```text
-Capture
-  ↓
-processing frame count
-  ↓
-VAD SpeechStart/SpeechEnd
-  ↓
-SpeechSegment id + timestamp/duration
-  ↓
-Whisper inference
-  ↓
-TranscriptRecorder
-  ↓
-SQLite
+audio capture stopped frames_dropped=0
 ```
 
-Interpretation:
+A non-zero value means the real-time audio path was unable to consume native
+capture frames quickly enough.
 
-- speech absent from VAD events → investigate capture/normalization/VAD;
-- VAD event present but no corresponding segment → investigate the assembler;
-- segment present but transcription missing/failing → investigate Whisper or
-  its input audio;
-- transcription completed but persistence missing/failing → investigate the
-  recorder/repository boundary.
+---
 
-Capture discontinuities and dropped frames must be considered when comparing
-these stages because a discontinuity intentionally resets downstream state
-and discards incomplete speech state.
+## Capture recovery
 
-### Device-change interpretation
+System-audio and microphone recovery are independent.
 
-A timestamp gap around a Windows output-device change does not by itself
-indicate capture failure.
-
-Windows may require several seconds to transition between output endpoints.
-During that interval there may be no usable default endpoint from which the
-application can capture audio.
-
-For recovery diagnostics, distinguish:
+System-audio recovery follows:
 
 ```text
-Windows device-transition interval
+eRender / eConsole change
         ↓
-default endpoint becomes available
+capture device-change signal
+        ↓
+settle/debounce period
         ↓
 capture recovery
         ↓
-frame delivery resumes
-```
-The application's recovery behavior should therefore be evaluated from the
-point at which a usable default endpoint becomes available rather than by
-assuming that the operating-system device switch is instantaneous.
-A successful recovery should be visible as:
-```text
-default audio output changed
+fresh PyAudio session
         ↓
-capture default output change signaled
-        ↓
-capture recovery started
-        ↓
-new capture device selected
+current default loopback selected
         ↓
 capture recovered
-        ↓
-capture discontinuity detected; processing state reset
 ```
 
-## Deliberately not implemented yet
-
-The diagnostic pass does not introduce:
-
-- Prometheus or another metrics backend;
-- OpenTelemetry;
-- a metrics abstraction or protocol;
-- per-frame logging;
-- Silero probability logging;
-- audio debug dumps;
-- VAD or segmentation parameter changes.
-
-These can be introduced if the diagnostic evidence shows that they are needed.
-
-## Next investigation
-
-Run the application with a known piece of live speech and compare:
+Microphone recovery follows the equivalent:
 
 ```text
-speech that was played
-vs.
-VAD events
-vs.
-speech segments
-vs.
-Whisper results
-vs.
-persisted transcripts
+eCapture / eConsole change
+        ↓
+capture device-change signal
+        ↓
+settle/debounce period
+        ↓
+capture recovery
+        ↓
+fresh PyAudio session
+        ↓
+current default input selected
+        ↓
+capture recovered
 ```
 
-Only after identifying the responsible boundary should VAD or segmentation
-parameters be changed.
+A recovery triggers a discontinuity only for the affected source.
 
+`SpeechPipeline` resets:
 
-## Transcription execution
+```text
+AudioNormalizer
+AudioVad
+SpeechSegmentAssembler
+```
 
-The transcription execution boundary must expose enough information to
-distinguish real-time audio health from transcription backlog.
+before processing recovered audio.
 
-The following runtime information should be observable:
+A short audio gap during a real Windows device transition is expected.
 
-- transcription queue capacity;
-- transcription queue depth;
-- transcription jobs submitted;
-- transcription jobs completed;
-- transcription jobs failed;
-- transcription queue wait duration;
-- transcription inference duration.
+Windows may temporarily expose no usable endpoint while devices disappear,
+appear, or change profile.
 
-The existing `Transcriber` inference timing remains useful:
+The recovery guarantee is therefore not gapless audio.
+
+The guarantee is:
+
+> Once Windows exposes a usable selected default endpoint, capture recovers
+> automatically without restarting the application.
+
+---
+
+## Speech pipeline
+
+There is one `SpeechPipeline` per source:
+
+```text
+system_audio
+microphone
+```
+
+Pipeline logs include `source=` so events from the two real-time paths can be
+distinguished.
+
+Important events include:
+
+- pipeline started;
+- `SpeechStart`;
+- `SpeechEnd`;
+- capture discontinuity / processing-state reset;
+- speech segment emitted;
+- segment rejected by the transcription executor;
+- processing failure;
+- pipeline stopped.
+
+### Pipeline statistics
+
+Each pipeline tracks:
+
+- `captured_frames`
+  - frames consumed from `AudioCapture`;
+
+- `processing_frames`
+  - normalized 20 ms processing frames produced;
+
+- `segments_emitted`
+  - complete speech segments produced by the assembler;
+
+- `segments_rejected`
+  - emitted segments rejected by the shared transcription executor;
+
+- `short_segments`
+  - emitted segments shorter than 1 second;
+
+- `segment_seconds_average`
+  - average duration of all emitted segments;
+
+- `segment_seconds_max`
+  - maximum emitted segment duration.
+
+Segment-duration statistics describe the output of the assembler.
+
+They are calculated before transcription submission, so rejected work remains
+represented in segmentation statistics.
+
+This is important because the purpose of these metrics is to answer whether
+the producer is creating too many small transcription jobs.
+
+A typical shutdown summary is:
+
+```text
+speech pipeline stopped
+source=microphone
+captured_frames=...
+processing_frames=...
+segments_emitted=...
+segments_rejected=...
+short_segments=...
+avg_segment_duration=...
+max_segment_duration=...
+```
+
+The system-audio pipeline emits the equivalent summary with:
+
+```text
+source=system_audio
+```
+
+---
+
+## Transcription executor
+
+Both source pipelines share one bounded `TranscriptionExecutor`.
+
+The executor is the boundary between real-time audio processing and
+resource-sensitive transcription.
+
+The executor tracks:
+
+- `submitted`
+  - work items successfully accepted by the bounded queue;
+
+- `completed`
+  - accepted work successfully transcribed and delivered to the result handler;
+
+- `rejected`
+  - submissions rejected because executor capacity was exhausted;
+
+- `failed`
+  - accepted work that failed during transcription or result delivery;
+
+- `queue_depth`
+  - current number of queued work items;
+
+- `queue_high_water_mark`
+  - maximum queue depth observed during the runtime;
+
+- `queue_wait_seconds_average`
+  - average time accepted work waited before transcription began;
+
+- `queue_wait_seconds_max`
+  - maximum observed queue wait;
+
+- `transcription_seconds_average`
+  - average executor service time for processed work;
+
+- `transcription_seconds_max`
+  - maximum executor service time observed.
+
+### Submission semantics
+
+`submitted` means:
+
+> The work item was accepted into the bounded transcription executor.
+
+Rejected work is counted separately.
+
+After a graceful shutdown where all accepted work is drained, the useful
+invariant is:
+
+```text
+submitted = completed + failed
+```
+
+`rejected` is outside that equation because rejected segments never entered
+the executor workload.
+
+### Queue high-water mark
+
+If:
+
+```text
+queue_high_water_mark < queue_capacity
+```
+
+the executor never reached its configured capacity during the run.
+
+If:
+
+```text
+queue_high_water_mark == queue_capacity
+```
+
+the queue became fully saturated at least once.
+
+This does not by itself mean work was lost.
+
+Actual overload loss is represented by:
+
+```text
+rejected > 0
+```
+
+### Queue wait
+
+Queue wait measures the delay between:
+
+```text
+segment accepted
+        ↓
+wait in bounded executor queue
+        ↓
+worker begins transcription
+```
+
+Increasing queue wait indicates that transcription work is arriving faster
+than the worker can service it.
+
+This is one of the primary metrics for deciding whether the current
+single-worker execution model has enough capacity.
+
+### Transcription duration
+
+Transcription duration measures the executor service time for one work item.
+
+This is distinct from queue wait.
+
+Conceptually:
+
+```text
+total executor latency for one accepted item
+        =
+queue wait
+        +
+transcription/result-delivery service
+```
+
+The Faster-Whisper adapter also logs per-call inference timing.
+
+The executor aggregates timings across the complete runtime so long-running
+behavior can be evaluated without manually parsing every inference log.
+
+### Overload
+
+When the queue cannot accept more work:
+
+```text
+transcription executor overloaded
+source=...
+queue_capacity=...
+queue_depth=...
+queue_high_water_mark=...
+rejected=...
+```
+
+The submission returns `False`.
+
+The corresponding `SpeechPipeline` increments:
+
+```text
+segments_rejected
+```
+
+and continues processing real-time audio.
+
+This behavior is defined by ADR-037.
+
+The service prioritizes keeping the real-time audio path alive over
+guaranteeing transcription completeness during sustained overload.
+
+### Executor shutdown summary
+
+A graceful shutdown emits a summary similar to:
+
+```text
+transcription executor stopped
+submitted=...
+completed=...
+rejected=...
+failed=...
+queue_high_water_mark=...
+avg_queue_wait=...
+max_queue_wait=...
+avg_transcription_duration=...
+max_transcription_duration=...
+```
+
+This is the primary summary for transcription-capacity investigations.
+
+---
+
+## Faster-Whisper
+
+The Faster-Whisper adapter logs:
 
 ```text
 transcription started
-    ↓
+```
+
+with:
+
+- source segment start;
+- source segment duration.
+
+It then logs:
+
+```text
 transcription inference completed
 ```
 
-The new execution boundary additionally makes queue waiting observable:
-```
-SpeechSegment emitted
-    ↓
-transcription job submitted
-    ↓
-queue wait
-    ↓
-transcription started
-    ↓
-inference completed
-    ↓
-result delivered
-```
+with:
+
+- segment start;
+- segment duration;
+- inference duration;
+- detected language.
+
+These logs are useful for investigating individual unusually slow or
+incorrect transcriptions.
+
+Long-running throughput analysis should primarily use the aggregate
+`TranscriptionExecutor` statistics.
+
+---
+
+## Transcript recorder
+
+The recorder logs:
+
+- successful persistence;
+- persistence failures;
+- source;
+- transcript start and end timestamps.
+
+Successful recorder completion means the repository operation completed
+successfully.
+
+SQLite-specific SQL logging is not required during normal operation.
+
+---
 
 ## Backpressure interpretation
-Capture-frame drops indicate that the real-time audio path could not consume
-captured audio quickly enough.
 
-Transcription queue growth indicates that speech segments are being produced
-faster than the transcription worker can process them.
+The service has two different bounded pressure boundaries.
 
-These are different failure modes and must not be conflated.
+### Capture pressure
 
-A healthy runtime should therefore make it possible to distinguish:
+```text
+native audio callback
+        ↓
+capture transport
+        ↓
+SpeechPipeline
 ```
-capture queue pressure
+
+Evidence:
+
+```text
+frames_dropped > 0
+```
+
+This means the real-time audio path could not consume capture frames quickly
+enough.
+
+### Transcription pressure
+
+```text
+SpeechSegment
+        ↓
+TranscriptionExecutor queue
+        ↓
+Whisper worker
+```
+
+Evidence includes:
+
+```text
+queue_high_water_mark
+queue wait
+rejected
+```
+
+These failure modes must not be conflated.
+
+The architecture is specifically designed so that transcription overload does
+not directly block capture processing.
+
+---
+
+## Throughput investigation
+
+The current observability milestone exists to support the next performance
+decision:
+
+```text
+segment aggregation
 vs.
-transcription queue pressure
+additional transcription worker capacity
 vs.
-transcription inference latency
+a combination
 ```
 
-## Current runtime evidence
-The initial sequential implementation was measured with Faster-Whisper
-processing approximately 5-second segments in approximately 3.1–3.3 seconds.
+The decision must be based on runtime evidence rather than assumption.
 
-With the previous capture queue capacity, the pipeline accumulated 722 dropped
-audio frames during a real recording.
+### Evidence suggesting segmentation pressure
 
-Increasing the capture queue to 500 frames, with approximately 10 ms per
-capture callback, provided approximately 5 seconds of buffering and resulted
-in:
-```py
-frames_dropped = 0
+Examples:
+
+```text
+large segments_emitted count
+high short_segments count
+low avg_segment_duration
 ```
 
-Repeated runs produced the same complete transcript.
+This suggests the pipeline is producing many small Whisper jobs.
 
-This establishes that transcription inference was creating backpressure on
-the real-time audio path.
+In that case, segment aggregation or segmentation tuning may reduce fixed
+per-transcription overhead.
 
-The larger capture queue is therefore considered a diagnostic mitigation, not
-the architectural solution.
+### Evidence suggesting execution-capacity pressure
 
+Examples:
+
+```text
+reasonable segment durations
+queue_high_water_mark == queue_capacity
+large queue waits
+rejected > 0
+```
+
+This suggests the worker cannot service the incoming workload quickly enough.
+
+Additional execution capacity may need evaluation.
+
+### Evidence suggesting machine/resource contention
+
+Examples:
+
+```text
+transcription duration varies heavily
+max_transcription_duration much larger than average
+performance degrades while other applications are busy
+```
+
+This suggests model execution itself is sensitive to current machine load.
+
+Adding workers could make this better or worse and must therefore be
+benchmarked rather than assumed to improve throughput.
+
+### Likely combination
+
+If runtime evidence shows both:
+
+```text
+many short segments
+and
+sustained executor backlog
+```
+
+then the eventual solution may combine:
+
+```text
+fewer / better-sized work items
++
+additional execution capacity where hardware supports it
+```
+
+No throughput strategy has been selected yet.
+
+---
+
+## Realistic runtime validation
+
+Short integration tests are not sufficient to evaluate transcription
+throughput.
+
+For throughput investigations, run a realistic two-sided conversation for at
+least 10–30 minutes.
+
+Record:
+
+```text
+system SpeechPipeline shutdown summary
+microphone SpeechPipeline shutdown summary
+TranscriptionExecutor shutdown summary
+```
+
+Also record the runtime configuration:
+
+```text
+Whisper model
+device
+compute_type
+transcription queue capacity
+segmentation settings
+```
+
+For comparison between runs, avoid changing multiple performance-sensitive
+parameters at once.
+
+The next throughput decision should be made only after collecting these
+measurements.
+
+---
+
+## Deliberately not implemented
+
+The current observability implementation does not introduce:
+
+- Prometheus;
+- OpenTelemetry;
+- external metrics storage;
+- a custom metrics framework;
+- per-frame logs;
+- percentile/histogram infrastructure;
+- CPU/GPU telemetry;
+- adaptive executor behavior;
+- automatic queue resizing.
+
+These may be introduced later when a concrete requirement justifies them.
