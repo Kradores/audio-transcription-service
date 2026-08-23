@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import numpy as np
+
 from app.audio.contracts import SpeechSegment
 from app.core.config.models import TranscriptionAggregationSettings
 from app.transcription.contracts import TranscriptionSegmentAggregatorStats
@@ -41,20 +43,59 @@ class TranscriptionSegmentAggregatorImpl:
         if not self._settings.enabled:
             return self._emit(segment)
 
-        emitted: list[SpeechSegment] = []
+        pending = self._pending
 
-        if self._pending is not None:
-            emitted.extend(self._emit_pending())
+        if pending is None:
+            return self._handle_new_pending_candidate(segment)
 
-        if (
-            segment.duration >= self._settings.target_duration_seconds
-            or self._settings.max_wait_seconds == 0.0
-        ):
-            emitted.extend(self._emit(segment))
-        else:
-            self._pending = segment
+        gap_seconds = self._gap_seconds(
+            pending,
+            segment,
+        )
 
-        return tuple(emitted)
+        if gap_seconds < 0.0:
+            emitted = self._emit_pending()
+
+            return (
+                *emitted,
+                *self._handle_new_pending_candidate(segment),
+            )
+
+        if gap_seconds > self._settings.max_gap_seconds:
+            emitted = self._emit_pending()
+
+            return (
+                *emitted,
+                *self._handle_new_pending_candidate(segment),
+            )
+
+        gap_samples = self._gap_samples(
+            gap_seconds=gap_seconds,
+            sample_rate=pending.format.sample_rate,
+        )
+
+        combined_sample_count = pending.audio.shape[0] + gap_samples + segment.audio.shape[0]
+
+        combined_duration = combined_sample_count / pending.format.sample_rate
+
+        if combined_duration > self._settings.max_duration_seconds:
+            emitted = self._emit_pending()
+
+            return (
+                *emitted,
+                *self._handle_new_pending_candidate(segment),
+            )
+
+        combined = self._combine(
+            pending,
+            segment,
+            gap_samples=gap_samples,
+        )
+
+        self._segments_combined += 1
+        self._pending = None
+
+        return self._handle_new_pending_candidate(combined)
 
     def advance(
         self,
@@ -97,3 +138,65 @@ class TranscriptionSegmentAggregatorImpl:
         )
 
         return (segment,)
+
+    def _handle_new_pending_candidate(
+        self,
+        segment: SpeechSegment,
+    ) -> tuple[SpeechSegment, ...]:
+        if (
+            segment.duration >= self._settings.target_duration_seconds
+            or self._settings.max_wait_seconds == 0.0
+        ):
+            return self._emit(segment)
+
+        self._pending = segment
+        return ()
+
+    @staticmethod
+    def _gap_seconds(
+        first: SpeechSegment,
+        second: SpeechSegment,
+    ) -> float:
+        first_end = first.timestamp + first.duration
+        return second.timestamp - first_end
+
+    @staticmethod
+    def _gap_samples(
+        *,
+        gap_seconds: float,
+        sample_rate: int,
+    ) -> int:
+        return round(gap_seconds * sample_rate)
+
+    @staticmethod
+    def _combine(
+        first: SpeechSegment,
+        second: SpeechSegment,
+        *,
+        gap_samples: int,
+    ) -> SpeechSegment:
+        silence = np.zeros(
+            (
+                gap_samples,
+                first.format.channels,
+            ),
+            dtype=first.audio.dtype,
+        )
+
+        audio = np.concatenate(
+            (
+                first.audio,
+                silence,
+                second.audio,
+            ),
+            axis=0,
+        )
+
+        duration = audio.shape[0] / first.format.sample_rate
+
+        return SpeechSegment(
+            audio=audio,
+            timestamp=first.timestamp,
+            duration=duration,
+            format=first.format,
+        )

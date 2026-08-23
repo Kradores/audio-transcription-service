@@ -237,7 +237,9 @@ def test_zero_max_wait_emits_short_segment_immediately() -> None:
 def test_second_segment_does_not_replace_pending_segment() -> None:
     # Arrange
     aggregator = TranscriptionSegmentAggregatorImpl(
-        create_settings(),
+        create_settings(
+            max_gap_seconds=1.5,
+        ),
     )
     first = create_segment(
         timestamp=10.0,
@@ -245,7 +247,7 @@ def test_second_segment_does_not_replace_pending_segment() -> None:
         value=1.0,
     )
     second = create_segment(
-        timestamp=12.0,
+        timestamp=12.6,
         duration=1.0,
         value=2.0,
     )
@@ -324,3 +326,485 @@ def test_stats_are_returned_as_snapshots() -> None:
 
     assert after.segments_received == 1
     assert after.segments_emitted == 1
+
+
+def test_contiguous_short_segments_are_combined() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(
+            target_duration_seconds=5.0,
+        ),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=1.0,
+        value=1.0,
+    )
+    second = create_segment(
+        timestamp=11.0,
+        duration=1.5,
+        value=2.0,
+    )
+
+    assert aggregator.process(first) == ()
+
+    # Act
+    result = aggregator.process(second)
+
+    # Assert
+    assert result == ()
+
+    flushed = aggregator.flush()
+
+    assert len(flushed) == 1
+
+    combined = flushed[0]
+
+    assert combined.timestamp == 10.0
+    assert combined.duration == 2.5
+
+    np.testing.assert_array_equal(
+        combined.audio[:SAMPLE_RATE],
+        first.audio,
+    )
+    np.testing.assert_array_equal(
+        combined.audio[SAMPLE_RATE:],
+        second.audio,
+    )
+
+
+def test_combined_segment_is_emitted_when_target_is_reached() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(
+            target_duration_seconds=5.0,
+        ),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=2.0,
+        value=1.0,
+    )
+    second = create_segment(
+        timestamp=12.0,
+        duration=3.0,
+        value=2.0,
+    )
+
+    assert aggregator.process(first) == ()
+
+    # Act
+    result = aggregator.process(second)
+
+    # Assert
+    assert len(result) == 1
+
+    combined = result[0]
+
+    assert combined.timestamp == 10.0
+    assert combined.duration == 5.0
+    assert aggregator.flush() == ()
+
+
+def test_multiple_contiguous_segments_are_combined_until_target() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(
+            target_duration_seconds=5.0,
+        ),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=1.0,
+        value=1.0,
+    )
+    second = create_segment(
+        timestamp=11.0,
+        duration=1.5,
+        value=2.0,
+    )
+    third = create_segment(
+        timestamp=12.5,
+        duration=2.5,
+        value=3.0,
+    )
+
+    # Act
+    first_result = aggregator.process(first)
+    second_result = aggregator.process(second)
+    third_result = aggregator.process(third)
+
+    # Assert
+    assert first_result == ()
+    assert second_result == ()
+    assert len(third_result) == 1
+
+    combined = third_result[0]
+
+    assert combined.timestamp == 10.0
+    assert combined.duration == 5.0
+
+    expected = np.concatenate(
+        (
+            first.audio,
+            second.audio,
+            third.audio,
+        ),
+        axis=0,
+    )
+
+    np.testing.assert_array_equal(
+        combined.audio,
+        expected,
+    )
+
+
+def test_segment_is_not_combined_when_max_duration_would_be_exceeded() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(
+            target_duration_seconds=8.0,
+            max_duration_seconds=10.0,
+        ),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=6.0,
+        value=1.0,
+    )
+    second = create_segment(
+        timestamp=16.0,
+        duration=5.0,
+        value=2.0,
+    )
+
+    assert aggregator.process(first) == ()
+
+    # Act
+    result = aggregator.process(second)
+
+    # Assert
+    assert result == (first,)
+
+    assert aggregator.flush() == (second,)
+
+
+def test_combination_may_reach_exact_max_duration() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(
+            target_duration_seconds=10.0,
+            max_duration_seconds=10.0,
+        ),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=4.0,
+    )
+    second = create_segment(
+        timestamp=14.0,
+        duration=6.0,
+    )
+
+    assert aggregator.process(first) == ()
+
+    # Act
+    result = aggregator.process(second)
+
+    # Assert
+    assert len(result) == 1
+    assert result[0].duration == 10.0
+
+
+def test_positive_gap_is_filled_with_silence() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(
+            target_duration_seconds=5.0,
+            max_gap_seconds=1.5,
+        ),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=1.0,
+        value=1.0,
+    )
+    second = create_segment(
+        timestamp=11.5,
+        duration=1.0,
+        value=2.0,
+    )
+
+    assert aggregator.process(first) == ()
+
+    # Act
+    result = aggregator.process(second)
+
+    # Assert
+    assert result == ()
+
+    combined = aggregator.flush()[0]
+
+    assert combined.timestamp == 10.0
+    assert combined.duration == 2.5
+
+    first_end = SAMPLE_RATE
+    silence_end = first_end + (SAMPLE_RATE // 2)
+
+    np.testing.assert_array_equal(
+        combined.audio[:first_end],
+        first.audio,
+    )
+
+    np.testing.assert_array_equal(
+        combined.audio[first_end:silence_end],
+        np.zeros(
+            (SAMPLE_RATE // 2, 1),
+            dtype=np.float32,
+        ),
+    )
+
+    np.testing.assert_array_equal(
+        combined.audio[silence_end:],
+        second.audio,
+    )
+
+
+def test_overlap_forms_boundary_until_overlap_trimming_is_supported() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=1.0,
+    )
+    second = create_segment(
+        timestamp=10.98,
+        duration=1.0,
+    )
+
+    assert aggregator.process(first) == ()
+
+    # Act
+    result = aggregator.process(second)
+
+    # Assert
+    assert result == (first,)
+    assert aggregator.flush() == (second,)
+
+
+def test_stats_count_combined_input_segments() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(
+            target_duration_seconds=5.0,
+        ),
+    )
+
+    first = create_segment(
+        timestamp=10.0,
+        duration=1.0,
+    )
+    second = create_segment(
+        timestamp=11.0,
+        duration=1.5,
+    )
+    third = create_segment(
+        timestamp=12.5,
+        duration=2.5,
+    )
+
+    # Act
+    aggregator.process(first)
+    aggregator.process(second)
+    aggregator.process(third)
+
+    stats = aggregator.stats
+
+    # Assert
+    assert stats.segments_received == 3
+    assert stats.segments_emitted == 1
+    assert stats.segments_combined == 2
+
+    assert stats.output_seconds_total == 5.0
+    assert stats.output_seconds_average == 5.0
+    assert stats.output_seconds_max == 5.0
+
+
+def test_half_second_gap_inserts_exact_sample_count() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=1.0,
+    )
+    second = create_segment(
+        timestamp=11.5,
+        duration=1.0,
+    )
+
+    assert aggregator.process(first) == ()
+
+    # Act
+    aggregator.process(second)
+    combined = aggregator.flush()[0]
+
+    # Assert
+    expected_samples = SAMPLE_RATE + 8_000 + SAMPLE_RATE
+
+    assert combined.audio.shape == (
+        expected_samples,
+        1,
+    )
+
+
+def test_gap_equal_to_max_gap_is_combined() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(
+            target_duration_seconds=5.0,
+            max_gap_seconds=1.5,
+        ),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=1.0,
+    )
+    second = create_segment(
+        timestamp=12.5,
+        duration=1.0,
+    )
+
+    assert aggregator.process(first) == ()
+
+    # Act
+    result = aggregator.process(second)
+
+    # Assert
+    assert result == ()
+
+    combined = aggregator.flush()[0]
+
+    assert combined.timestamp == 10.0
+    assert combined.duration == 3.5
+
+
+def test_gap_above_max_gap_forms_boundary() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(
+            max_gap_seconds=1.5,
+        ),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=1.0,
+    )
+    second = create_segment(
+        timestamp=12.51,
+        duration=1.0,
+    )
+
+    assert aggregator.process(first) == ()
+
+    # Act
+    result = aggregator.process(second)
+
+    # Assert
+    assert result == (first,)
+    assert aggregator.flush() == (second,)
+
+
+def test_synthesized_gap_counts_toward_target_duration() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(
+            target_duration_seconds=5.0,
+            max_gap_seconds=1.5,
+        ),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=2.0,
+    )
+    second = create_segment(
+        timestamp=13.0,
+        duration=2.0,
+    )
+
+    assert aggregator.process(first) == ()
+
+    # Act
+    result = aggregator.process(second)
+
+    # Assert
+    assert len(result) == 1
+
+    combined = result[0]
+
+    assert combined.timestamp == 10.0
+    assert combined.duration == 5.0
+    assert aggregator.flush() == ()
+
+
+def test_synthesized_gap_counts_toward_max_duration() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(
+            target_duration_seconds=9.0,
+            max_duration_seconds=10.0,
+            max_gap_seconds=1.5,
+        ),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=5.0,
+    )
+    second = create_segment(
+        timestamp=16.0,
+        duration=5.0,
+    )
+
+    assert aggregator.process(first) == ()
+
+    # Act
+    result = aggregator.process(second)
+
+    # Assert
+    assert result == (first,)
+    assert aggregator.flush() == (second,)
+
+
+def test_stats_include_synthesized_silence_in_output_duration() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(
+            target_duration_seconds=5.0,
+        ),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=2.0,
+    )
+    second = create_segment(
+        timestamp=13.0,
+        duration=2.0,
+    )
+
+    # Act
+    aggregator.process(first)
+    aggregator.process(second)
+
+    stats = aggregator.stats
+
+    # Assert
+    assert stats.segments_received == 2
+    assert stats.segments_emitted == 1
+    assert stats.segments_combined == 1
+
+    assert stats.output_seconds_total == 5.0
+    assert stats.output_seconds_average == 5.0
+    assert stats.output_seconds_max == 5.0
