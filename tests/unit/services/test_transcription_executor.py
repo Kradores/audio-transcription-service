@@ -226,7 +226,7 @@ async def test_executor_recovers_after_queue_overflow() -> None:
     # 3. Wait safely until the first segment finishes processing
     await asyncio.to_thread(result_received.wait)
 
-    # 4. Prove the executor recovered: a new segment is now successfully accepted
+    # 4. Prove the executor recovered: a new segment is now successfully submitted
     assert executor.submit(create_transcription_work_item(timestamp=3.0)) is True
 
     await executor.stop()
@@ -334,7 +334,7 @@ async def test_executor_stats_track_accepted_submissions() -> None:
 
     stats = executor.stats
 
-    assert stats.accepted == 2
+    assert stats.submitted == 2
 
 
 @pytest.mark.anyio
@@ -400,7 +400,7 @@ async def test_executor_stats_track_completed_transcriptions() -> None:
 
     stats = executor.stats
 
-    assert stats.accepted == 3
+    assert stats.submitted == 3
     assert stats.completed == 3
     assert stats.failed == 0
 
@@ -441,7 +441,7 @@ async def test_executor_stats_track_transcription_failures() -> None:
 
     stats = executor.stats
 
-    assert stats.accepted == 3
+    assert stats.submitted == 3
     assert stats.completed == 1
     assert stats.failed == 2
 
@@ -482,7 +482,7 @@ async def test_executor_stats_track_max_queue_depth() -> None:
 
     stats = executor.stats
 
-    assert stats.max_queue_depth == 3
+    assert stats.queue_high_water_mark == 3
 
     release.set()
 
@@ -503,14 +503,14 @@ async def test_executor_stats_are_snapshot() -> None:
 
     stats_before = executor.stats
 
-    assert stats_before.accepted == 1
+    assert stats_before.submitted == 1
 
     assert executor.submit(create_transcription_work_item(timestamp=1.0)) is True
 
     stats_after = executor.stats
 
-    assert stats_before.accepted == 1
-    assert stats_after.accepted == 2
+    assert stats_before.submitted == 1
+    assert stats_after.submitted == 2
 
     await executor.stop()
 
