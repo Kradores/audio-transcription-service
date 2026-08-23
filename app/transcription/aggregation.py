@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from app.audio.contracts import SpeechSegment
+from app.core.config.constants import PROCESSING_FRAME_DURATION_SECONDS
 from app.core.config.models import TranscriptionAggregationSettings
 from app.transcription.contracts import TranscriptionSegmentAggregatorStats
 
@@ -53,13 +56,36 @@ class TranscriptionSegmentAggregatorImpl:
             segment,
         )
 
-        if gap_seconds < 0.0:
-            emitted = self._emit_pending()
+        trim_samples = 0
 
-            return (
-                *emitted,
-                *self._handle_new_pending_candidate(segment),
+        if gap_seconds < 0.0:
+            overlap_seconds = -gap_seconds
+
+            if overlap_seconds > PROCESSING_FRAME_DURATION_SECONDS and not math.isclose(
+                overlap_seconds,
+                PROCESSING_FRAME_DURATION_SECONDS,
+                rel_tol=0.0,
+                abs_tol=1e-9,
+            ):
+                emitted = self._emit_pending()
+
+                return (
+                    *emitted,
+                    *self._handle_new_pending_candidate(segment),
+                )
+
+            trim_samples = self._overlap_samples(
+                overlap_seconds=overlap_seconds,
+                sample_rate=segment.format.sample_rate,
             )
+
+            if trim_samples >= segment.audio.shape[0]:
+                emitted = self._emit_pending()
+
+                return (
+                    *emitted,
+                    *self._handle_new_pending_candidate(segment),
+                )
 
         if gap_seconds > self._settings.max_gap_seconds:
             emitted = self._emit_pending()
@@ -69,12 +95,17 @@ class TranscriptionSegmentAggregatorImpl:
                 *self._handle_new_pending_candidate(segment),
             )
 
-        gap_samples = self._gap_samples(
-            gap_seconds=gap_seconds,
-            sample_rate=pending.format.sample_rate,
-        )
+        gap_samples = 0
 
-        combined_sample_count = pending.audio.shape[0] + gap_samples + segment.audio.shape[0]
+        if gap_seconds > 0.0:
+            gap_samples = self._gap_samples(
+                gap_seconds=gap_seconds,
+                sample_rate=pending.format.sample_rate,
+            )
+
+        combined_sample_count = (
+            pending.audio.shape[0] + gap_samples + segment.audio.shape[0] - trim_samples
+        )
 
         combined_duration = combined_sample_count / pending.format.sample_rate
 
@@ -90,6 +121,7 @@ class TranscriptionSegmentAggregatorImpl:
             pending,
             segment,
             gap_samples=gap_samples,
+            trim_samples=trim_samples,
         )
 
         self._segments_combined += 1
@@ -169,11 +201,20 @@ class TranscriptionSegmentAggregatorImpl:
         return round(gap_seconds * sample_rate)
 
     @staticmethod
+    def _overlap_samples(
+        *,
+        overlap_seconds: float,
+        sample_rate: int,
+    ) -> int:
+        return round(overlap_seconds * sample_rate)
+
+    @staticmethod
     def _combine(
         first: SpeechSegment,
         second: SpeechSegment,
         *,
         gap_samples: int,
+        trim_samples: int,
     ) -> SpeechSegment:
         silence = np.zeros(
             (
@@ -183,11 +224,13 @@ class TranscriptionSegmentAggregatorImpl:
             dtype=first.audio.dtype,
         )
 
+        second_audio = second.audio[trim_samples:]
+
         audio = np.concatenate(
             (
                 first.audio,
                 silence,
-                second.audio,
+                second_audio,
             ),
             axis=0,
         )

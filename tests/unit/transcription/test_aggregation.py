@@ -570,18 +570,22 @@ def test_positive_gap_is_filled_with_silence() -> None:
     )
 
 
-def test_overlap_forms_boundary_until_overlap_trimming_is_supported() -> None:
+def test_small_overlap_is_trimmed_and_segments_are_combined() -> None:
     # Arrange
     aggregator = TranscriptionSegmentAggregatorImpl(
-        create_settings(),
+        create_settings(
+            target_duration_seconds=5.0,
+        ),
     )
     first = create_segment(
         timestamp=10.0,
         duration=1.0,
+        value=1.0,
     )
     second = create_segment(
         timestamp=10.98,
         duration=1.0,
+        value=2.0,
     )
 
     assert aggregator.process(first) == ()
@@ -590,8 +594,28 @@ def test_overlap_forms_boundary_until_overlap_trimming_is_supported() -> None:
     result = aggregator.process(second)
 
     # Assert
-    assert result == (first,)
-    assert aggregator.flush() == (second,)
+    assert result == ()
+
+    combined = aggregator.flush()[0]
+
+    expected_overlap_samples = 320
+
+    assert combined.timestamp == 10.0
+    assert combined.audio.shape == (
+        (2 * SAMPLE_RATE) - expected_overlap_samples,
+        1,
+    )
+    assert combined.duration == pytest.approx(1.98)
+
+    np.testing.assert_array_equal(
+        combined.audio[:SAMPLE_RATE],
+        first.audio,
+    )
+
+    np.testing.assert_array_equal(
+        combined.audio[SAMPLE_RATE:],
+        second.audio[expected_overlap_samples:],
+    )
 
 
 def test_stats_count_combined_input_segments() -> None:
@@ -808,3 +832,107 @@ def test_stats_include_synthesized_silence_in_output_duration() -> None:
     assert stats.output_seconds_total == 5.0
     assert stats.output_seconds_average == 5.0
     assert stats.output_seconds_max == 5.0
+
+
+def test_overlap_equal_to_processing_frame_duration_is_combined() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=1.0,
+    )
+    second = create_segment(
+        timestamp=10.98,
+        duration=1.0,
+    )
+
+    assert aggregator.process(first) == ()
+
+    # Act
+    result = aggregator.process(second)
+
+    # Assert
+    assert result == ()
+
+    combined = aggregator.flush()[0]
+
+    assert combined.duration == pytest.approx(1.98)
+
+
+def test_overlap_above_processing_frame_duration_forms_boundary() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=1.0,
+    )
+    second = create_segment(
+        timestamp=10.979,
+        duration=1.0,
+    )
+
+    assert aggregator.process(first) == ()
+
+    # Act
+    result = aggregator.process(second)
+
+    # Assert
+    assert result == (first,)
+    assert aggregator.flush() == (second,)
+
+
+def test_trimmed_overlap_counts_toward_actual_target_duration() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(
+            target_duration_seconds=2.0,
+        ),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=1.0,
+    )
+    second = create_segment(
+        timestamp=10.98,
+        duration=1.0,
+    )
+
+    assert aggregator.process(first) == ()
+
+    # Act
+    result = aggregator.process(second)
+
+    # Assert
+    assert result == ()
+    assert aggregator.flush()[0].duration == pytest.approx(1.98)
+
+
+def test_trimmed_overlap_uses_actual_duration_for_maximum() -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(
+            target_duration_seconds=1.99,
+            max_duration_seconds=1.99,
+        ),
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=1.0,
+    )
+    second = create_segment(
+        timestamp=10.99,
+        duration=1.0,
+    )
+
+    assert aggregator.process(first) == ()
+
+    # Act
+    result = aggregator.process(second)
+
+    # Assert
+    assert len(result) == 1
+    assert result[0].duration == pytest.approx(1.99)
