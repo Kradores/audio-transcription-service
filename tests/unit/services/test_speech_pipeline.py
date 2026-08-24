@@ -185,6 +185,7 @@ class FakeTranscriptionSegmentAggregator:
     def __init__(self) -> None:
         self.processed: list[SpeechSegment] = []
         self.advanced: list[float] = []
+        self.flush_calls = 0
 
         self.process_results: dict[
             int,
@@ -195,6 +196,8 @@ class FakeTranscriptionSegmentAggregator:
             float,
             tuple[SpeechSegment, ...],
         ] = {}
+
+        self.flush_result: tuple[SpeechSegment, ...] = ()
 
     @property
     def stats(self) -> TranscriptionSegmentAggregatorStats:
@@ -221,7 +224,12 @@ class FakeTranscriptionSegmentAggregator:
         return self.advance_results.get(timestamp, ())
 
     def flush(self) -> tuple[SpeechSegment, ...]:
-        return ()
+        self.flush_calls += 1
+
+        result = self.flush_result
+        self.flush_result = ()
+
+        return result
 
 
 class PassThroughTranscriptionSegmentAggregator(FakeTranscriptionSegmentAggregator):
@@ -1341,3 +1349,207 @@ async def test_pipeline_advances_aggregator_before_processing_new_segment() -> N
         "advance",
         "process",
     ]
+
+
+@pytest.mark.anyio
+async def test_stop_submits_pending_aggregate() -> None:
+    # Arrange
+    pending_segment = create_speech_segment(
+        timestamp=10.0,
+        duration=1.0,
+    )
+
+    aggregator = FakeTranscriptionSegmentAggregator()
+    aggregator.flush_result = (pending_segment,)
+
+    executor = FakeTranscriptionExecutor()
+
+    pipeline = create_pipeline(
+        transcription_segment_aggregator=aggregator,
+        transcription_executor=executor,
+    )
+
+    await pipeline.start()
+
+    # Act
+    await pipeline.stop()
+
+    # Assert
+    assert executor.attempted == [
+        TranscriptionWorkItem(
+            source=AudioSource.SYSTEM_AUDIO,
+            segment=pending_segment,
+        )
+    ]
+
+
+@pytest.mark.anyio
+async def test_stop_handles_empty_aggregator_flush() -> None:
+    # Arrange
+    aggregator = FakeTranscriptionSegmentAggregator()
+    executor = FakeTranscriptionExecutor()
+
+    pipeline = create_pipeline(
+        transcription_segment_aggregator=aggregator,
+        transcription_executor=executor,
+    )
+
+    await pipeline.start()
+
+    # Act
+    await pipeline.stop()
+
+    # Assert
+    assert aggregator.flush_calls == 1
+    assert executor.attempted == []
+
+
+@pytest.mark.anyio
+async def test_rejected_shutdown_aggregate_is_counted() -> None:
+    # Arrange
+    pending_segment = create_speech_segment(
+        timestamp=10.0,
+        duration=1.0,
+    )
+
+    aggregator = FakeTranscriptionSegmentAggregator()
+    aggregator.flush_result = (pending_segment,)
+
+    class RejectingExecutor(FakeTranscriptionExecutor):
+        def submit(
+            self,
+            item: TranscriptionWorkItem,
+        ) -> bool:
+            self.attempted.append(item)
+            return False
+
+    executor = RejectingExecutor()
+
+    pipeline = create_pipeline(
+        transcription_segment_aggregator=aggregator,
+        transcription_executor=executor,
+    )
+
+    await pipeline.start()
+
+    # Act
+    await pipeline.stop()
+
+    # Assert
+    assert pipeline.stats.segments_rejected == 1
+
+
+@pytest.mark.anyio
+async def test_repeated_stop_does_not_flush_aggregator_twice() -> None:
+    # Arrange
+    aggregator = FakeTranscriptionSegmentAggregator()
+
+    pipeline = create_pipeline(
+        transcription_segment_aggregator=aggregator,
+    )
+
+    await pipeline.start()
+
+    # Act
+    await pipeline.stop()
+    await pipeline.stop()
+
+    # Assert
+    assert aggregator.flush_calls == 1
+
+
+@pytest.mark.anyio
+async def test_discontinuity_submits_pending_aggregate() -> None:
+    # Arrange
+    pending_segment = create_speech_segment(
+        timestamp=10.0,
+        duration=1.0,
+    )
+
+    aggregator = FakeTranscriptionSegmentAggregator()
+    aggregator.flush_result = (pending_segment,)
+
+    executor = FakeTranscriptionExecutor()
+    capture = ControllableAudioCapture()
+
+    pipeline = create_pipeline(
+        capture=capture,
+        transcription_segment_aggregator=aggregator,
+        transcription_executor=executor,
+    )
+
+    await pipeline.start()
+
+    capture.signal_discontinuity()
+
+    # Act
+    await capture.submit(create_audio_frame())
+    await asyncio.sleep(0)
+
+    # Assert
+    assert executor.attempted == [
+        TranscriptionWorkItem(
+            source=AudioSource.SYSTEM_AUDIO,
+            segment=pending_segment,
+        )
+    ]
+
+    await capture.close()
+    await pipeline.wait()
+
+
+@pytest.mark.anyio
+async def test_discontinuity_flushes_aggregator_before_processing_state_reset() -> None:
+    # Arrange
+    events: list[str] = []
+    capture = ControllableAudioCapture()
+    executor = FakeTranscriptionExecutor()
+
+    class RecordingAggregator(FakeTranscriptionSegmentAggregator):
+        def flush(self) -> tuple[SpeechSegment, ...]:
+            events.append("aggregator-flush")
+            return super().flush()
+
+    class RecordingNormalizer(FakeNormalizer):
+        def reset(self) -> None:
+            events.append("normalizer-reset")
+            super().reset()
+
+    class RecordingVad(FakeVad):
+        def reset(self) -> None:
+            events.append("vad-reset")
+            super().reset()
+
+    class RecordingAssembler(FakeAssembler):
+        def reset(self) -> None:
+            events.append("assembler-reset")
+            super().reset()
+
+    pipeline = SpeechPipeline(
+        source=AudioSource.SYSTEM_AUDIO,
+        capture=capture,
+        normalizer=RecordingNormalizer(()),
+        vad=RecordingVad(),
+        assembler=RecordingAssembler({}),
+        transcription_segment_aggregator=RecordingAggregator(),
+        transcription_executor=executor,
+    )
+
+    await pipeline.start()
+
+    capture.signal_discontinuity()
+
+    # Act
+    await capture.submit(create_audio_frame())
+    await asyncio.sleep(0)
+
+    # Assert
+    assert events[:4] == [
+        "aggregator-flush",
+        "normalizer-reset",
+        "vad-reset",
+        "assembler-reset",
+    ]
+
+    await capture.close()
+    await pipeline.wait()

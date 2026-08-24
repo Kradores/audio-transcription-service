@@ -138,6 +138,8 @@ class SpeechPipeline:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
+        self._flush_transcription_segment_aggregator()
+
         stats = self.stats
 
         logger.info(
@@ -268,6 +270,8 @@ class SpeechPipeline:
             self._source.value,
         )
 
+        self._flush_transcription_segment_aggregator()
+
         self._normalizer.reset()
         self._vad.reset()
         self._assembler.reset()
@@ -297,3 +301,7 @@ class SpeechPipeline:
             segment.timestamp,
             segment.timestamp + segment.duration,
         )
+
+    def _flush_transcription_segment_aggregator(self) -> None:
+        for segment in self._transcription_segment_aggregator.flush():
+            self._submit_transcription_segment(segment)
