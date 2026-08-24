@@ -59,6 +59,8 @@ Transcript text is not logged at INFO level.
 
 Transcript text may be logged at DEBUG level for controlled diagnostic runs.
 
+Normal logging is emitted both to console and, when configured, to a bounded rotating file.
+
 ---
 
 ## Audio capture

@@ -46,10 +46,20 @@ class ApiSettings(BaseConfigurationModel):
     port: Annotated[int, Field(ge=1, le=65535)]
 
 
+class FileLoggingSettings(BaseConfigurationModel):
+    """Configuration for persistent application log output."""
+
+    enabled: bool
+    path: Path
+    max_bytes: Annotated[int, Field(gt=0)]
+    backup_count: Annotated[int, Field(ge=0)]
+
+
 class LoggingSettings(BaseConfigurationModel):
     """Configuration settings for application logging outputs."""
 
     level: LogLevel
+    file: FileLoggingSettings
 
 
 class AudioCaptureSettings(BaseConfigurationModel):
@@ -141,6 +151,7 @@ __all__ = [
     "AudioSettings",
     "BaseConfigurationModel",
     "DatabaseSettings",
+    "FileLoggingSettings",
     "LoggingSettings",
     "Settings",
     "VadSettings",
