@@ -141,13 +141,17 @@ class SpeechPipeline:
         self._flush_transcription_segment_aggregator()
 
         stats = self.stats
+        aggregation_stats = self._transcription_segment_aggregator.stats
 
         logger.info(
             "speech pipeline stopped "
             "source=%s captured_frames=%d processing_frames=%d "
             "segments_emitted=%d segments_rejected=%d "
             "short_segments=%d avg_segment_duration=%.3f "
-            "max_segment_duration=%.3f",
+            "max_segment_duration=%.3f "
+            "aggregation_received=%d aggregation_emitted=%d "
+            "aggregation_combined=%d avg_aggregate_duration=%.3f "
+            "max_aggregate_duration=%.3f",
             self._source.value,
             stats.captured_frames,
             stats.processing_frames,
@@ -156,6 +160,11 @@ class SpeechPipeline:
             stats.short_segments,
             stats.segment_seconds_average,
             stats.segment_seconds_max,
+            aggregation_stats.segments_received,
+            aggregation_stats.segments_emitted,
+            aggregation_stats.segments_combined,
+            aggregation_stats.output_seconds_average,
+            aggregation_stats.output_seconds_max,
         )
 
         self._normalizer.reset()

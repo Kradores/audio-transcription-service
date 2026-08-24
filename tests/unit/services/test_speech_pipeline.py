@@ -199,15 +199,17 @@ class FakeTranscriptionSegmentAggregator:
 
         self.flush_result: tuple[SpeechSegment, ...] = ()
 
-    @property
-    def stats(self) -> TranscriptionSegmentAggregatorStats:
-        return TranscriptionSegmentAggregatorStats(
-            segments_received=len(self.processed),
+        self.stats_result = TranscriptionSegmentAggregatorStats(
+            segments_received=0,
             segments_emitted=0,
             segments_combined=0,
             output_seconds_total=0.0,
             output_seconds_max=0.0,
         )
+
+    @property
+    def stats(self) -> TranscriptionSegmentAggregatorStats:
+        return self.stats_result
 
     def process(
         self,
@@ -879,6 +881,15 @@ async def test_pipeline_logs_vad_segments_and_final_statistics(
 
     capture = FakeAudioCapture([create_audio_frame()])
     transcription_executor = FakeTranscriptionExecutor()
+    aggregator = PassThroughTranscriptionSegmentAggregator()
+
+    aggregator.stats_result = TranscriptionSegmentAggregatorStats(
+        segments_received=3,
+        segments_emitted=2,
+        segments_combined=1,
+        output_seconds_total=8.0,
+        output_seconds_max=5.0,
+    )
 
     pipeline = SpeechPipeline(
         source=AudioSource.SYSTEM_AUDIO,
@@ -886,7 +897,7 @@ async def test_pipeline_logs_vad_segments_and_final_statistics(
         normalizer=FakeNormalizer((processing_frame,)),
         vad=VadWithEvents(),
         assembler=FakeAssembler({id(processing_frame): (segment,)}),
-        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
+        transcription_segment_aggregator=aggregator,
         transcription_executor=transcription_executor,
     )
 
@@ -903,8 +914,14 @@ async def test_pipeline_logs_vad_segments_and_final_statistics(
     )
     assert any("speech segment emitted source=system_audio id=1" in message for message in messages)
     assert any(
-        "speech pipeline stopped source=system_audio captured_frames=1 processing_frames=1 "
-        "segments_emitted=1 segments_rejected=0" in message
+        "speech pipeline stopped source=system_audio "
+        "captured_frames=1 processing_frames=1 "
+        "segments_emitted=1 segments_rejected=0 "
+        "short_segments=0 avg_segment_duration=1.000 "
+        "max_segment_duration=1.000 "
+        "aggregation_received=3 aggregation_emitted=2 "
+        "aggregation_combined=1 avg_aggregate_duration=4.000 "
+        "max_aggregate_duration=5.000" in message
         for message in messages
     )
 

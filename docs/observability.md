@@ -640,3 +640,41 @@ The current observability implementation does not introduce:
 - automatic queue resizing.
 
 These may be introduced later when a concrete requirement justifies them.
+
+
+## Transcription aggregation
+
+Each source pipeline reports semantic segmentation and transcription
+aggregation separately.
+
+Semantic segment statistics:
+
+- `segments_emitted`
+- `short_segments`
+- `avg_segment_duration`
+- `max_segment_duration`
+
+Aggregation statistics:
+
+- `aggregation_received`
+- `aggregation_emitted`
+- `aggregation_combined`
+- `avg_aggregate_duration`
+- `max_aggregate_duration`
+
+`segments_emitted` describes completed semantic segments produced by
+`SpeechSegmentAssembler`.
+
+`aggregation_emitted` describes the actual `SpeechSegment` work units emitted
+by `TranscriptionSegmentAggregator` toward `TranscriptionExecutor`.
+
+`segments_rejected` counts transcription segments rejected by the shared
+executor after aggregation.
+
+This allows runtime diagnosis across:
+
+semantic segmentation
+→ aggregation
+→ executor submission
+→ queue pressure
+→ transcription
