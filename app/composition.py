@@ -32,9 +32,10 @@ from app.services.speech_pipeline import SpeechPipeline
 from app.services.transcription_executor import TranscriptionExecutor, TranscriptionExecutorImpl
 from app.storage.recorder import TranscriptRecorderImpl
 from app.storage.sqlite import SQLiteTranscriptRepository
+from app.transcription.aggregation import TranscriptionSegmentAggregatorImpl
 from app.transcription.contracts import AudioSource
 from app.transcription.faster_whisper import FasterWhisperTranscriber
-from app.transcription.protocols import Transcriber
+from app.transcription.protocols import Transcriber, TranscriptionSegmentAggregator
 from app.vad.assembler import SpeechSegmentAssemblerImpl
 from app.vad.protocols import AudioVad, SpeechSegmentAssembler
 from app.vad.silero import SileroVADAdapter
@@ -127,12 +128,17 @@ def create_source_pipeline(
         settings=settings.audio.segmentation,
     )
 
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        settings.transcription.aggregation,
+    )
+
     return create_speech_pipeline(
         source=source,
         capture=capture,
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
+        transcription_segment_aggregator=aggregator,
         transcription_executor=transcription_executor,
     )
 
@@ -259,6 +265,7 @@ def create_speech_pipeline(
     normalizer: AudioNormalizer,
     vad: AudioVad,
     assembler: SpeechSegmentAssembler,
+    transcription_segment_aggregator: TranscriptionSegmentAggregator,
     transcription_executor: TranscriptionExecutor,
 ) -> SpeechPipeline:
     """Create the application speech-processing pipeline."""
@@ -269,5 +276,6 @@ def create_speech_pipeline(
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
+        transcription_segment_aggregator=transcription_segment_aggregator,
         transcription_executor=transcription_executor,
     )

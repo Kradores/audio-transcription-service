@@ -19,6 +19,7 @@ from app.composition import (
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
 from app.services.speech_pipeline import SpeechPipeline
+from app.transcription.aggregation import TranscriptionSegmentAggregatorImpl
 from app.transcription.contracts import AudioSource
 
 FIXTURE_PATH = Path(__file__).parents[2] / "fixtures" / "audio" / "english_speech.wav"
@@ -92,6 +93,10 @@ async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None
 
     assembler = create_speech_assembler(settings.audio.segmentation)
 
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        settings.transcription.aggregation,
+    )
+
     database = sqlite3.connect(":memory:")
 
     transcription_executor = create_transcription_executor(
@@ -105,6 +110,7 @@ async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
+        transcription_segment_aggregator=aggregator,
         transcription_executor=transcription_executor,
     )
 

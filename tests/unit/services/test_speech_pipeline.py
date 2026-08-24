@@ -16,7 +16,11 @@ from app.audio.contracts import (
 )
 from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.services.speech_pipeline import SpeechPipeline
-from app.transcription.contracts import AudioSource, TranscriptionWorkItem
+from app.transcription.contracts import (
+    AudioSource,
+    TranscriptionSegmentAggregatorStats,
+    TranscriptionWorkItem,
+)
 from app.vad.protocols import AudioVad, SpeechSegmentAssembler
 
 SAMPLE_RATE = 16_000
@@ -177,6 +181,58 @@ class FakeAssembler:
         return ()
 
 
+class FakeTranscriptionSegmentAggregator:
+    def __init__(self) -> None:
+        self.processed: list[SpeechSegment] = []
+        self.advanced: list[float] = []
+
+        self.process_results: dict[
+            int,
+            tuple[SpeechSegment, ...],
+        ] = {}
+
+        self.advance_results: dict[
+            float,
+            tuple[SpeechSegment, ...],
+        ] = {}
+
+    @property
+    def stats(self) -> TranscriptionSegmentAggregatorStats:
+        return TranscriptionSegmentAggregatorStats(
+            segments_received=len(self.processed),
+            segments_emitted=0,
+            segments_combined=0,
+            output_seconds_total=0.0,
+            output_seconds_max=0.0,
+        )
+
+    def process(
+        self,
+        segment: SpeechSegment,
+    ) -> tuple[SpeechSegment, ...]:
+        self.processed.append(segment)
+        return self.process_results.get(id(segment), ())
+
+    def advance(
+        self,
+        timestamp: float,
+    ) -> tuple[SpeechSegment, ...]:
+        self.advanced.append(timestamp)
+        return self.advance_results.get(timestamp, ())
+
+    def flush(self) -> tuple[SpeechSegment, ...]:
+        return ()
+
+
+class PassThroughTranscriptionSegmentAggregator(FakeTranscriptionSegmentAggregator):
+    def process(
+        self,
+        segment: SpeechSegment,
+    ) -> tuple[SpeechSegment, ...]:
+        self.processed.append(segment)
+        return (segment,)
+
+
 class FakeTranscriptionExecutor:
     def __init__(self) -> None:
         self.attempted: list[TranscriptionWorkItem] = []
@@ -237,6 +293,8 @@ def create_audio_frame() -> AudioFrame:
 
 def create_processing_frame(
     value: float | None = None,
+    *,
+    timestamp: float = 0.020,
 ) -> ProcessingAudioFrame:
     frame_value = 1.0 if value is None else value
 
@@ -248,7 +306,7 @@ def create_processing_frame(
 
     return ProcessingAudioFrame(
         audio=audio,
-        timestamp=1 * 0.020,
+        timestamp=timestamp,
         format=AudioFormat(
             sample_rate=16_000,
             channels=1,
@@ -257,17 +315,24 @@ def create_processing_frame(
     )
 
 
-def create_speech_segment() -> SpeechSegment:
+def create_speech_segment(
+    *,
+    timestamp: float = 10.0,
+    duration: float = 1.0,
+    value: float = 1.0,
+) -> SpeechSegment:
+    sample_count = round(duration * SAMPLE_RATE)
+
     audio = np.full(
-        (FRAME_SAMPLES, CHANNELS),
-        1.0,
+        (sample_count, 1),
+        value,
         dtype=np.float32,
     )
 
     return SpeechSegment(
         audio=audio,
-        timestamp=10.0,
-        duration=0.020,
+        timestamp=timestamp,
+        duration=sample_count / SAMPLE_RATE,
         format=AUDIO_FORMAT,
     )
 
@@ -284,27 +349,37 @@ def create_pipeline(
     normalizer: AudioNormalizer | None = None,
     vad: AudioVad | None = None,
     assembler: SpeechSegmentAssembler | None = None,
+    transcription_segment_aggregator: FakeTranscriptionSegmentAggregator | None = None,
     transcription_executor: FakeTranscriptionExecutor | None = None,
+    processing_frames: tuple[ProcessingAudioFrame, ...] | None = None,
     segments: tuple[SpeechSegment, ...] = (),
+    segments_by_frame: dict[int, tuple[SpeechSegment, ...]] | None = None,
     source: AudioSource = AudioSource.SYSTEM_AUDIO,
 ) -> SpeechPipeline:
-    processing_frame = create_processing_frame()
+    if processing_frames is None:
+        processing_frames = (create_processing_frame(),)
 
     if capture is None:
         capture = FakeAudioCapture([create_audio_frame()])
 
     if normalizer is None:
-        normalizer = FakeNormalizer((processing_frame,))
+        normalizer = FakeNormalizer(processing_frames)
 
     if vad is None:
         vad = FakeVad()
 
     if assembler is None:
-        assembler = FakeAssembler(
-            {
-                id(processing_frame): segments,
+        if segments_by_frame is not None:
+            assembler_results = segments_by_frame
+        else:
+            assembler_results = {
+                id(processing_frames[0]): segments,
             }
-        )
+
+        assembler = FakeAssembler(assembler_results)
+
+    if transcription_segment_aggregator is None:
+        transcription_segment_aggregator = PassThroughTranscriptionSegmentAggregator()
 
     if transcription_executor is None:
         transcription_executor = FakeTranscriptionExecutor()
@@ -315,6 +390,7 @@ def create_pipeline(
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
+        transcription_segment_aggregator=transcription_segment_aggregator,
         transcription_executor=transcription_executor,
     )
 
@@ -342,6 +418,7 @@ async def test_pipeline_processes_frame_through_all_stages() -> None:
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
+        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
         transcription_executor=transcription_executor,
     )
 
@@ -383,6 +460,7 @@ async def test_pipeline_processes_all_normalized_frames() -> None:
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
+        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
         transcription_executor=transcription_executor,
     )
 
@@ -420,6 +498,7 @@ async def test_pipeline_submits_all_items_from_one_processing_frame() -> None:
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
+        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
         transcription_executor=transcription_executor,
     )
 
@@ -452,6 +531,7 @@ async def test_pipeline_processes_frames_emitted_by_normalizer_flush() -> None:
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
+        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
         transcription_executor=transcription_executor,
     )
 
@@ -550,6 +630,7 @@ async def test_pipeline_discontinuity_callback_only_marks_pending_reset() -> Non
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
+        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
         transcription_executor=transcription_executor,
     )
 
@@ -585,6 +666,7 @@ async def test_pipeline_discontinuity_resets_processing_components() -> None:
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
+        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
         transcription_executor=transcription_executor,
     )
 
@@ -631,6 +713,7 @@ async def test_pipeline_resets_before_first_post_discontinuity_frame() -> None:
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
+        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
         transcription_executor=transcription_executor,
     )
 
@@ -674,6 +757,7 @@ async def test_pipeline_handles_multiple_discontinuities() -> None:
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
+        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
         transcription_executor=transcription_executor,
     )
 
@@ -714,6 +798,7 @@ async def test_pipeline_coalesces_multiple_pending_discontinuities() -> None:
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
+        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
         transcription_executor=transcription_executor,
     )
 
@@ -752,6 +837,7 @@ async def test_pipeline_discontinuity_does_not_submit_transcription() -> None:
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
+        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
         transcription_executor=transcription_executor,
     )
 
@@ -792,6 +878,7 @@ async def test_pipeline_logs_vad_segments_and_final_statistics(
         normalizer=FakeNormalizer((processing_frame,)),
         vad=VadWithEvents(),
         assembler=FakeAssembler({id(processing_frame): (segment,)}),
+        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
         transcription_executor=transcription_executor,
     )
 
@@ -809,7 +896,7 @@ async def test_pipeline_logs_vad_segments_and_final_statistics(
     assert any("speech segment emitted source=system_audio id=1" in message for message in messages)
     assert any(
         "speech pipeline stopped source=system_audio captured_frames=1 processing_frames=1 "
-        "segments_emitted=1 segments_rejected=0 short_segments=1" in message
+        "segments_emitted=1 segments_rejected=0" in message
         for message in messages
     )
 
@@ -830,6 +917,7 @@ async def test_pipeline_continues_when_transcription_executor_rejects_item() -> 
         assembler=FakeAssembler(
             {id(processing_frame): (item.segment,)},
         ),
+        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
         transcription_executor=transcription_executor,
     )
 
@@ -933,6 +1021,7 @@ async def test_pipeline_continues_after_transcription_rejection() -> None:
         normalizer=normalizer,
         vad=FakeVad(),
         assembler=assembler,
+        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
         transcription_executor=executor,
     )
 
@@ -992,6 +1081,7 @@ async def test_pipeline_reports_rejected_segments_in_final_statistics(
                 id(processing_frame_two): (item_two.segment,),
             },
         ),
+        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
         transcription_executor=executor,
     )
 
@@ -1023,6 +1113,7 @@ async def test_pipeline_attaches_source_to_transcription_work_item() -> None:
                 id(processing_frame): (segment,),
             }
         ),
+        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
         transcription_executor=transcription_executor,
     )
 
@@ -1052,6 +1143,7 @@ async def test_pipeline_does_not_manage_transcription_executor_lifecycle() -> No
         normalizer=FakeNormalizer(()),
         vad=FakeVad(),
         assembler=FakeAssembler({}),
+        transcription_segment_aggregator=PassThroughTranscriptionSegmentAggregator(),
         transcription_executor=transcription_executor,
     )
 
@@ -1063,3 +1155,189 @@ async def test_pipeline_does_not_manage_transcription_executor_lifecycle() -> No
     # Assert
     assert not transcription_executor.started
     assert not transcription_executor.stopped
+
+
+@pytest.mark.anyio
+async def test_pipeline_passes_assembler_segment_to_aggregator() -> None:
+    # Arrange
+    processing_frame = create_processing_frame(1.0)
+    segment = create_speech_segment()
+
+    aggregator = FakeTranscriptionSegmentAggregator()
+
+    pipeline = create_pipeline(
+        processing_frames=(processing_frame,),
+        segments=(segment,),
+        transcription_segment_aggregator=aggregator,
+    )
+
+    # Act
+    await pipeline.start()
+    await pipeline.wait()
+
+    # Assert
+    assert aggregator.processed == [segment]
+
+
+@pytest.mark.anyio
+async def test_pipeline_does_not_submit_buffered_semantic_segment() -> None:
+    # Arrange
+    processing_frame = create_processing_frame(1.0)
+    segment = create_speech_segment()
+
+    aggregator = FakeTranscriptionSegmentAggregator()
+    aggregator.process_results[id(segment)] = ()
+
+    executor = FakeTranscriptionExecutor()
+
+    pipeline = create_pipeline(
+        processing_frames=(processing_frame,),
+        segments=(segment,),
+        transcription_segment_aggregator=aggregator,
+        transcription_executor=executor,
+    )
+
+    # Act
+    await pipeline.start()
+    await pipeline.wait()
+
+    # Assert
+    assert aggregator.processed == [segment]
+    assert executor.attempted == []
+
+
+@pytest.mark.anyio
+async def test_pipeline_submits_segment_emitted_by_aggregator() -> None:
+    # Arrange
+    processing_frame = create_processing_frame(1.0)
+
+    semantic_segment = create_speech_segment(
+        timestamp=10.0,
+        duration=1.0,
+    )
+    aggregated_segment = create_speech_segment(
+        timestamp=10.0,
+        duration=5.0,
+    )
+
+    aggregator = FakeTranscriptionSegmentAggregator()
+    aggregator.process_results[id(semantic_segment)] = (aggregated_segment,)
+
+    executor = FakeTranscriptionExecutor()
+
+    pipeline = create_pipeline(
+        processing_frames=(processing_frame,),
+        segments=(semantic_segment,),
+        transcription_segment_aggregator=aggregator,
+        transcription_executor=executor,
+    )
+
+    # Act
+    await pipeline.start()
+    await pipeline.wait()
+
+    # Assert
+    assert executor.attempted == [
+        TranscriptionWorkItem(
+            source=AudioSource.SYSTEM_AUDIO,
+            segment=aggregated_segment,
+        )
+    ]
+
+
+@pytest.mark.anyio
+async def test_pipeline_advances_aggregator_with_processing_timeline() -> None:
+    # Arrange
+    processing_frames = (
+        create_processing_frame(1.0),
+        create_processing_frame(2.0),
+        create_processing_frame(3.0),
+    )
+
+    aggregator = FakeTranscriptionSegmentAggregator()
+
+    pipeline = create_pipeline(
+        processing_frames=processing_frames,
+        transcription_segment_aggregator=aggregator,
+    )
+
+    # Act
+    await pipeline.start()
+    await pipeline.wait()
+
+    # Assert
+    assert aggregator.advanced == [frame.timestamp for frame in processing_frames]
+
+
+@pytest.mark.anyio
+async def test_pipeline_submits_segment_emitted_by_advance() -> None:
+    # Arrange
+    processing_frame = create_processing_frame(5.0)
+    expired_segment = create_speech_segment(
+        timestamp=1.0,
+        duration=1.0,
+    )
+
+    aggregator = FakeTranscriptionSegmentAggregator()
+    aggregator.advance_results[processing_frame.timestamp] = (expired_segment,)
+
+    executor = FakeTranscriptionExecutor()
+
+    pipeline = create_pipeline(
+        processing_frames=(processing_frame,),
+        transcription_segment_aggregator=aggregator,
+        transcription_executor=executor,
+    )
+
+    # Act
+    await pipeline.start()
+    await pipeline.wait()
+
+    # Assert
+    assert executor.attempted == [
+        TranscriptionWorkItem(
+            source=AudioSource.SYSTEM_AUDIO,
+            segment=expired_segment,
+        )
+    ]
+
+
+@pytest.mark.anyio
+async def test_pipeline_advances_aggregator_before_processing_new_segment() -> None:
+    # Arrange
+    events: list[str] = []
+    processing_frame = create_processing_frame(5.0)
+    segment = create_speech_segment()
+
+    class RecordingAggregator(FakeTranscriptionSegmentAggregator):
+        def advance(
+            self,
+            timestamp: float,
+        ) -> tuple[SpeechSegment, ...]:
+            events.append("advance")
+            return super().advance(timestamp)
+
+        def process(
+            self,
+            segment: SpeechSegment,
+        ) -> tuple[SpeechSegment, ...]:
+            events.append("process")
+            return super().process(segment)
+
+    aggregator = RecordingAggregator()
+
+    pipeline = create_pipeline(
+        processing_frames=(processing_frame,),
+        segments=(segment,),
+        transcription_segment_aggregator=aggregator,
+    )
+
+    # Act
+    await pipeline.start()
+    await pipeline.wait()
+
+    # Assert
+    assert events == [
+        "advance",
+        "process",
+    ]

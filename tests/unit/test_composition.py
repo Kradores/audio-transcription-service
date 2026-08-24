@@ -226,6 +226,7 @@ def test_create_speech_pipeline_wires_dependencies() -> None:
     normalizer = MagicMock()
     vad = MagicMock()
     assembler = MagicMock()
+    transcription_segment_aggregator = MagicMock()
     transcription_executor = MagicMock()
 
     with patch("app.composition.SpeechPipeline") as pipeline_type:
@@ -235,6 +236,7 @@ def test_create_speech_pipeline_wires_dependencies() -> None:
             normalizer=normalizer,
             vad=vad,
             assembler=assembler,
+            transcription_segment_aggregator=transcription_segment_aggregator,
             transcription_executor=transcription_executor,
         )
 
@@ -246,6 +248,7 @@ def test_create_speech_pipeline_wires_dependencies() -> None:
         normalizer=normalizer,
         vad=vad,
         assembler=assembler,
+        transcription_segment_aggregator=transcription_segment_aggregator,
         transcription_executor=transcription_executor,
     )
 

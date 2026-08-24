@@ -5,10 +5,11 @@ import contextlib
 import logging
 from dataclasses import dataclass
 
-from app.audio.contracts import ProcessingAudioFrame
+from app.audio.contracts import ProcessingAudioFrame, SpeechSegment
 from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.services.transcription_executor import TranscriptionExecutor
 from app.transcription.contracts import AudioSource, TranscriptionWorkItem
+from app.transcription.protocols import TranscriptionSegmentAggregator
 from app.vad.protocols import AudioVad, SpeechSegmentAssembler
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class SpeechPipeline:
         normalizer: AudioNormalizer,
         vad: AudioVad,
         assembler: SpeechSegmentAssembler,
+        transcription_segment_aggregator: TranscriptionSegmentAggregator,
         transcription_executor: TranscriptionExecutor,
     ) -> None:
         self._source = source
@@ -53,6 +55,7 @@ class SpeechPipeline:
         self._normalizer = normalizer
         self._vad = vad
         self._assembler = assembler
+        self._transcription_segment_aggregator = transcription_segment_aggregator
         self._transcription_executor = transcription_executor
 
         self._task: asyncio.Task[None] | None = None
@@ -206,6 +209,9 @@ class SpeechPipeline:
         self,
         frame: ProcessingAudioFrame,
     ) -> None:
+        for segment in self._transcription_segment_aggregator.advance(frame.timestamp):
+            self._submit_transcription_segment(segment)
+
         events = self._vad.process(frame)
 
         for event in events:
@@ -246,23 +252,9 @@ class SpeechPipeline:
                 segment.timestamp + duration,
             )
 
-            accepted = self._transcription_executor.submit(
-                TranscriptionWorkItem(
-                    source=self._source,
-                    segment=segment,
-                )
-            )
-
-            if not accepted:
-                self._segments_rejected += 1
-
-                logger.warning(
-                    "speech segment rejected by transcription executor "
-                    "source=%s id=%d start=%.3f end=%.3f",
-                    self._source.value,
-                    segment_id,
-                    segment.timestamp,
-                    segment.timestamp + duration,
+            for transcription_segment in self._transcription_segment_aggregator.process(segment):
+                self._submit_transcription_segment(
+                    transcription_segment,
                 )
 
     def _handle_capture_discontinuity(self) -> None:
@@ -281,3 +273,27 @@ class SpeechPipeline:
         self._assembler.reset()
 
         self._discontinuity_pending = False
+
+    def _submit_transcription_segment(
+        self,
+        segment: SpeechSegment,
+    ) -> None:
+        accepted = self._transcription_executor.submit(
+            TranscriptionWorkItem(
+                source=self._source,
+                segment=segment,
+            )
+        )
+
+        if accepted:
+            return
+
+        self._segments_rejected += 1
+
+        logger.warning(
+            "transcription segment rejected by transcription executor "
+            "source=%s start=%.3f end=%.3f",
+            self._source.value,
+            segment.timestamp,
+            segment.timestamp + segment.duration,
+        )
