@@ -21,6 +21,12 @@ def valid_configuration_document() -> dict[str, Any]:
         },
         "logging": {
             "level": "INFO",
+            "file": {
+                "enabled": True,
+                "path": "logs/audio-transcription-service.log",
+                "max_bytes": 10485760,
+                "backup_count": 5,
+            },
         },
         "audio": {
             "capture": {
