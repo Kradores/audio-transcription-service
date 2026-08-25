@@ -266,6 +266,9 @@ class FakeTranscriptionExecutor:
     async def stop(self) -> None:
         self.stopped = True
 
+    async def wait(self) -> None:
+        """Wait until an executor worker terminates unexpectedly."""
+
 
 class ControllableAudioCapture(FakeAudioCapture):
     def __init__(self) -> None:

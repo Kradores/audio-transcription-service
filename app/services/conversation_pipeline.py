@@ -109,9 +109,15 @@ class ConversationPipeline:
             name="microphone-speech-pipeline-wait",
         )
 
+        executor_wait = asyncio.create_task(
+            self._transcription_executor.wait(),
+            name="transcription-executor-wait",
+        )
+
         waiters = {
             system_wait: "system_audio",
             microphone_wait: "microphone",
+            executor_wait: "transcription_executor",
         }
 
         try:
@@ -127,13 +133,13 @@ class ConversationPipeline:
                 await completed
             except Exception:
                 logger.exception(
-                    "conversation source pipeline failed source=%s",
+                    "conversation component failed component=%s",
                     source,
                 )
                 raise
 
             raise RuntimeError(
-                f"conversation source pipeline stopped unexpectedly: {source}",
+                f"conversation component stopped unexpectedly: {source}",
             )
 
         finally:

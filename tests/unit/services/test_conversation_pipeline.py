@@ -8,10 +8,15 @@ from app.services.speech_pipeline import SpeechPipeline
 from app.services.transcription_executor import TranscriptionExecutor
 
 
+async def wait_forever() -> None:
+    await asyncio.Event().wait()
+
+
 def create_executor_mock() -> MagicMock:
     executor = MagicMock(spec=TranscriptionExecutor)
     executor.start = AsyncMock()
     executor.stop = AsyncMock()
+    executor.wait = AsyncMock(side_effect=wait_forever)
     return executor
 
 
@@ -298,4 +303,30 @@ async def test_wait_rejects_unexpected_source_completion() -> None:
         RuntimeError,
         match="system_audio",
     ):
+        await conversation.wait()
+
+
+@pytest.mark.anyio
+async def test_wait_propagates_transcription_executor_failure() -> None:
+    executor = create_executor_mock()
+    system_pipeline = create_pipeline_mock()
+    microphone_pipeline = create_pipeline_mock()
+
+    async def wait_forever() -> None:
+        await asyncio.Event().wait()
+
+    async def fail_executor() -> None:
+        raise RuntimeError("executor failed")
+
+    system_pipeline.wait.side_effect = wait_forever
+    microphone_pipeline.wait.side_effect = wait_forever
+    executor.wait.side_effect = fail_executor
+
+    conversation = ConversationPipeline(
+        transcription_executor=executor,
+        system_pipeline=system_pipeline,
+        microphone_pipeline=microphone_pipeline,
+    )
+
+    with pytest.raises(RuntimeError, match="executor failed"):
         await conversation.wait()

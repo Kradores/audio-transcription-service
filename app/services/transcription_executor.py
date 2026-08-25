@@ -70,13 +70,16 @@ class TranscriptionExecutor(Protocol):
     """Execute transcription independently from real-time audio processing."""
 
     async def start(self) -> None:
-        """Start the transcription worker."""
+        """Start transcription workers."""
 
     def submit(self, item: TranscriptionWorkItem) -> bool:
         """Submit a speech segment without blocking the caller."""
 
     async def stop(self) -> None:
-        """Stop the worker after accepted work has been processed."""
+        """Stop workers after accepted work has been processed."""
+
+    async def wait(self) -> None:
+        """Wait until an executor worker terminates unexpectedly."""
 
 
 class TranscriptionExecutorImpl:
@@ -104,6 +107,8 @@ class TranscriptionExecutorImpl:
         )
 
         self._worker_tasks: tuple[asyncio.Task[None], ...] = ()
+        self._worker_failure: asyncio.Future[BaseException] | None = None
+        self._stopping = False
 
         self._started = False
         self._accepting = False
@@ -146,8 +151,11 @@ class TranscriptionExecutorImpl:
 
         self._started = True
         self._accepting = True
+        self._stopping = False
 
-        self._worker_tasks = tuple(
+        self._worker_failure = asyncio.get_running_loop().create_future()
+
+        worker_tasks = tuple(
             asyncio.create_task(
                 self._run(transcriber),
                 name=f"transcription-executor-worker-{worker_id}",
@@ -157,6 +165,11 @@ class TranscriptionExecutorImpl:
                 start=1,
             )
         )
+
+        for worker_task in worker_tasks:
+            worker_task.add_done_callback(self._on_worker_done)
+
+        self._worker_tasks = worker_tasks
 
         logger.info(
             "transcription executor started queue_capacity=%d",
@@ -205,31 +218,44 @@ class TranscriptionExecutorImpl:
         return True
 
     async def stop(self) -> None:
-        """Stop accepting work and drain accepted segments."""
+        """Stop accepting work and drain accepted transcription."""
 
         if not self._started:
             return
 
         self._accepting = False
+        self._stopping = True
 
         worker_tasks = self._worker_tasks
+        lifecycle_failure: BaseException | None = None
 
-        if not worker_tasks:
+        worker_failure = self._worker_failure
+
+        if worker_failure is not None and worker_failure.done():
+            lifecycle_failure = worker_failure.result()
+
+        try:
+            await self._drain_accepted_work(worker_tasks)
+
+            live_workers = tuple(
+                worker_task
+                for worker_task in worker_tasks
+                if not worker_task.done()
+            )
+
+            for _ in live_workers:
+                await self._queue.put(self._SHUTDOWN)
+
+            await asyncio.gather(
+                *worker_tasks,
+                return_exceptions=True,
+            )
+
+        finally:
+            self._worker_tasks = ()
+            self._worker_failure = None
             self._started = False
-            return
-
-        # Drain all work accepted before shutdown.
-        await self._queue.join()
-
-        # Accepted work has drained. Give every worker its own termination signal.
-        for _ in worker_tasks:
-            await self._queue.put(self._SHUTDOWN)
-
-        with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.gather(*worker_tasks)
-
-        self._worker_tasks = ()
-        self._started = False
+            self._stopping = False
 
         stats = self.stats
 
@@ -250,6 +276,25 @@ class TranscriptionExecutorImpl:
             stats.transcription_seconds_average,
             stats.transcription_seconds_max,
         )
+
+        if lifecycle_failure is not None:
+            raise RuntimeError(
+                "transcription executor worker terminated unexpectedly"
+            ) from lifecycle_failure
+
+    async def wait(self) -> None:
+        """Wait for unexpected transcription-worker termination."""
+
+        worker_failure = self._worker_failure
+
+        if not self._started or worker_failure is None:
+            raise RuntimeError("transcription executor is not running")
+
+        failure = await worker_failure
+
+        raise RuntimeError(
+            "transcription executor worker terminated unexpectedly"
+        ) from failure
 
     async def _run(self, transcriber: Transcriber) -> None:
         while True:
@@ -326,3 +371,77 @@ class TranscriptionExecutorImpl:
 
             finally:
                 self._queue.task_done()
+
+    def _on_worker_done(
+        self,
+        worker_task: asyncio.Task[None],
+    ) -> None:
+        if self._stopping:
+            return
+
+        if worker_task.cancelled():
+            failure: BaseException = RuntimeError(
+                f"transcription worker cancelled unexpectedly: "
+                f"{worker_task.get_name()}"
+            )
+        else:
+            exception = worker_task.exception()
+
+            if exception is None:
+                failure = RuntimeError(
+                    f"transcription worker stopped unexpectedly: "
+                    f"{worker_task.get_name()}"
+                )
+            else:
+                failure = exception
+
+        self._accepting = False
+
+        logger.error(
+            "transcription worker terminated unexpectedly "
+            "worker=%s failure=%r",
+            worker_task.get_name(),
+            failure,
+        )
+
+        worker_failure = self._worker_failure
+
+        if worker_failure is not None and not worker_failure.done():
+            worker_failure.set_result(failure)
+
+    async def _drain_accepted_work(
+        self,
+        worker_tasks: tuple[asyncio.Task[None], ...],
+    ) -> None:
+        join_task = asyncio.create_task(
+            self._queue.join(),
+            name="transcription-executor-drain",
+        )
+
+        live_workers = set(worker_tasks)
+
+        try:
+            while not join_task.done():
+                if not live_workers:
+                    raise RuntimeError(
+                        "all transcription workers stopped before "
+                        "accepted work was drained"
+                    )
+
+                done, _ = await asyncio.wait(
+                    {join_task, *live_workers},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if join_task in done:
+                    break
+
+                live_workers.difference_update(done)
+
+            await join_task
+
+        finally:
+            if not join_task.done():
+                join_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await join_task

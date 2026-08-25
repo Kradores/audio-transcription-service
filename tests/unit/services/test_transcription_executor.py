@@ -303,21 +303,6 @@ async def test_executor_stop_drains_accepted_segments() -> None:
 
 
 @pytest.mark.anyio
-async def test_executor_stop_is_safe_when_called_multiple_times() -> None:
-    executor = TranscriptionExecutorImpl(
-        transcribers=(FakeTranscriber(),),
-        on_result=lambda _: None,
-        queue_capacity=1,
-    )
-
-    await executor.stop()
-
-    await executor.start()
-    await executor.stop()
-    await executor.stop()
-
-
-@pytest.mark.anyio
 async def test_executor_stats_track_accepted_submissions() -> None:
     executor = TranscriptionExecutorImpl(
         transcribers=(FakeTranscriber(),),
@@ -642,3 +627,105 @@ async def test_executor_uses_one_transcriber_per_worker() -> None:
 
     assert first.calls == 1
     assert second.calls == 1
+
+
+@pytest.mark.anyio
+async def test_executor_accounts_for_all_accepted_work_after_shutdown() -> None:
+    class SelectiveTranscriber:
+        def transcribe(
+            self,
+            segment: SpeechSegment,
+        ) -> TranscriptionResult:
+            if int(segment.timestamp) % 2 == 0:
+                raise RuntimeError("transcription failed")
+
+            return TranscriptionResult(
+                text="text",
+                language="en",
+                confidence=None,
+                start=segment.timestamp,
+                end=segment.timestamp + segment.duration,
+            )
+
+    executor = TranscriptionExecutorImpl(
+        transcribers=(
+            SelectiveTranscriber(),
+            SelectiveTranscriber(),
+        ),
+        on_result=lambda _: None,
+        queue_capacity=10,
+    )
+
+    await executor.start()
+
+    for timestamp in range(6):
+        assert executor.submit(
+            create_transcription_work_item(
+                timestamp=float(timestamp),
+            )
+        )
+
+    await executor.stop()
+
+    stats = executor.stats
+
+    assert stats.submitted == 6
+    assert stats.completed == 3
+    assert stats.failed == 3
+    assert stats.submitted == stats.completed + stats.failed
+
+
+@pytest.mark.anyio
+async def test_executor_stop_is_safe_when_called_multiple_times() -> None:
+    executor = TranscriptionExecutorImpl(
+        transcribers=(
+            FakeTranscriber(),
+            FakeTranscriber(),
+        ),
+        on_result=lambda _: None,
+        queue_capacity=1,
+    )
+
+    await executor.stop()
+
+    await executor.start()
+    await executor.stop()
+    await executor.stop()
+
+
+@pytest.mark.anyio
+async def test_executor_wait_reports_unexpected_worker_termination() -> None:
+    class WorkerFatalError(BaseException):
+        pass
+
+    def fail_result_handler(
+        _: SourcedTranscriptionResult,
+    ) -> None:
+        raise WorkerFatalError("worker lifecycle failure")
+
+    executor = TranscriptionExecutorImpl(
+        transcribers=(
+            FakeTranscriber(),
+            FakeTranscriber(),
+        ),
+        on_result=fail_result_handler,
+        queue_capacity=10,
+    )
+
+    await executor.start()
+
+    assert executor.submit(
+        create_transcription_work_item(),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="worker terminated unexpectedly",
+    ):
+        await executor.wait()
+
+    with pytest.raises(
+        RuntimeError,
+        match="worker terminated unexpectedly",
+    ):
+        await executor.stop()
