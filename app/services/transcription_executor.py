@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -85,21 +86,24 @@ class TranscriptionExecutorImpl:
 
     def __init__(
         self,
-        transcriber: Transcriber,
+        transcribers: Sequence[Transcriber],
         on_result: SourcedTranscriptionResultHandler,
         queue_capacity: int,
     ) -> None:
         if queue_capacity < 1:
             raise ValueError("queue_capacity must be at least 1")
 
-        self._transcriber = transcriber
+        if not transcribers:
+            raise ValueError("at least one transcriber is required")
+
+        self._transcribers = tuple(transcribers)
         self._on_result = on_result
 
         self._queue: asyncio.Queue[_QueuedWorkItem | _Shutdown] = asyncio.Queue(
             maxsize=queue_capacity,
         )
 
-        self._worker_task: asyncio.Task[None] | None = None
+        self._worker_tasks: tuple[asyncio.Task[None], ...] = ()
 
         self._started = False
         self._accepting = False
@@ -135,7 +139,7 @@ class TranscriptionExecutorImpl:
         )
 
     async def start(self) -> None:
-        """Start accepting segments and launch the worker."""
+        """Start accepting segments and launch transcription workers."""
 
         if self._started:
             return
@@ -143,9 +147,15 @@ class TranscriptionExecutorImpl:
         self._started = True
         self._accepting = True
 
-        self._worker_task = asyncio.create_task(
-            self._run(),
-            name="transcription-executor",
+        self._worker_tasks = tuple(
+            asyncio.create_task(
+                self._run(transcriber),
+                name=f"transcription-executor-worker-{worker_id}",
+            )
+            for worker_id, transcriber in enumerate(
+                self._transcribers,
+                start=1,
+            )
         )
 
         logger.info(
@@ -202,23 +212,23 @@ class TranscriptionExecutorImpl:
 
         self._accepting = False
 
-        worker_task = self._worker_task
+        worker_tasks = self._worker_tasks
 
-        if worker_task is None:
+        if not worker_tasks:
             self._started = False
             return
 
         # Drain all work accepted before shutdown.
         await self._queue.join()
 
-        # The queue is now empty, so the sentinel can terminate the worker
-        # without discarding accepted work.
-        await self._queue.put(self._SHUTDOWN)
+        # Accepted work has drained. Give every worker its own termination signal.
+        for _ in worker_tasks:
+            await self._queue.put(self._SHUTDOWN)
 
         with contextlib.suppress(asyncio.CancelledError):
-            await worker_task
+            await asyncio.gather(*worker_tasks)
 
-        self._worker_task = None
+        self._worker_tasks = ()
         self._started = False
 
         stats = self.stats
@@ -241,7 +251,7 @@ class TranscriptionExecutorImpl:
             stats.transcription_seconds_max,
         )
 
-    async def _run(self) -> None:
+    async def _run(self, transcriber: Transcriber) -> None:
         while True:
             queued_item = await self._queue.get()
 
@@ -264,7 +274,7 @@ class TranscriptionExecutorImpl:
 
                 try:
                     result = await asyncio.to_thread(
-                        self._transcriber.transcribe,
+                        transcriber.transcribe,
                         item.segment,
                     )
                 finally:

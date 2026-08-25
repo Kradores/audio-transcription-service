@@ -382,11 +382,7 @@ def test_transcription_settings_accepts_valid_values() -> None:
 def test_transcription_worker_count_accepts_positive_values(
     worker_count: int,
 ) -> None:
-    settings = (
-        SettingsBuilder()
-        .with_transcription_worker_count(worker_count)
-        .build()
-    )
+    settings = SettingsBuilder().with_transcription_worker_count(worker_count).build()
 
     assert settings.transcription.worker_count == worker_count
 
@@ -402,8 +398,4 @@ def test_transcription_worker_count_rejects_invalid_values(
     worker_count: int,
 ) -> None:
     with pytest.raises(ValidationError):
-        (
-            SettingsBuilder()
-            .with_transcription_worker_count(worker_count)
-            .build()
-        )
+        (SettingsBuilder().with_transcription_worker_count(worker_count).build())

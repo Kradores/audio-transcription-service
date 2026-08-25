@@ -246,7 +246,7 @@ def create_transcription_executor(
     recorder = TranscriptRecorderImpl(repository)
 
     return TranscriptionExecutorImpl(
-        transcriber=transcriber,
+        transcribers=(transcriber,),
         on_result=recorder.record,
         queue_capacity=settings.transcription.queue_capacity,
     )

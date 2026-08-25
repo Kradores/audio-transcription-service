@@ -60,7 +60,7 @@ async def test_executor_processes_submitted_segment() -> None:
     results: list[SourcedTranscriptionResult] = []
 
     executor = TranscriptionExecutorImpl(
-        transcriber=transcriber,
+        transcribers=(transcriber,),
         on_result=results.append,
         queue_capacity=10,
     )
@@ -85,7 +85,7 @@ async def test_executor_preserves_submission_order() -> None:
     results: list[SourcedTranscriptionResult] = []
 
     executor = TranscriptionExecutorImpl(
-        transcriber=transcriber,
+        transcribers=(transcriber,),
         on_result=results.append,
         queue_capacity=10,
     )
@@ -128,7 +128,7 @@ async def test_executor_submit_does_not_block_while_transcription_is_running() -
             )
 
     executor = TranscriptionExecutorImpl(
-        transcriber=BlockingTranscriber(),
+        transcribers=(BlockingTranscriber(),),
         on_result=lambda _: None,
         queue_capacity=10,
     )
@@ -169,7 +169,7 @@ async def test_executor_rejects_segment_when_queue_is_full() -> None:
             )
 
     executor = TranscriptionExecutorImpl(
-        transcriber=BlockingTranscriber(),
+        transcribers=(BlockingTranscriber(),),
         on_result=lambda _: None,
         queue_capacity=1,
     )
@@ -209,7 +209,7 @@ async def test_executor_recovers_after_queue_overflow() -> None:
             )
 
     executor = TranscriptionExecutorImpl(
-        transcriber=BlockingTranscriber(),
+        transcribers=(BlockingTranscriber(),),
         on_result=lambda _: result_received.set(),  # Signal when an item finishes
         queue_capacity=1,
     )
@@ -256,7 +256,7 @@ async def test_executor_continues_after_transcription_failure() -> None:
     results: list[SourcedTranscriptionResult] = []
 
     executor = TranscriptionExecutorImpl(
-        transcriber=transcriber,
+        transcribers=(transcriber,),
         on_result=results.append,
         queue_capacity=10,
     )
@@ -278,7 +278,7 @@ async def test_executor_stop_drains_accepted_segments() -> None:
     results: list[SourcedTranscriptionResult] = []
 
     executor = TranscriptionExecutorImpl(
-        transcriber=transcriber,
+        transcribers=(transcriber,),
         on_result=results.append,
         queue_capacity=10,
     )
@@ -305,7 +305,7 @@ async def test_executor_stop_drains_accepted_segments() -> None:
 @pytest.mark.anyio
 async def test_executor_stop_is_safe_when_called_multiple_times() -> None:
     executor = TranscriptionExecutorImpl(
-        transcriber=FakeTranscriber(),
+        transcribers=(FakeTranscriber(),),
         on_result=lambda _: None,
         queue_capacity=1,
     )
@@ -320,7 +320,7 @@ async def test_executor_stop_is_safe_when_called_multiple_times() -> None:
 @pytest.mark.anyio
 async def test_executor_stats_track_accepted_submissions() -> None:
     executor = TranscriptionExecutorImpl(
-        transcriber=FakeTranscriber(),
+        transcribers=(FakeTranscriber(),),
         on_result=lambda _: None,
         queue_capacity=10,
     )
@@ -356,7 +356,7 @@ async def test_executor_stats_track_rejected_submissions() -> None:
             )
 
     executor = TranscriptionExecutorImpl(
-        transcriber=BlockingTranscriber(),
+        transcribers=(BlockingTranscriber(),),
         on_result=lambda _: None,
         queue_capacity=1,
     )
@@ -385,7 +385,7 @@ async def test_executor_stats_track_completed_transcriptions() -> None:
     transcriber = FakeTranscriber()
 
     executor = TranscriptionExecutorImpl(
-        transcriber=transcriber,
+        transcribers=(transcriber,),
         on_result=lambda _: None,
         queue_capacity=10,
     )
@@ -426,7 +426,7 @@ async def test_executor_stats_track_transcription_failures() -> None:
             )
 
     executor = TranscriptionExecutorImpl(
-        transcriber=FailingTranscriber(),
+        transcribers=(FailingTranscriber(),),
         on_result=lambda _: None,
         queue_capacity=10,
     )
@@ -465,7 +465,7 @@ async def test_executor_stats_track_max_queue_depth() -> None:
             )
 
     executor = TranscriptionExecutorImpl(
-        transcriber=BlockingTranscriber(),
+        transcribers=(BlockingTranscriber(),),
         on_result=lambda _: None,
         queue_capacity=3,
     )
@@ -492,7 +492,7 @@ async def test_executor_stats_track_max_queue_depth() -> None:
 @pytest.mark.anyio
 async def test_executor_stats_are_snapshot() -> None:
     executor = TranscriptionExecutorImpl(
-        transcriber=FakeTranscriber(),
+        transcribers=(FakeTranscriber(),),
         on_result=lambda _: None,
         queue_capacity=10,
     )
@@ -521,7 +521,7 @@ async def test_executor_preserves_source_on_results() -> None:
     results: list[SourcedTranscriptionResult] = []
 
     executor = TranscriptionExecutorImpl(
-        transcriber=transcriber,
+        transcribers=(transcriber,),
         on_result=results.append,
         queue_capacity=10,
     )
@@ -556,7 +556,7 @@ async def test_executor_preserves_source_on_transcription_result() -> None:
     results: list[SourcedTranscriptionResult] = []
 
     executor = TranscriptionExecutorImpl(
-        transcriber=transcriber,
+        transcribers=(transcriber,),
         on_result=results.append,
         queue_capacity=10,
     )
@@ -574,3 +574,71 @@ async def test_executor_preserves_source_on_transcription_result() -> None:
     # Assert
     assert len(results) == 1
     assert results[0].source is item.source
+
+
+def test_executor_requires_at_least_one_transcriber() -> None:
+    with pytest.raises(
+        ValueError,
+        match="at least one transcriber is required",
+    ):
+        TranscriptionExecutorImpl(
+            transcribers=(),
+            on_result=lambda _: None,
+            queue_capacity=10,
+        )
+
+
+@pytest.mark.anyio
+async def test_executor_uses_one_transcriber_per_worker() -> None:
+    first_started = threading.Event()
+    second_started = threading.Event()
+    release = threading.Event()
+
+    class BlockingTranscriber:
+        def __init__(self, started: threading.Event) -> None:
+            self._started = started
+            self.calls = 0
+
+        def transcribe(
+            self,
+            segment: SpeechSegment,
+        ) -> TranscriptionResult:
+            self.calls += 1
+            self._started.set()
+            release.wait()
+
+            return TranscriptionResult(
+                text="text",
+                language="en",
+                confidence=None,
+                start=segment.timestamp,
+                end=segment.timestamp + segment.duration,
+            )
+
+    first = BlockingTranscriber(first_started)
+    second = BlockingTranscriber(second_started)
+
+    executor = TranscriptionExecutorImpl(
+        transcribers=(first, second),
+        on_result=lambda _: None,
+        queue_capacity=10,
+    )
+
+    await executor.start()
+
+    assert executor.submit(
+        create_transcription_work_item(timestamp=0.0),
+    )
+    assert executor.submit(
+        create_transcription_work_item(timestamp=1.0),
+    )
+
+    await asyncio.to_thread(first_started.wait)
+    await asyncio.to_thread(second_started.wait)
+
+    release.set()
+
+    await executor.stop()
+
+    assert first.calls == 1
+    assert second.calls == 1
