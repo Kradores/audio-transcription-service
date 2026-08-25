@@ -9,6 +9,12 @@ api:
 logging:
   level: INFO
 
+  file:
+    enabled: true
+    path: logs/audio-transcription-service.log
+    max_bytes: 10485760
+    backup_count: 5
+
 audio:
   capture:
     queue_capacity: 100
@@ -25,6 +31,7 @@ audio:
 
 transcription:
   queue_capacity: 10
+  worker_count: 2
 
   aggregation:
     enabled: true

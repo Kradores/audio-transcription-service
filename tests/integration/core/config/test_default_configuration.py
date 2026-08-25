@@ -28,3 +28,4 @@ def test_default_configuration_loads_successfully() -> None:
     assert settings.whisper.compute_type.value == "int8"
     assert settings.database.path == (Path("config/transcripts.db").resolve())
     assert settings.transcription.queue_capacity == 10
+    assert settings.transcription.worker_count == 2

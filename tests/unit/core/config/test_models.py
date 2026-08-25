@@ -71,11 +71,6 @@ def test_whisper_settings_accepts_valid_values() -> None:
     assert settings.whisper.compute_type is WhisperComputeType.INT8
 
 
-def test_transcription_settings_accepts_valid_values() -> None:
-    settings = SettingsBuilder().build()
-    assert settings.transcription.queue_capacity == 10
-
-
 def test_database_settings_accepts_valid_values() -> None:
     settings = SettingsBuilder().build()
     assert settings.database.path == Path("data/transcripts.db")
@@ -367,3 +362,48 @@ def test_transcription_aggregation_accepts_target_equal_to_maximum() -> None:
 
     assert settings.transcription.aggregation.target_duration_seconds == 10.0
     assert settings.transcription.aggregation.max_duration_seconds == 10.0
+
+
+def test_transcription_settings_accepts_valid_values() -> None:
+    settings = SettingsBuilder().build()
+
+    assert settings.transcription.queue_capacity == 10
+    assert settings.transcription.worker_count == 2
+
+
+@pytest.mark.parametrize(
+    "worker_count",
+    [
+        1,
+        2,
+        8,
+    ],
+)
+def test_transcription_worker_count_accepts_positive_values(
+    worker_count: int,
+) -> None:
+    settings = (
+        SettingsBuilder()
+        .with_transcription_worker_count(worker_count)
+        .build()
+    )
+
+    assert settings.transcription.worker_count == worker_count
+
+
+@pytest.mark.parametrize(
+    "worker_count",
+    [
+        0,
+        -1,
+    ],
+)
+def test_transcription_worker_count_rejects_invalid_values(
+    worker_count: int,
+) -> None:
+    with pytest.raises(ValidationError):
+        (
+            SettingsBuilder()
+            .with_transcription_worker_count(worker_count)
+            .build()
+        )

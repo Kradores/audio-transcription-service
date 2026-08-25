@@ -45,6 +45,7 @@ def valid_configuration_document() -> dict[str, Any]:
         },
         "transcription": {
             "queue_capacity": 10,
+            "worker_count": 2,
             "aggregation": {
                 "enabled": True,
                 "target_duration_seconds": 5.0,
@@ -183,6 +184,10 @@ class SettingsBuilder:
         seconds: float,
     ) -> SettingsBuilder:
         self._document["transcription"]["aggregation"]["max_wait_seconds"] = seconds
+        return self
+
+    def with_transcription_worker_count(self, worker_count: int) -> SettingsBuilder:
+        self._document["transcription"]["worker_count"] = worker_count
         return self
 
 

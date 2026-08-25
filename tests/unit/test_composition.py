@@ -50,6 +50,7 @@ def test_create_application_loads_configuration(
     # Assert
     assert isinstance(application, Application)
     assert application.settings.application.name == "Audio Transcription Service"
+    assert application.settings.transcription.worker_count == 2
 
 
 @patch("app.composition.create_vad")
