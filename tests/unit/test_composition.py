@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -21,11 +22,12 @@ from app.composition import (
     create_speech_pipeline,
     create_system_audio_capture,
     create_transcriber,
+    create_transcription_executor,
     create_vad,
+    create_whisper_model,
 )
 from app.services.transcription_executor import TranscriptionExecutor
 from app.transcription.contracts import AudioSource
-from app.transcription.faster_whisper import FasterWhisperTranscriber
 from app.vad.protocols import AudioVad
 from app.vad.silero import SileroVADAdapter
 from tests.unit.core.config.builders import SettingsBuilder, valid_configuration_document
@@ -175,51 +177,18 @@ def test_create_vad_rejects_incompatible_processing_sample_rate() -> None:
     load_model.assert_not_called()
 
 
-def test_create_transcriber_creates_configured_faster_whisper_transcriber() -> None:
+@patch("app.composition.FasterWhisperTranscriber")
+def test_create_transcriber_creates_configured_faster_whisper_transcriber(
+    faster_whisper_transcriber: MagicMock,
+) -> None:
     # Arrange
-    settings = SettingsBuilder().build()
     model = MagicMock()
 
-    with patch(
-        "app.composition.WhisperModel",
-        return_value=model,
-    ) as whisper_model:
-        # Act
-        transcriber = create_transcriber(settings)
+    # Act
+    create_transcriber(model)
 
     # Assert
-    whisper_model.assert_called_once_with(
-        "small",
-        device="cpu",
-        compute_type="int8",
-    )
-    assert isinstance(transcriber, FasterWhisperTranscriber)
-
-
-def test_create_transcriber_passes_configured_whisper_settings() -> None:
-    # Arrange
-    settings = (
-        SettingsBuilder()
-        .with_whisper_model("medium")
-        .with_whisper_device("cuda")
-        .with_whisper_compute_type("float16")
-        .build()
-    )
-    model = MagicMock()
-
-    with patch(
-        "app.composition.WhisperModel",
-        return_value=model,
-    ) as whisper_model:
-        # Act
-        create_transcriber(settings)
-
-    # Assert
-    whisper_model.assert_called_once_with(
-        "medium",
-        device="cuda",
-        compute_type="float16",
-    )
+    faster_whisper_transcriber.assert_called_once_with(model)
 
 
 def test_create_speech_pipeline_wires_dependencies() -> None:
@@ -392,3 +361,63 @@ def test_create_application_builds_two_source_pipelines_with_shared_executor(
     assert calls[1].kwargs["source"] is AudioSource.MICROPHONE
     assert calls[1].kwargs["capture"] is microphone_capture
     assert calls[1].kwargs["transcription_executor"] is transcription_executor
+
+
+@patch("app.composition.WhisperModel")
+def test_create_whisper_model_uses_transcription_worker_count(
+    whisper_model: MagicMock,
+) -> None:
+    settings = SettingsBuilder().with_transcription_worker_count(3).build()
+
+    create_whisper_model(settings)
+
+    whisper_model.assert_called_once_with(
+        settings.whisper.model.value,
+        device=settings.whisper.device.value,
+        compute_type=settings.whisper.compute_type.value,
+        num_workers=3,
+    )
+
+
+@patch("app.composition.TranscriptionExecutorImpl")
+@patch("app.composition.create_transcriber")
+@patch("app.composition.create_whisper_model")
+def test_create_transcription_executor_creates_one_transcriber_per_worker(
+    create_whisper_model: MagicMock,
+    create_transcriber: MagicMock,
+    transcription_executor_impl: MagicMock,
+) -> None:
+    settings = SettingsBuilder().with_transcription_worker_count(3).build()
+
+    database = sqlite3.connect(":memory:")
+
+    model = MagicMock()
+    create_whisper_model.return_value = model
+
+    transcribers = [
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+    ]
+    create_transcriber.side_effect = transcribers
+
+    create_transcription_executor(
+        database=database,
+        settings=settings,
+    )
+
+    create_whisper_model.assert_called_once_with(settings)
+
+    assert create_transcriber.call_count == 3
+    assert create_transcriber.call_args_list == [
+        ((model,), {}),
+        ((model,), {}),
+        ((model,), {}),
+    ]
+
+    transcription_executor_impl.assert_called_once()
+
+    call = transcription_executor_impl.call_args
+
+    assert call.kwargs["transcribers"] == tuple(transcribers)
+    assert call.kwargs["queue_capacity"] == settings.transcription.queue_capacity

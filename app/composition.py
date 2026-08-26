@@ -35,7 +35,11 @@ from app.storage.sqlite import SQLiteTranscriptRepository
 from app.transcription.aggregation import TranscriptionSegmentAggregatorImpl
 from app.transcription.contracts import AudioSource
 from app.transcription.faster_whisper import FasterWhisperTranscriber
-from app.transcription.protocols import Transcriber, TranscriptionSegmentAggregator
+from app.transcription.protocols import (
+    Transcriber,
+    TranscriptionSegmentAggregator,
+    WhisperModelProtocol,
+)
 from app.vad.assembler import SpeechSegmentAssemblerImpl
 from app.vad.protocols import AudioVad, SpeechSegmentAssembler
 from app.vad.silero import SileroVADAdapter
@@ -224,13 +228,14 @@ def create_whisper_model(settings: Settings) -> WhisperModel:
         settings.whisper.model.value,
         device=settings.whisper.device.value,
         compute_type=settings.whisper.compute_type.value,
+        num_workers=settings.transcription.worker_count,
     )
 
 
-def create_transcriber(settings: Settings) -> Transcriber:
-    """Create the configured transcription service."""
-    model = create_whisper_model(settings)
-
+def create_transcriber(
+    model: WhisperModelProtocol,
+) -> Transcriber:
+    """Create one Faster-Whisper transcriber around a shared model."""
     return FasterWhisperTranscriber(model)
 
 
@@ -239,14 +244,19 @@ def create_transcription_executor(
     database: sqlite3.Connection,
     settings: Settings,
 ) -> TranscriptionExecutor:
-    transcriber = create_transcriber(settings)
+    model = create_whisper_model(settings)
+
+    transcribers = tuple(
+        create_transcriber(model) for _ in range(settings.transcription.worker_count)
+    )
+
     repository = SQLiteTranscriptRepository(database)
     repository.initialize()
 
     recorder = TranscriptRecorderImpl(repository)
 
     return TranscriptionExecutorImpl(
-        transcribers=(transcriber,),
+        transcribers=transcribers,
         on_result=recorder.record,
         queue_capacity=settings.transcription.queue_capacity,
     )

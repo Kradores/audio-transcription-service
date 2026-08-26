@@ -7,7 +7,7 @@ import pytest
 from app.audio.contracts import AudioFormat, AudioFrame, ProcessingAudioFrame, SpeechSegment
 from app.audio.normalizer import AudioNormalizerImpl
 from app.audio.resampler import SoXRResamplerFactory
-from app.composition import create_transcriber
+from app.composition import create_transcriber, create_whisper_model
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
 
@@ -73,7 +73,8 @@ def test_real_faster_whisper_transcribes_audio_fixture() -> None:
 
     segment = _create_speech_segment(processing_frames)
 
-    transcriber = create_transcriber(settings)
+    model = create_whisper_model(settings)
+    transcriber = create_transcriber(model)
 
     # Act
     result = transcriber.transcribe(segment)
