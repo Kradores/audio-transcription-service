@@ -573,8 +573,24 @@ def test_executor_requires_at_least_one_transcriber() -> None:
         )
 
 
+def test_executor_initial_concurrency_stats() -> None:
+    # Arrange
+    executor = TranscriptionExecutorImpl(
+        transcribers=(FakeTranscriber(),),
+        on_result=lambda _: None,
+        queue_capacity=10,
+    )
+
+    stats = executor.stats
+
+    # Assert
+    assert stats.worker_count == 1
+    assert stats.active_workers == 0
+    assert stats.active_workers_high_water_mark == 0
+
+
 @pytest.mark.anyio
-async def test_executor_uses_one_transcriber_per_worker() -> None:
+async def test_executor_processes_two_transcriptions_concurrently() -> None:
     first_started = threading.Event()
     second_started = threading.Event()
     release = threading.Event()
@@ -621,12 +637,22 @@ async def test_executor_uses_one_transcriber_per_worker() -> None:
     await asyncio.to_thread(first_started.wait)
     await asyncio.to_thread(second_started.wait)
 
+    stats_while_running = executor.stats
+
+    assert stats_while_running.worker_count == 2
+    assert stats_while_running.active_workers == 2
+    assert stats_while_running.active_workers_high_water_mark == 2
+
     release.set()
 
     await executor.stop()
 
+    stats_after_stop = executor.stats
+
     assert first.calls == 1
     assert second.calls == 1
+    assert stats_after_stop.active_workers == 0
+    assert stats_after_stop.active_workers_high_water_mark == 2
 
 
 @pytest.mark.anyio
@@ -729,3 +755,77 @@ async def test_executor_wait_reports_unexpected_worker_termination() -> None:
         match="worker terminated unexpectedly",
     ):
         await executor.stop()
+
+
+@pytest.mark.anyio
+async def test_executor_allows_results_to_complete_out_of_submission_order() -> None:
+    first_started = threading.Event()
+    second_started = threading.Event()
+
+    release_first = threading.Event()
+    release_second = threading.Event()
+
+    results: list[SourcedTranscriptionResult] = []
+    second_completed = asyncio.Event()
+
+    class ControlledTranscriber:
+        def transcribe(
+            self,
+            segment: SpeechSegment,
+        ) -> TranscriptionResult:
+            if segment.timestamp == 0.0:
+                first_started.set()
+                release_first.wait()
+            else:
+                second_started.set()
+                release_second.wait()
+
+            return TranscriptionResult(
+                text="text",
+                language="en",
+                confidence=None,
+                start=segment.timestamp,
+                end=segment.timestamp + segment.duration,
+            )
+
+    def handle_result(
+        result: SourcedTranscriptionResult,
+    ) -> None:
+        results.append(result)
+
+        if result.result.start == 1.0:
+            second_completed.set()
+
+    executor = TranscriptionExecutorImpl(
+        transcribers=(
+            ControlledTranscriber(),
+            ControlledTranscriber(),
+        ),
+        on_result=handle_result,
+        queue_capacity=10,
+    )
+
+    await executor.start()
+
+    assert executor.submit(
+        create_transcription_work_item(timestamp=0.0),
+    )
+    assert executor.submit(
+        create_transcription_work_item(timestamp=1.0),
+    )
+
+    await asyncio.to_thread(first_started.wait)
+    await asyncio.to_thread(second_started.wait)
+
+    release_second.set()
+    await second_completed.wait()
+
+    assert [result.result.start for result in results] == [1.0]
+
+    release_first.set()
+    await executor.stop()
+
+    assert [result.result.start for result in results] == [
+        1.0,
+        0.0,
+    ]
