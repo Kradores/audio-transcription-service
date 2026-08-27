@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 
 import pytest
@@ -829,3 +830,149 @@ async def test_executor_allows_results_to_complete_out_of_submission_order() -> 
         1.0,
         0.0,
     ]
+
+
+@pytest.mark.anyio
+async def test_executor_logs_worker_count_and_worker_lifecycle(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    executor = TranscriptionExecutorImpl(
+        transcribers=(
+            FakeTranscriber(),
+            FakeTranscriber(),
+        ),
+        on_result=lambda _: None,
+        queue_capacity=10,
+    )
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="app.services.transcription_executor",
+    ):
+        await executor.start()
+        await executor.stop()
+
+    messages = [record.getMessage() for record in caplog.records]
+
+    assert ("transcription executor started queue_capacity=10 worker_count=2") in messages
+
+    assert "transcription worker started worker_id=1" in messages
+    assert "transcription worker started worker_id=2" in messages
+
+    assert "transcription worker stopped worker_id=1" in messages
+    assert "transcription worker stopped worker_id=2" in messages
+
+
+@pytest.mark.anyio
+async def test_executor_completion_log_includes_worker_identity(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    executor = TranscriptionExecutorImpl(
+        transcribers=(
+            FakeTranscriber(),
+            FakeTranscriber(),
+        ),
+        on_result=lambda _: None,
+        queue_capacity=10,
+    )
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="app.services.transcription_executor",
+    ):
+        await executor.start()
+
+        assert executor.submit(
+            create_transcription_work_item(
+                source=AudioSource.MICROPHONE,
+                timestamp=3.0,
+            )
+        )
+
+        assert executor.submit(
+            create_transcription_work_item(
+                source=AudioSource.MICROPHONE,
+                timestamp=3.0,
+            )
+        )
+
+        assert executor.submit(
+            create_transcription_work_item(
+                source=AudioSource.MICROPHONE,
+                timestamp=4.0,
+            )
+        )
+
+        await executor.stop()
+
+    assert any(
+        "transcription completed "
+        "worker_id=1 source=microphone start=3.000 end=4.000" in record.getMessage()
+        for record in caplog.records
+    )
+
+    assert any(
+        "worker_count=2 max_active_workers=2" in record.getMessage() for record in caplog.records
+    )
+
+
+@pytest.mark.anyio
+async def test_cancelling_wait_does_not_cancel_executor_lifecycle() -> None:
+    transcriber_started = threading.Event()
+    release_transcriber = threading.Event()
+
+    class BlockingTranscriber:
+        def transcribe(
+            self,
+            segment: SpeechSegment,
+        ) -> TranscriptionResult:
+            transcriber_started.set()
+            release_transcriber.wait()
+
+            return TranscriptionResult(
+                text="done",
+                language="en",
+                confidence=None,
+                start=segment.timestamp,
+                end=segment.timestamp + segment.duration,
+            )
+
+    results: list[SourcedTranscriptionResult] = []
+
+    executor = TranscriptionExecutorImpl(
+        transcribers=(BlockingTranscriber(),),
+        on_result=results.append,
+        queue_capacity=10,
+    )
+
+    await executor.start()
+
+    assert executor.submit(
+        create_transcription_work_item(timestamp=1.0),
+    )
+
+    await asyncio.to_thread(transcriber_started.wait)
+
+    wait_task = asyncio.create_task(executor.wait())
+
+    await asyncio.sleep(0)
+
+    wait_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await wait_task
+
+    stop_task = asyncio.create_task(executor.stop())
+
+    await asyncio.sleep(0)
+
+    assert not stop_task.done()
+
+    release_transcriber.set()
+
+    await stop_task
+
+    assert len(results) == 1
+    assert executor.stats.submitted == 1
+    assert executor.stats.completed == 1
+    assert executor.stats.failed == 0

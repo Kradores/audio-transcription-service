@@ -334,7 +334,7 @@ segment accepted
         ↓
 wait in bounded executor queue
         ↓
-worker begins transcription
+an executor worker begins transcription
 ```
 
 Increasing queue wait indicates that transcription work is arriving faster
@@ -398,6 +398,8 @@ A graceful shutdown emits a summary similar to:
 
 ```text
 transcription executor stopped
+worker_count=...
+max_active_workers=...
 submitted=...
 completed=...
 rejected=...
@@ -410,6 +412,47 @@ max_transcription_duration=...
 ```
 
 This is the primary summary for transcription-capacity investigations.
+
+### Worker concurrency
+
+The executor also reports:
+
+- `worker_count`
+  - configured number of executor workers;
+
+- `active_workers`
+  - number of workers currently executing transcription;
+
+- `active_workers_high_water_mark`
+  - maximum number of transcription operations observed concurrently.
+
+Configured concurrency and observed concurrency are intentionally separate.
+
+For example:
+
+```text
+worker_count=2
+max_active_workers=2
+```
+confirms that two configured workers actually executed transcription
+concurrently during the run.
+
+A value such as:
+```
+worker_count=2
+max_active_workers=1
+```
+means two workers were configured but no overlapping transcription execution
+was observed.
+
+Individual executor-worker logs include:
+
+```text
+transcription worker started worker_id=...
+transcription completed worker_id=... source=... start=... end=...
+transcription execution failed worker_id=... source=... start=... end=...
+transcription worker stopped worker_id=...
+```
 
 ---
 

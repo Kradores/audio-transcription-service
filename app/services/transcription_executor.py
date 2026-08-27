@@ -166,7 +166,10 @@ class TranscriptionExecutorImpl:
 
         worker_tasks = tuple(
             asyncio.create_task(
-                self._run(transcriber),
+                self._run(
+                    worker_id=worker_id,
+                    transcriber=transcriber,
+                ),
                 name=f"transcription-executor-worker-{worker_id}",
             )
             for worker_id, transcriber in enumerate(
@@ -181,8 +184,9 @@ class TranscriptionExecutorImpl:
         self._worker_tasks = worker_tasks
 
         logger.info(
-            "transcription executor started queue_capacity=%d",
+            "transcription executor started queue_capacity=%d worker_count=%d",
             self._queue.maxsize,
+            len(self._transcribers),
         )
 
     def submit(self, item: TranscriptionWorkItem) -> bool:
@@ -240,7 +244,7 @@ class TranscriptionExecutorImpl:
 
         worker_failure = self._worker_failure
 
-        if worker_failure is not None and worker_failure.done():
+        if worker_failure is not None and worker_failure.done() and not worker_failure.cancelled():
             lifecycle_failure = worker_failure.result()
 
         try:
@@ -268,11 +272,15 @@ class TranscriptionExecutorImpl:
 
         logger.info(
             "transcription executor stopped "
+            "worker_count=%d "
+            "max_active_workers=%d "
             "submitted=%d completed=%d rejected=%d failed=%d "
             "queue_high_water_mark=%d "
             "avg_queue_wait=%.3f max_queue_wait=%.3f "
             "avg_transcription_duration=%.3f "
             "max_transcription_duration=%.3f",
+            stats.worker_count,
+            stats.active_workers_high_water_mark,
             stats.submitted,
             stats.completed,
             stats.rejected,
@@ -297,93 +305,112 @@ class TranscriptionExecutorImpl:
         if not self._started or worker_failure is None:
             raise RuntimeError("transcription executor is not running")
 
-        failure = await worker_failure
+        failure = await asyncio.shield(worker_failure)
 
         raise RuntimeError("transcription executor worker terminated unexpectedly") from failure
 
-    async def _run(self, transcriber: Transcriber) -> None:
-        while True:
-            queued_item = await self._queue.get()
+    async def _run(
+        self,
+        *,
+        worker_id: int,
+        transcriber: Transcriber,
+    ) -> None:
+        logger.info(
+            "transcription worker started worker_id=%d",
+            worker_id,
+        )
 
-            try:
-                if isinstance(queued_item, _Shutdown):
-                    return
-
-                item = queued_item.item
-
-                transcription_started_at = time.perf_counter()
-
-                queue_wait_seconds = transcription_started_at - queued_item.enqueued_at
-
-                self._queue_wait_seconds_total += queue_wait_seconds
-                self._queue_wait_seconds_max = max(
-                    self._queue_wait_seconds_max,
-                    queue_wait_seconds,
-                )
-                self._queue_wait_samples += 1
-
-                self._active_workers += 1
-                self._active_workers_high_water_mark = max(
-                    self._active_workers_high_water_mark,
-                    self._active_workers,
-                )
+        try:
+            while True:
+                queued_item = await self._queue.get()
 
                 try:
-                    result = await asyncio.to_thread(
-                        transcriber.transcribe,
-                        item.segment,
+                    if isinstance(queued_item, _Shutdown):
+                        return
+
+                    item = queued_item.item
+
+                    transcription_started_at = time.perf_counter()
+
+                    queue_wait_seconds = transcription_started_at - queued_item.enqueued_at
+
+                    self._queue_wait_seconds_total += queue_wait_seconds
+                    self._queue_wait_seconds_max = max(
+                        self._queue_wait_seconds_max,
+                        queue_wait_seconds,
                     )
+                    self._queue_wait_samples += 1
+
+                    self._active_workers += 1
+                    self._active_workers_high_water_mark = max(
+                        self._active_workers_high_water_mark,
+                        self._active_workers,
+                    )
+
+                    try:
+                        result = await asyncio.to_thread(
+                            transcriber.transcribe,
+                            item.segment,
+                        )
+                    finally:
+                        self._active_workers -= 1
+
+                        transcription_seconds = time.perf_counter() - transcription_started_at
+
+                        self._transcription_seconds_total += transcription_seconds
+                        self._transcription_seconds_max = max(
+                            self._transcription_seconds_max,
+                            transcription_seconds,
+                        )
+
+                    logger.info(
+                        "transcription completed worker_id=%d source=%s start=%.3f end=%.3f",
+                        worker_id,
+                        item.source.value,
+                        result.start,
+                        result.end,
+                    )
+
+                    logger.debug(
+                        "transcription result worker_id=%d source=%s language=%s text=%r",
+                        worker_id,
+                        item.source.value,
+                        result.language,
+                        result.text,
+                    )
+
+                    self._on_result(
+                        SourcedTranscriptionResult(
+                            source=item.source,
+                            result=result,
+                        )
+                    )
+
+                    self._completed += 1
+
+                except Exception:
+                    if isinstance(queued_item, _Shutdown):
+                        raise
+
+                    self._failed += 1
+
+                    item = queued_item.item
+
+                    logger.exception(
+                        "transcription execution failed worker_id=%d source=%s start=%.3f end=%.3f",
+                        worker_id,
+                        item.source.value,
+                        item.segment.timestamp,
+                        item.segment.timestamp + item.segment.duration,
+                    )
+
                 finally:
-                    self._active_workers -= 1
-
-                    transcription_seconds = time.perf_counter() - transcription_started_at
-
-                    self._transcription_seconds_total += transcription_seconds
-                    self._transcription_seconds_max = max(
-                        self._transcription_seconds_max,
-                        transcription_seconds,
-                    )
-
-                logger.info(
-                    "transcription completed source=%s start=%.3f end=%.3f",
-                    item.source.value,
-                    result.start,
-                    result.end,
-                )
-
-                logger.debug(
-                    "transcription result source=%s language=%s text=%r",
-                    item.source.value,
-                    result.language,
-                    result.text,
-                )
-
-                self._on_result(
-                    SourcedTranscriptionResult(
-                        source=item.source,
-                        result=result,
-                    )
-                )
-
-                self._completed += 1
-
-            except Exception:
-                if isinstance(queued_item, _Shutdown):
-                    raise
-
-                self._failed += 1
-
-                item = queued_item.item
-
-                logger.exception(
-                    "transcription execution failed source=%s start=%.3f end=%.3f",
-                    item.source.value,
-                    item.segment.timestamp,
-                    item.segment.timestamp + item.segment.duration,
-                )
-
-            finally:
-                self._queue.task_done()
+                    self._queue.task_done()
+        finally:
+            logger.info(
+                "transcription worker stopped worker_id=%d",
+                worker_id,
+            )
 
     def _on_worker_done(
         self,

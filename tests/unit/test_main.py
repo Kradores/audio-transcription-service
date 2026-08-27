@@ -1,14 +1,15 @@
 import asyncio
+import signal
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.main import run_application
+from app.main import _handle_shutdown_signal, run_application
 
 
 @pytest.mark.anyio
-async def test_run_application_starts_and_stops_application(
+async def test_run_application_stops_gracefully_when_shutdown_is_requested(
     tmp_path: Path,
 ) -> None:
     # Arrange
@@ -109,3 +110,15 @@ async def test_run_application_propagates_runtime_failure_and_stops_application(
         )
 
     application.stop.assert_awaited_once()
+
+
+def test_shutdown_signal_sets_shutdown_event() -> None:
+    shutdown_event = asyncio.Event()
+
+    _handle_shutdown_signal(
+        shutdown_event,
+        signal.SIGINT,
+        None,
+    )
+
+    assert shutdown_event.is_set()
