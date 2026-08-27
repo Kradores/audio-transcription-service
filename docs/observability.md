@@ -723,3 +723,227 @@ semantic segmentation
 → executor submission
 → queue pressure
 → transcription
+
+
+## Transcription concurrency
+
+The shared transcription executor may run multiple concurrent workers.
+
+Concurrency diagnostics include:
+
+- `worker_count`
+  - configured number of transcription executor workers;
+
+- `active_workers`
+  - number of workers currently executing transcription;
+
+- `active_workers_high_water_mark`
+  - maximum number of transcription operations observed concurrently.
+
+Configured concurrency and observed concurrency are intentionally separate.
+
+For example:
+
+```text
+worker_count=2
+max_active_workers=2
+```
+
+confirms that both configured workers actually executed transcription
+concurrently.
+
+By contrast:
+
+```text
+worker_count=2
+max_active_workers=1
+```
+
+means two workers were configured but the workload did not produce overlapping
+transcription execution during that run.
+
+Worker lifecycle and execution logs include diagnostic worker identity:
+
+```text
+transcription worker started worker_id=...
+transcription completed worker_id=... source=... start=... end=...
+transcription execution failed worker_id=... source=... start=... end=...
+transcription worker stopped worker_id=...
+```
+
+`worker_id` is execution metadata only.
+
+It is not persisted and must not be used for conversation ordering.
+
+### Interpreting transcription capacity
+
+Worker count must not be evaluated from one metric alone.
+
+The important signals are:
+
+```text
+worker_count
+max_active_workers
+
+submitted
+completed
+rejected
+failed
+
+queue_high_water_mark
+avg_queue_wait
+max_queue_wait
+
+avg_transcription_duration
+max_transcription_duration
+
+frames_dropped
+```
+
+A queue high-water mark equal to queue capacity means the executor experienced
+a period of maximum waiting pressure.
+
+It does not by itself mean the service was unhealthy.
+
+For example:
+
+```text
+queue_high_water_mark=10
+rejected=0
+```
+
+means the waiting queue became full temporarily but workers drained it before
+new work needed to be rejected.
+
+Sustained executor pressure is better indicated by a combination such as:
+
+```text
+queue_high_water_mark == queue_capacity
++
+high average queue wait
++
+non-zero rejected
+```
+
+Capture pressure and transcription pressure remain different conditions.
+
+```text
+frames_dropped > 0
+```
+
+means the real-time capture/processing path could not keep up.
+
+```text
+rejected > 0
+```
+
+means the bounded transcription executor could not accept all generated
+transcription work.
+
+A healthy real-time path may therefore legitimately report:
+
+```text
+frames_dropped=0
+rejected>0
+```
+
+during CPU-intensive transcription overload.
+
+### Worker-count benchmark reference
+
+Real-conversation validation of ADR-042 produced the following approximate
+operating points on the benchmark machine:
+
+| Workers | Rejection | Avg queue wait | Avg inference |
+| ---: | ---: | ---: | ---: |
+| 1 | 18.36% | 28.263 s | 4.207 s |
+| 2 | 9.52% | 17.676 s | 6.740 s |
+| 3 | 0% | 10.779 s | 8.130 s |
+
+All measured runs retained:
+
+```text
+frames_dropped=0
+failed=0
+```
+
+The three-worker run kept CPU utilization above approximately 90% during
+intensive conversation.
+
+The operational interpretation is:
+
+```text
+1 worker
+    lower resource use
+    but insufficient throughput for measured intensive conversations
+
+2 workers
+    selected default
+    balanced throughput and resource pressure
+
+3 workers
+    higher measured throughput
+    but high sustained CPU pressure
+```
+
+These numbers are benchmark-machine observations, not universal performance
+targets.
+
+Hardware, competing applications, model configuration, and conversation
+intensity can materially change them.
+
+For this reason `worker_count` remains explicit configuration rather than an
+automatically scaled value.
+
+### Graceful shutdown diagnostics
+
+A healthy multi-worker shutdown must drain all accepted work before workers
+terminate.
+
+The final executor accounting must satisfy:
+
+```text
+submitted = completed + failed
+```
+
+The expected ordering is:
+
+```text
+source pipelines stop
+        ↓
+pending aggregates flush
+        ↓
+accepted executor work drains
+        ↓
+final transcription completes
+        ↓
+result is delivered/persisted
+        ↓
+transcription workers stop
+        ↓
+executor shutdown summary
+```
+
+An inference completion appearing after:
+
+```text
+transcription worker stopped
+```
+
+is a lifecycle defect and must be investigated.
+
+The executor shutdown summary should expose at least:
+
+```text
+worker_count=...
+max_active_workers=...
+submitted=...
+completed=...
+rejected=...
+failed=...
+queue_high_water_mark=...
+avg_queue_wait=...
+max_queue_wait=...
+avg_transcription_duration=...
+max_transcription_duration=...
+```

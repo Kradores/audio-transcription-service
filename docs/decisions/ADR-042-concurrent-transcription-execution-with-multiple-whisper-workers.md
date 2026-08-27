@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — implemented and validated
 
 ## Date
 
@@ -1086,6 +1086,226 @@ to reduce queue wait and rejection substantially
 because system throughput—not individual call latency—is the capacity problem we're solving.
 
 If two workers produce little or no throughput gain while greatly increasing CPU/RAM pressure, we revert to one worker and investigate model/thread configuration rather than adding more workers.
+
+---
+
+## Validation outcome
+
+ADR-042 was implemented and validated with deterministic concurrency tests,
+short runtime smoke tests, graceful-shutdown testing, and several real
+two-sided conversation benchmarks.
+
+The implementation provides:
+
+- configuration-driven `worker_count`;
+- one shared bounded FIFO transcription queue;
+- one `Transcriber` wrapper per executor worker;
+- one shared Faster-Whisper `WhisperModel`;
+- Faster-Whisper model concurrency derived from `worker_count`;
+- aggregate executor statistics;
+- worker identity in execution logs;
+- actual-concurrency diagnostics;
+- graceful draining of all accepted work;
+- lifecycle supervision for unexpected worker termination.
+
+A Ctrl+C lifecycle issue was also discovered during runtime validation.
+
+The original CLI shutdown path allowed `asyncio.run()` cancellation to
+interrupt graceful executor draining. A second issue allowed cancellation of
+an executor lifecycle observer to cancel executor-owned failure state.
+
+Both issues were corrected.
+
+The validated shutdown invariant is:
+
+```text
+stop source pipelines
+        ↓
+flush pending aggregation
+        ↓
+stop accepting executor work
+        ↓
+drain all accepted transcription work
+        ↓
+workers terminate
+        ↓
+executor stop completes
+```
+
+Runtime validation confirmed:
+
+```text
+submitted = completed + failed
+```
+
+with no accepted transcription inference surviving past worker shutdown.
+
+### Real-conversation worker-count benchmark
+
+The worker count was evaluated using several real two-sided conversations.
+
+The conversations were not identical recordings. They were natural
+conversations of different durations.
+
+For that reason, raw job totals are not treated as directly comparable.
+The primary comparison uses normalized workload rate, rejection percentage,
+queue latency, inference duration, capture health, and observed resource
+pressure.
+
+The observed incoming transcription-job rates were nevertheless very similar:
+
+```text
+1 worker ≈ 17.92 jobs/minute
+2 workers ≈ 17.89 jobs/minute
+3 workers ≈ 18.68 jobs/minute
+```
+
+This makes the field results directionally useful despite the conversations
+not being identical.
+
+Observed executor behavior:
+
+| Metric | 1 worker | 2 workers | 3 workers |
+| --- | ---: | ---: | ---: |
+| Jobs offered/minute | 17.92 | 17.89 | 18.68 |
+| Rejection rate | 18.36% | 9.52% | 0% |
+| Queue high-water mark | 10 | 10 | 10 |
+| Average queue wait | 28.263 s | 17.676 s | 10.779 s |
+| Maximum queue wait | 82.391 s | 56.493 s | 33.720 s |
+| Average inference duration | 4.207 s | 6.740 s | 8.130 s |
+| Maximum active workers | 1 | 2 | 3 |
+| Capture-frame drops | 0 | 0 | 0 |
+| Transcription failures | 0 | 0 | 0 |
+
+The trend is clear:
+
+```text
+more workers
+    ↓
+higher aggregate transcription throughput
+    ↓
+lower queue wait
+    ↓
+fewer rejected jobs
+```
+
+but also:
+
+```text
+more workers
+    ↓
+greater CPU contention
+    ↓
+longer individual inference duration
+```
+
+The three-worker run eliminated transcription rejection during its measured
+conversation, but the processor remained above approximately 90% utilization
+during intensive parts of the conversation.
+
+Individual inference duration also increased substantially:
+
+```text
+1 worker average ≈ 4.2 s
+2 workers average ≈ 6.7 s
+3 workers average ≈ 8.1 s
+```
+
+This confirms that three-worker execution was already operating in a
+resource-contention regime on the benchmark machine.
+
+### Selected default
+
+The default remains:
+
+```yaml
+transcription:
+  worker_count: 2
+```
+
+Two workers are selected as the default operating compromise.
+
+One worker is not selected because realistic conversation workloads showed
+substantial sustained backlog:
+
+```text
+rejection rate      ≈ 18.36%
+average queue wait  ≈ 28.3 s
+maximum queue wait  ≈ 82.4 s
+```
+
+Three workers are not selected as the default because, although they provided
+the highest measured throughput and eliminated rejection in the measured run,
+they kept CPU utilization above approximately 90% during intensive
+conversation and nearly doubled average per-job inference duration relative
+to one worker.
+
+The service runs on the same desktop or laptop that must also support the
+actual call application and other user workloads.
+
+The default should therefore optimize for system-level reliability rather
+than maximum possible transcription throughput.
+
+Two workers provided a meaningful improvement over one worker:
+
+```text
+rejection rate:
+18.36% → 9.52%
+
+average queue wait:
+28.263 s → 17.676 s
+```
+
+while avoiding the deliberately aggressive resource profile observed with
+three workers.
+
+The resulting policy is:
+
+```text
+worker_count = 1
+    supported compatibility / lower-resource mode
+
+worker_count = 2
+    default balanced mode
+
+worker_count = 3+
+    explicit higher-throughput configuration
+    requiring machine-specific resource validation
+```
+
+Worker count remains configuration-driven.
+
+The application will not automatically increase concurrency based on CPU core
+count or queue pressure.
+
+The benchmark also confirms that a queue reaching its high-water mark does
+not by itself mean the worker configuration is invalid. Queue pressure,
+rejection rate, queue latency, inference duration, and machine resource
+pressure must be interpreted together.
+
+### Acceptance result
+
+The ADR-042 implementation meets its intended system-level objective.
+
+Compared with one-worker operation, concurrent execution:
+
+- substantially reduced transcription rejection;
+- substantially reduced queue wait;
+- preserved zero capture-frame drops;
+- preserved bounded queue behavior;
+- preserved source identity;
+- preserved graceful shutdown;
+- preserved failure isolation;
+- demonstrated real simultaneous transcription execution.
+
+The selected two-worker default intentionally accepts the possibility of
+bounded transcription rejection during unusually intensive workloads rather
+than driving the user's machine continuously toward full CPU saturation.
+
+This is consistent with ADR-037:
+
+> real-time audio processing and overall service stability take priority over
+> guaranteeing transcription of every segment during resource overload.
 
 ---
 
