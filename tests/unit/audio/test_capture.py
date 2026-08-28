@@ -9,7 +9,6 @@ import pyaudiowpatch
 import pytest
 
 from app.audio.capture import (
-    DEFAULT_DEVICE_SETTLE_SECONDS,
     CaptureDeviceProvider,
     CaptureDeviceProviderFactory,
     PyAudioCapture,
@@ -24,6 +23,7 @@ from app.audio.capture import (
 )
 from app.audio.contracts import AudioFormat, AudioFrame
 from app.audio.device_monitor import AudioDeviceMonitor
+from app.audio.portaudio_refresh import PortAudioRefreshRequester
 from app.audio.timeline import AudioTimeline
 from app.audio.transport import AudioFrameTransport
 from tests.unit.audio.helpers import (
@@ -138,6 +138,14 @@ class FakeAudioCapture:
         self._discontinuity_handler()
 
 
+class FakePortAudioRefreshRequester:
+    def __init__(self) -> None:
+        self.requests = 0
+
+    async def request_refresh(self) -> None:
+        self.requests += 1
+
+
 class FakeStream(pyaudiowpatch.Stream):
     def __init__(self, active: bool) -> None:
         self.active = active
@@ -236,9 +244,9 @@ def _create_capture(
     device_monitor: AudioDeviceMonitor | None = None,
     transport: QueuedAudioCapture | None = None,
     timeline: AudioTimeline | None = None,
+    portaudio_refresh: PortAudioRefreshRequester | None = None,
     sleep: Sleep = asyncio.sleep,
 ) -> PyAudioCapture:
-
     if audio_factory is None:
         audio_factory = MagicMock()
 
@@ -254,12 +262,16 @@ def _create_capture(
     if timeline is None:
         timeline = MagicMock()
 
+    if portaudio_refresh is None:
+        portaudio_refresh = FakePortAudioRefreshRequester()
+
     return PyAudioCapture(
         audio_factory=audio_factory,
         device_provider_factory=device_provider_factory,
         device_monitor=device_monitor,
         transport=transport,
         timeline=timeline,
+        portaudio_refresh=portaudio_refresh,
         sleep=sleep,
     )
 
@@ -857,173 +869,15 @@ async def test_stop_stops_audio_device_monitor() -> None:
     assert monitor.stopped
 
 
-@pytest.mark.anyio
-async def test_default_output_change_recreates_pyaudio_and_stream() -> None:
-    first_audio = MagicMock()
-    second_audio = MagicMock()
-
-    first_stream = FakeStream(active=True)
-    second_stream = FakeStream(active=True)
-
-    first_audio.open.return_value = first_stream
-    second_audio.open.return_value = second_stream
-
-    first_device = WasapiLoopbackDevice(
-        index=16,
-        name="Headphones [Loopback]",
-        channels=2,
-        sample_rate=44_100,
-    )
-
-    second_device = WasapiLoopbackDevice(
-        index=10,
-        name="Speakers [Loopback]",
-        channels=2,
-        sample_rate=48_000,
-    )
-
-    first_provider = MagicMock()
-    first_provider.get_default.return_value = first_device
-
-    second_provider = MagicMock()
-    second_provider.get_default.return_value = second_device
-
-    audio_factory = FakePyAudioFactory(
-        first_audio,
-        second_audio,
-    )
-
-    provider_factory = FakeDeviceProviderFactory(
-        first_provider,
-        second_provider,
-    )
-
-    monitor = FakeAudioDeviceMonitor()
-
-    discontinuity = asyncio.Event()
-
-    capture = _create_capture(
-        audio_factory=audio_factory,
-        device_provider_factory=provider_factory,
-        device_monitor=monitor,
-        transport=QueuedAudioCapture(max_queue_size=4),
-        sleep=_yielding_sleep,
-    )
-
-    capture.set_discontinuity_handler(
-        discontinuity.set,
-    )
-
-    await capture.start()
-
-    try:
-        monitor.signal_change()
-
-        await asyncio.wait_for(
-            discontinuity.wait(),
-            timeout=1.0,
-        )
-
-        for _ in range(20):
-            if capture._stream is second_stream:
-                break
-
-            await asyncio.sleep(0)
-
-        assert capture._stream is second_stream
-
-        assert first_stream.stop_called
-        assert first_stream.close_called
-        first_audio.terminate.assert_called_once_with()
-
-        assert audio_factory.created == [
-            first_audio,
-            second_audio,
-        ]
-
-        assert provider_factory.created_with == [
-            first_audio,
-            second_audio,
-        ]
-
-        second_provider.get_default.assert_called_once_with()
-        assert second_stream.start_called
-
-    finally:
-        await capture.stop()
-
-
-@pytest.mark.anyio
-async def test_repeated_default_output_change_signals_coalesce() -> None:
-    first_audio = MagicMock()
-    second_audio = MagicMock()
-
-    first_stream = FakeStream(active=True)
-    second_stream = FakeStream(active=True)
-
-    first_audio.open.return_value = first_stream
-    second_audio.open.return_value = second_stream
-
-    device = WasapiLoopbackDevice(
-        index=42,
-        name="Device [Loopback]",
-        channels=2,
-        sample_rate=48_000,
-    )
-
-    first_provider = MagicMock()
-    first_provider.get_default.return_value = device
-
-    second_provider = MagicMock()
-    second_provider.get_default.return_value = device
-
-    audio_factory = FakePyAudioFactory(
-        first_audio,
-        second_audio,
-    )
-
-    monitor = FakeAudioDeviceMonitor()
-
-    capture = _create_capture(
-        audio_factory=audio_factory,
-        device_provider_factory=FakeDeviceProviderFactory(
-            first_provider,
-            second_provider,
-        ),
-        device_monitor=monitor,
-        transport=QueuedAudioCapture(max_queue_size=4),
-        sleep=_yielding_sleep,
-    )
-
-    await capture.start()
-
-    try:
-        monitor.signal_change()
-        monitor.signal_change()
-        monitor.signal_change()
-
-        for _ in range(20):
-            if capture._stream is second_stream:
-                break
-
-            await asyncio.sleep(0)
-
-        assert capture._stream is second_stream
-        assert len(audio_factory.created) == 2
-
-    finally:
-        await capture.stop()
-
-
-def test_wasapi_input_device_provider_returns_default_input() -> None:
+def test_wasapi_input_device_provider_returns_default_wasapi_input() -> None:
     # Arrange
     audio = MagicMock()
 
-    audio.get_default_input_device_info.return_value = {
-        "index": 15,
+    audio.get_default_wasapi_device.return_value = {
+        "index": 14,
         "name": "Microphone Array (Realtek(R) Audio)",
-        "maxInputChannels": 2,
-        "defaultSampleRate": 48_000.0,
+        "maxInputChannels": 1,
+        "defaultSampleRate": 16_000.0,
     }
 
     provider = WasapiInputDeviceProvider(audio)
@@ -1033,13 +887,15 @@ def test_wasapi_input_device_provider_returns_default_input() -> None:
 
     # Assert
     assert device == WasapiInputDevice(
-        index=15,
+        index=14,
         name="Microphone Array (Realtek(R) Audio)",
-        channels=2,
-        sample_rate=48_000.0,
+        channels=1,
+        sample_rate=16_000.0,
     )
 
-    audio.get_default_input_device_info.assert_called_once_with()
+    audio.get_default_wasapi_device.assert_called_once_with(
+        d_in=True,
+    )
 
 
 def test_wasapi_input_device_provider_factory_binds_audio_instance() -> None:
@@ -1058,7 +914,7 @@ def test_wasapi_input_device_provider_rejects_device_without_input_channels() ->
     # Arrange
     audio = MagicMock()
 
-    audio.get_default_input_device_info.return_value = {
+    audio.get_default_wasapi_device.return_value = {
         "index": 15,
         "name": "Invalid input",
         "maxInputChannels": 0,
@@ -1073,6 +929,33 @@ def test_wasapi_input_device_provider_rejects_device_without_input_channels() ->
         match="default input device has no input channels",
     ):
         provider.get_default()
+
+    audio.get_default_wasapi_device.assert_called_once_with(
+        d_in=True,
+    )
+
+
+def test_wasapi_input_device_provider_does_not_use_global_default_input() -> None:
+    # Arrange
+    audio = MagicMock()
+
+    audio.get_default_wasapi_device.return_value = {
+        "index": 14,
+        "name": "WASAPI microphone",
+        "maxInputChannels": 1,
+        "defaultSampleRate": 16_000.0,
+    }
+
+    provider = WasapiInputDeviceProvider(audio)
+
+    # Act
+    provider.get_default()
+
+    # Assert
+    audio.get_default_wasapi_device.assert_called_once_with(
+        d_in=True,
+    )
+    audio.get_default_input_device_info.assert_not_called()
 
 
 @pytest.mark.anyio
@@ -1353,272 +1236,6 @@ def test_first_frame_timestamp_is_clamped_to_zero() -> None:
 
 
 @pytest.mark.anyio
-async def test_default_device_settle_restarts_for_repeated_notification() -> None:
-    sleep = ControlledSleep()
-
-    capture = _create_capture(
-        sleep=sleep,
-    )
-
-    capture._started = True
-
-    capture._signal_default_device_changed()
-
-    task = asyncio.create_task(
-        capture._wait_for_default_device_settle(),
-    )
-
-    await _wait_until(
-        lambda: sleep.calls == [DEFAULT_DEVICE_SETTLE_SECONDS],
-    )
-
-    # Another notification arrives during the first settle interval.
-    capture._signal_default_device_changed()
-
-    await sleep.release_next()
-
-    await _wait_until(
-        lambda: (
-            sleep.calls
-            == [
-                DEFAULT_DEVICE_SETTLE_SECONDS,
-                DEFAULT_DEVICE_SETTLE_SECONDS,
-            ]
-        ),
-    )
-
-    assert not task.done()
-
-    await sleep.release_next()
-    await task
-
-    assert not capture._device_change_event.is_set()
-
-
-@pytest.mark.anyio
-async def test_default_device_settle_restarts_for_different_endpoint() -> None:
-    sleep = ControlledSleep()
-
-    capture = _create_capture(
-        sleep=sleep,
-    )
-
-    capture._started = True
-    capture._event_loop = asyncio.get_running_loop()
-
-    capture._handle_default_device_changed("endpoint-a")
-
-    await asyncio.sleep(0)
-
-    task = asyncio.create_task(
-        capture._wait_for_default_device_settle(),
-    )
-
-    await _wait_until(
-        lambda: len(sleep.calls) == 1,
-    )
-
-    capture._handle_default_device_changed("endpoint-b")
-
-    await asyncio.sleep(0)
-    await sleep.release_next()
-
-    await _wait_until(
-        lambda: len(sleep.calls) == 2,
-    )
-
-    assert not task.done()
-
-    await sleep.release_next()
-    await task
-
-
-@pytest.mark.anyio
-async def test_notification_storm_causes_one_logical_discontinuity() -> None:
-    sleep = ControlledSleep()
-
-    capture = _create_capture(
-        sleep=sleep,
-    )
-
-    discontinuity_handler = MagicMock()
-    capture.set_discontinuity_handler(discontinuity_handler)
-
-    capture._started = True
-
-    with (
-        patch.object(
-            capture,
-            "_open_fresh_stream",
-            new_callable=AsyncMock,
-        ),
-        patch.object(
-            capture,
-            "_dispose_audio_session",
-        ) as dispose_audio_session,
-    ):
-        capture._signal_default_device_changed()
-
-        lifecycle = asyncio.create_task(
-            capture._run(),
-        )
-
-        await _wait_until(
-            lambda: len(sleep.calls) == 1,
-        )
-
-        capture._signal_default_device_changed()
-        capture._signal_default_device_changed()
-        capture._signal_default_device_changed()
-
-        await sleep.release_next()
-
-        await _wait_until(
-            lambda: len(sleep.calls) == 2,
-        )
-
-        await sleep.release_next()
-
-        await _wait_until(
-            lambda: discontinuity_handler.call_count == 1,
-        )
-
-        capture._started = False
-        lifecycle.cancel()
-
-        with pytest.raises(asyncio.CancelledError):
-            await lifecycle
-
-        discontinuity_handler.assert_called_once_with()
-        assert dispose_audio_session.call_count >= 1
-
-
-# tests/unit/audio/test_capture.py
-
-
-@pytest.mark.anyio
-async def test_notification_during_rebuild_is_processed_after_reopen() -> None:
-    sleep = ControlledSleep()
-
-    capture = _create_capture(
-        sleep=sleep,
-    )
-
-    capture._started = True
-
-    reopen_started = asyncio.Event()
-    allow_reopen_to_finish = asyncio.Event()
-
-    open_calls = 0
-
-    async def open_fresh_stream() -> None:
-        nonlocal open_calls
-
-        open_calls += 1
-
-        if open_calls == 1:
-            reopen_started.set()
-            await allow_reopen_to_finish.wait()
-
-        stream = MagicMock()
-        stream.is_active.return_value = True
-        capture._stream = stream
-
-    with patch.object(
-        capture,
-        "_open_fresh_stream",
-        new_callable=AsyncMock,
-    ) as open_fresh_stream_mock:
-        open_fresh_stream_mock.side_effect = open_fresh_stream
-
-        capture._signal_default_device_changed()
-
-        lifecycle = asyncio.create_task(
-            capture._run(),
-        )
-
-        await _wait_until(
-            lambda: sleep.calls == [DEFAULT_DEVICE_SETTLE_SECONDS],
-        )
-
-        await sleep.release_next()
-
-        await reopen_started.wait()
-
-        capture._signal_default_device_changed()
-
-        allow_reopen_to_finish.set()
-
-        await _wait_until(
-            lambda: (
-                sleep.calls.count(
-                    DEFAULT_DEVICE_SETTLE_SECONDS,
-                )
-                == 2
-            ),
-        )
-
-        assert capture._device_change_event.is_set()
-        assert open_calls == 1
-
-        await sleep.release_next()
-
-        await _wait_until(
-            lambda: open_calls == 2,
-        )
-
-        capture._started = False
-        lifecycle.cancel()
-
-        with pytest.raises(asyncio.CancelledError):
-            await lifecycle
-
-
-@pytest.mark.anyio
-async def test_stream_inactive_during_pending_device_change_waits_for_settle() -> None:
-    sleep = ControlledSleep()
-
-    capture = _create_capture(
-        sleep=sleep,
-    )
-
-    stream = MagicMock()
-    stream.is_active.return_value = False
-
-    capture._stream = stream
-    capture._started = True
-
-    with patch.object(
-        capture,
-        "_open_fresh_stream",
-        new_callable=AsyncMock,
-    ) as open_fresh_stream_mock:
-        capture._signal_default_device_changed()
-
-        lifecycle = asyncio.create_task(
-            capture._run(),
-        )
-
-        await _wait_until(
-            lambda: sleep.calls == [DEFAULT_DEVICE_SETTLE_SECONDS],
-        )
-
-        open_fresh_stream_mock.assert_not_awaited()
-
-        await sleep.release_next()
-
-        await _wait_until(
-            lambda: open_fresh_stream_mock.await_count == 1,
-        )
-
-        capture._started = False
-        lifecycle.cancel()
-
-        with pytest.raises(asyncio.CancelledError):
-            await lifecycle
-
-
-@pytest.mark.anyio
 async def test_recovery_retries_when_open_raises_oserror() -> None:
     sleep = ControlledSleep()
 
@@ -1760,39 +1377,6 @@ async def test_recovery_retries_when_default_device_is_unavailable() -> None:
         assert dispose_audio_session.call_count >= 1
 
 
-@pytest.mark.anyio
-async def test_shutdown_during_device_settle_does_not_reopen_stream() -> None:
-    sleep = ControlledSleep()
-
-    capture = _create_capture(
-        sleep=sleep,
-    )
-
-    capture._started = True
-
-    with patch.object(
-        capture,
-        "_open_fresh_stream",
-        new_callable=AsyncMock,
-    ) as open_fresh_stream_mock:
-        capture._signal_default_device_changed()
-
-        lifecycle = asyncio.create_task(
-            capture._run(),
-        )
-
-        await _wait_until(
-            lambda: sleep.calls == [DEFAULT_DEVICE_SETTLE_SECONDS],
-        )
-
-        capture._started = False
-
-        await sleep.release_next()
-        await lifecycle
-
-        open_fresh_stream_mock.assert_not_awaited()
-
-
 def test_begin_recovery_signals_discontinuity_only_once() -> None:
     capture = _create_capture()
 
@@ -1810,3 +1394,219 @@ def test_begin_recovery_signals_discontinuity_only_once() -> None:
     )
 
     handler.assert_called_once_with()
+
+
+def test_prepare_for_portaudio_refresh_disposes_native_session() -> None:
+    capture = _create_capture()
+    capture._started = True
+
+    discontinuity_handler = MagicMock()
+    capture._discontinuity_handler = discontinuity_handler
+
+    with patch.object(
+        capture,
+        "_dispose_audio_session",
+    ) as dispose_audio_session:
+        capture.prepare_for_portaudio_refresh()
+
+    dispose_audio_session.assert_called_once_with()
+    discontinuity_handler.assert_called_once_with()
+
+
+def test_prepare_for_portaudio_refresh_does_nothing_when_not_started() -> None:
+    capture = _create_capture()
+
+    with patch.object(
+        capture,
+        "_dispose_audio_session",
+    ) as dispose_audio_session:
+        capture.prepare_for_portaudio_refresh()
+
+    dispose_audio_session.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_restore_after_portaudio_refresh_opens_fresh_stream() -> None:
+    capture = _create_capture()
+    capture._started = True
+    capture._recovery_active = True
+
+    with patch.object(
+        capture,
+        "_open_fresh_stream",
+        new_callable=AsyncMock,
+    ) as open_fresh_stream:
+        await capture.restore_after_portaudio_refresh()
+
+    open_fresh_stream.assert_awaited_once_with()
+    assert capture._recovery_active is False
+
+
+@pytest.mark.anyio
+async def test_restore_after_portaudio_refresh_does_nothing_when_not_started() -> None:
+    capture = _create_capture()
+
+    with patch.object(
+        capture,
+        "_open_fresh_stream",
+        new_callable=AsyncMock,
+    ) as open_fresh_stream:
+        await capture.restore_after_portaudio_refresh()
+
+    open_fresh_stream.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_restore_after_portaudio_refresh_propagates_device_unavailable() -> None:
+    capture = _create_capture()
+    capture._started = True
+
+    with (
+        patch.object(
+            capture,
+            "_open_fresh_stream",
+            new_callable=AsyncMock,
+            side_effect=LookupError("device unavailable"),
+        ),
+        pytest.raises(
+            LookupError,
+            match="device unavailable",
+        ),
+    ):
+        await capture.restore_after_portaudio_refresh()
+
+
+@pytest.mark.anyio
+async def test_default_device_change_requests_process_wide_refresh() -> None:
+    requester = FakePortAudioRefreshRequester()
+
+    device = WasapiLoopbackDevice(
+        index=42,
+        name="Test Speakers [Loopback]",
+        channels=2,
+        sample_rate=48_000,
+    )
+
+    device_provider = MagicMock()
+    device_provider.get_default.return_value = device
+
+    capture = _create_capture(
+        device_provider_factory=FakeDeviceProviderFactory(device_provider),
+        portaudio_refresh=requester,
+    )
+
+    capture._started = True
+
+    capture._signal_default_device_changed()
+
+    lifecycle = asyncio.create_task(
+        capture._run(),
+    )
+
+    await _wait_until(
+        lambda: requester.requests == 1,
+    )
+
+    capture._started = False
+    lifecycle.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await lifecycle
+
+    assert requester.requests == 1
+
+
+@pytest.mark.anyio
+async def test_inactive_stream_uses_source_local_recovery() -> None:
+    requester = FakePortAudioRefreshRequester()
+
+    capture = _create_capture(
+        portaudio_refresh=requester,
+        sleep=_yielding_sleep,
+    )
+
+    capture._started = True
+
+    stream = MagicMock()
+    stream.is_active.return_value = False
+    capture._stream = stream
+
+    with (
+        patch.object(
+            capture,
+            "_open_fresh_stream",
+            new_callable=AsyncMock,
+            side_effect=asyncio.CancelledError,
+        ) as open_fresh_stream,
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await capture._run()
+
+    open_fresh_stream.assert_awaited_once_with()
+
+    assert requester.requests == 0
+    assert capture._recovery_active is True
+    assert capture._stream is None
+
+    stream.stop_stream.assert_called_once_with()
+    stream.close.assert_called_once_with()
+
+
+@pytest.mark.anyio
+async def test_start_enters_recovery_when_initial_device_discovery_raises_oserror() -> None:
+    # Arrange
+    first_audio = MagicMock()
+    second_audio = MagicMock()
+
+    first_provider = MagicMock()
+    first_provider.get_default.side_effect = OSError(
+        -9996,
+        "Invalid device info",
+    )
+
+    recovered_device = WasapiInputDevice(
+        index=14,
+        name="Headset",
+        channels=1,
+        sample_rate=16_000.0,
+    )
+
+    second_provider = MagicMock()
+    second_provider.get_default.return_value = recovered_device
+
+    recovered_stream = FakeStream(active=True)
+    second_audio.open.return_value = recovered_stream
+
+    capture = _create_capture(
+        audio_factory=FakePyAudioFactory(
+            first_audio,
+            second_audio,
+        ),
+        device_provider_factory=FakeDeviceProviderFactory(
+            first_provider,
+            second_provider,
+        ),
+        device_monitor=FakeAudioDeviceMonitor(),
+        transport=QueuedAudioCapture(max_queue_size=4),
+        sleep=_yielding_sleep,
+    )
+
+    # Act
+    await capture.start()
+
+    try:
+        for _ in range(20):
+            if capture._stream is recovered_stream:
+                break
+
+            await asyncio.sleep(0)
+
+        # Assert
+        assert capture._stream is recovered_stream
+
+        first_audio.terminate.assert_called_once_with()
+        second_provider.get_default.assert_called_once_with()
+        assert recovered_stream.is_active()
+
+    finally:
+        await capture.stop()

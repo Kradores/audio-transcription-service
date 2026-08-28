@@ -15,6 +15,7 @@ from app.audio.capture import (
     WasapiLoopbackDeviceProviderFactoryImpl,
 )
 from app.audio.normalizer import AudioNormalizerImpl
+from app.audio.portaudio_refresh import PortAudioRefreshCoordinator
 from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.audio.resampler import SoXRResamplerFactory
 from app.audio.timeline import AudioTimeline, MonotonicAudioTimeline
@@ -66,14 +67,21 @@ def create_application(
         settings=settings,
     )
 
+    portaudio_refresh = PortAudioRefreshCoordinator()
+
     system_capture = create_system_audio_capture(
         queue_capacity=settings.audio.capture.queue_capacity,
         timeline=timeline,
+        portaudio_refresh=portaudio_refresh,
     )
     microphone_capture = create_microphone_capture(
         queue_capacity=settings.audio.capture.queue_capacity,
         timeline=timeline,
+        portaudio_refresh=portaudio_refresh,
     )
+
+    portaudio_refresh.register(system_capture)
+    portaudio_refresh.register(microphone_capture)
 
     system_pipeline = create_source_pipeline(
         source=AudioSource.SYSTEM_AUDIO,
@@ -151,7 +159,8 @@ def create_system_audio_capture(
     *,
     queue_capacity: int,
     timeline: AudioTimeline,
-) -> AudioCapture:
+    portaudio_refresh: PortAudioRefreshCoordinator,
+) -> PyAudioCapture:
     """Create Windows system-audio loopback capture."""
 
     return PyAudioCapture(
@@ -164,6 +173,7 @@ def create_system_audio_capture(
         transport=QueuedAudioCapture(
             max_queue_size=queue_capacity,
         ),
+        portaudio_refresh=portaudio_refresh,
         timeline=timeline,
     )
 
@@ -172,7 +182,8 @@ def create_microphone_capture(
     *,
     queue_capacity: int,
     timeline: AudioTimeline,
-) -> AudioCapture:
+    portaudio_refresh: PortAudioRefreshCoordinator,
+) -> PyAudioCapture:
     """Create Windows default-microphone capture."""
 
     return PyAudioCapture(
@@ -185,6 +196,7 @@ def create_microphone_capture(
         transport=QueuedAudioCapture(
             max_queue_size=queue_capacity,
         ),
+        portaudio_refresh=portaudio_refresh,
         timeline=timeline,
     )
 

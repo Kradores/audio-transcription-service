@@ -14,6 +14,7 @@ import pyaudiowpatch
 
 from app.audio.contracts import AudioFormat, AudioFrame
 from app.audio.device_monitor import AudioDeviceMonitor
+from app.audio.portaudio_refresh import PortAudioRefreshRequester
 from app.audio.protocols import AudioCapture
 from app.audio.timeline import AudioTimeline
 
@@ -68,13 +69,15 @@ class WasapiInputDevice:
 
 
 class WasapiInputDeviceProvider:
-    """Discover the current default input device."""
+    """Discover the current default WASAPI input device."""
 
     def __init__(self, audio: pyaudiowpatch.PyAudio) -> None:
         self._audio = audio
 
     def get_default(self) -> CaptureDevice:
-        device = self._audio.get_default_input_device_info()
+        device = self._audio.get_default_wasapi_device(
+            d_in=True,
+        )
 
         channels = int(device["maxInputChannels"])
         if channels <= 0:
@@ -290,6 +293,7 @@ class PyAudioCapture(AudioCapture):
         device_monitor: AudioDeviceMonitor,
         transport: QueuedAudioCapture,
         timeline: AudioTimeline,
+        portaudio_refresh: PortAudioRefreshRequester,
         sleep: Sleep = asyncio.sleep,
     ) -> None:
         self._audio_factory = audio_factory
@@ -297,6 +301,7 @@ class PyAudioCapture(AudioCapture):
         self._device_monitor = device_monitor
         self._transport = transport
         self._timeline = timeline
+        self._portaudio_refresh = portaudio_refresh
         self._sleep = sleep
 
         self._audio: pyaudiowpatch.PyAudio | None = None
@@ -337,8 +342,8 @@ class PyAudioCapture(AudioCapture):
         try:
             self._device_monitor.start()
 
-            with contextlib.suppress(LookupError):
-                await self._open_fresh_stream()
+            with contextlib.suppress(LookupError, OSError):
+                    await self._open_fresh_stream()
 
         except Exception:
             self._started = False
@@ -400,6 +405,31 @@ class PyAudioCapture(AudioCapture):
             )
 
         self._discontinuity_handler = handler
+
+    def prepare_for_portaudio_refresh(self) -> None:
+        if not self._started:
+            return
+
+        self._mark_recovery_started(
+            reason="default_device_changed",
+        )
+
+        self._dispose_audio_session()
+
+    async def restore_after_portaudio_refresh(self) -> None:
+        if not self._started:
+            return
+
+        try:
+            await self._open_fresh_stream()
+        except LookupError, OSError:
+            # Leave the stream absent.
+            # The ordinary source-local recovery loop will retry.
+            raise
+
+        if self._recovery_active:
+            logger.info("audio capture recovered")
+            self._recovery_active = False
 
     async def _open_fresh_stream(self) -> None:
         self._dispose_audio_session()
@@ -464,16 +494,17 @@ class PyAudioCapture(AudioCapture):
             stream.close()
 
     def _dispose_audio_session(self) -> None:
-        self._close_stream()
-
         audio = self._audio
 
         self._audio = None
         self._device_provider = None
         self._format = None
 
-        if audio is not None:
-            audio.terminate()
+        try:
+            self._close_stream()
+        finally:
+            if audio is not None:
+                audio.terminate()
 
     def _create_frame(
         self,
@@ -536,16 +567,9 @@ class PyAudioCapture(AudioCapture):
 
         while self._started:
             if self._device_change_event.is_set():
-                # we need to wait
-                # because windows creates many on/off notifications on a device change
-                await self._wait_for_default_device_settle()
+                self._device_change_event.clear()
 
-                if not self._started:
-                    return
-
-                self._begin_recovery(
-                    reason="default_device_changed",
-                )
+                await self._portaudio_refresh.request_refresh()
 
                 continue
 
@@ -639,35 +663,32 @@ class PyAudioCapture(AudioCapture):
         self._device_change_generation += 1
         self._device_change_event.set()
 
-    async def _wait_for_default_device_settle(self) -> None:
-        """Wait until no default-device notification arrives for 250 ms."""
+    def _mark_recovery_started(
+        self,
+        *,
+        reason: str,
+    ) -> None:
+        if self._recovery_active:
+            return
 
-        while self._started:
-            generation = self._device_change_generation
+        logger.warning(
+            "audio capture recovery started reason=%s",
+            reason,
+        )
 
-            await self._sleep(DEFAULT_DEVICE_SETTLE_SECONDS)
+        self._recovery_active = True
 
-            if generation == self._device_change_generation:
-                self._device_change_event.clear()
-                return
+        handler = self._discontinuity_handler
+
+        if handler is not None:
+            handler()
 
     def _begin_recovery(
         self,
         *,
         reason: str,
     ) -> None:
-        if not self._recovery_active:
-            logger.warning(
-                "audio capture recovery started reason=%s",
-                reason,
-            )
-            self._recovery_active = True
-
-            handler = self._discontinuity_handler
-
-            if handler is not None:
-                handler()
-
+        self._mark_recovery_started(reason=reason)
         self._dispose_audio_session()
 
     def _next_timestamp(

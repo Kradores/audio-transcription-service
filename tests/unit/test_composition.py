@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 from typing import cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import numpy as np
 import pytest
@@ -13,6 +13,7 @@ from app.audio.capture import (
     WasapiLoopbackDeviceProviderFactoryImpl,
 )
 from app.audio.contracts import AudioFormat, AudioFrame
+from app.audio.portaudio_refresh import PortAudioRefreshCoordinator
 from app.audio.protocols import AudioCapture
 from app.audio.timeline import MonotonicAudioTimeline
 from app.composition import (
@@ -224,17 +225,20 @@ def test_create_speech_pipeline_wires_dependencies() -> None:
 
 
 def test_create_microphone_capture_returns_pyaudio_capture() -> None:
+    coordinator = PortAudioRefreshCoordinator()
     timeline = MonotonicAudioTimeline()
 
     capture = create_microphone_capture(
         queue_capacity=100,
         timeline=timeline,
+        portaudio_refresh=coordinator,
     )
 
     assert isinstance(capture, PyAudioCapture)
 
 
 def test_create_microphone_capture_uses_input_device_provider() -> None:
+    coordinator = PortAudioRefreshCoordinator()
     timeline = MonotonicAudioTimeline()
 
     capture = cast(
@@ -242,6 +246,7 @@ def test_create_microphone_capture_uses_input_device_provider() -> None:
         create_microphone_capture(
             queue_capacity=100,
             timeline=timeline,
+            portaudio_refresh=coordinator,
         ),
     )
 
@@ -252,6 +257,7 @@ def test_create_microphone_capture_uses_input_device_provider() -> None:
 
 
 def test_create_system_audio_capture_uses_loopback_device_provider() -> None:
+    coordinator = PortAudioRefreshCoordinator()
     timeline = MonotonicAudioTimeline()
 
     capture = cast(
@@ -259,6 +265,7 @@ def test_create_system_audio_capture_uses_loopback_device_provider() -> None:
         create_system_audio_capture(
             queue_capacity=100,
             timeline=timeline,
+            portaudio_refresh=coordinator,
         ),
     )
 
@@ -269,6 +276,7 @@ def test_create_system_audio_capture_uses_loopback_device_provider() -> None:
 
 
 def test_captures_can_share_same_timeline() -> None:
+    coordinator = PortAudioRefreshCoordinator()
     timeline = MonotonicAudioTimeline()
 
     system_capture = cast(
@@ -276,6 +284,7 @@ def test_captures_can_share_same_timeline() -> None:
         create_system_audio_capture(
             queue_capacity=100,
             timeline=timeline,
+            portaudio_refresh=coordinator,
         ),
     )
     microphone_capture = cast(
@@ -283,6 +292,7 @@ def test_captures_can_share_same_timeline() -> None:
         create_microphone_capture(
             queue_capacity=100,
             timeline=timeline,
+            portaudio_refresh=coordinator,
         ),
     )
 
@@ -421,3 +431,72 @@ def test_create_transcription_executor_creates_one_transcriber_per_worker(
 
     assert call.kwargs["transcribers"] == tuple(transcribers)
     assert call.kwargs["queue_capacity"] == settings.transcription.queue_capacity
+
+
+def test_system_and_microphone_captures_share_portaudio_refresh_coordinator() -> None:
+    # Arrange
+    timeline = MonotonicAudioTimeline()
+    coordinator = PortAudioRefreshCoordinator()
+
+    # Act
+    system_capture = create_system_audio_capture(
+        queue_capacity=100,
+        timeline=timeline,
+        portaudio_refresh=coordinator,
+    )
+
+    microphone_capture = create_microphone_capture(
+        queue_capacity=100,
+        timeline=timeline,
+        portaudio_refresh=coordinator,
+    )
+
+    # Assert
+    assert system_capture._portaudio_refresh is coordinator
+    assert microphone_capture._portaudio_refresh is coordinator
+
+
+@patch("app.composition.PortAudioRefreshCoordinator")
+@patch("app.composition.create_microphone_capture")
+@patch("app.composition.create_system_audio_capture")
+@patch("app.composition.create_vad")
+def test_create_application_wires_shared_portaudio_refresh_coordinator(
+    create_vad: MagicMock,
+    create_system_audio_capture: MagicMock,
+    create_microphone_capture: MagicMock,
+    coordinator_type: MagicMock,
+    tmp_path: Path,
+) -> None:
+    # Arrange
+    document = valid_configuration_document()
+    config_path = write_configuration(tmp_path, document)
+
+    create_vad.return_value = MagicMock()
+
+    coordinator = MagicMock()
+    coordinator_type.return_value = coordinator
+
+    system_capture = MagicMock(spec=PyAudioCapture)
+    microphone_capture = MagicMock(spec=PyAudioCapture)
+
+    create_system_audio_capture.return_value = system_capture
+    create_microphone_capture.return_value = microphone_capture
+
+    # Act
+    application = create_application(config_path)
+
+    # Assert
+    create_system_audio_capture.assert_called_once_with(
+        queue_capacity=application.settings.audio.capture.queue_capacity,
+        timeline=ANY,
+        portaudio_refresh=coordinator,
+    )
+
+    create_microphone_capture.assert_called_once_with(
+        queue_capacity=application.settings.audio.capture.queue_capacity,
+        timeline=ANY,
+        portaudio_refresh=coordinator,
+    )
+
+    coordinator.register.assert_any_call(system_capture)
+    coordinator.register.assert_any_call(microphone_capture)

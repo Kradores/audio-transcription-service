@@ -44,10 +44,7 @@ def main() -> None:
             microphone,
         )
 
-        input(
-            "\nChange Windows default OUTPUT in Settings, "
-            "then press Enter...\n"
-        )
+        input("\nChange Windows default OUTPUT in Settings, then press Enter...\n")
 
         print(
             "\nTerminate/recreate ONLY system_audio PyAudio...",
