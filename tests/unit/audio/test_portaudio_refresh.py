@@ -79,6 +79,7 @@ async def test_refresh_disposes_all_participants_before_any_restore() -> None:
         FakeParticipant("microphone", events),
     )
 
+    coordinator.signal_refresh_requested()
     await coordinator.request_refresh()
 
     assert events == [
@@ -106,6 +107,7 @@ async def test_refresh_waits_for_settle_after_all_participants_are_disposed() ->
         FakeParticipant("microphone", events),
     )
 
+    coordinator.signal_refresh_requested()
     task = asyncio.create_task(
         coordinator.request_refresh(),
     )
@@ -147,6 +149,7 @@ async def test_refresh_request_during_settle_extends_same_refresh() -> None:
         FakeParticipant("microphone", events),
     )
 
+    coordinator.signal_refresh_requested()
     first = asyncio.create_task(
         coordinator.request_refresh(),
     )
@@ -155,6 +158,7 @@ async def test_refresh_request_during_settle_extends_same_refresh() -> None:
         lambda: len(sleep.calls) == 1,
     )
 
+    coordinator.signal_refresh_requested()
     second = asyncio.create_task(
         coordinator.request_refresh(),
     )
@@ -200,6 +204,7 @@ async def test_multiple_requests_during_settle_cause_one_teardown() -> None:
         FakeParticipant("microphone", events),
     )
 
+    coordinator.signal_refresh_requested()
     first = asyncio.create_task(
         coordinator.request_refresh(),
     )
@@ -208,7 +213,11 @@ async def test_multiple_requests_during_settle_cause_one_teardown() -> None:
         lambda: len(sleep.calls) == 1,
     )
 
-    additional = [asyncio.create_task(coordinator.request_refresh()) for _ in range(3)]
+    async def trigger_refresh() -> None:
+        coordinator.signal_refresh_requested()
+        await coordinator.request_refresh()
+
+    additional = [asyncio.create_task(trigger_refresh()) for _ in range(3)]
 
     await sleep.release_next()
 
@@ -246,6 +255,7 @@ async def test_restore_failure_does_not_prevent_other_participant_restore() -> N
         FakeParticipant("microphone", events),
     )
 
+    coordinator.signal_refresh_requested()
     await coordinator.request_refresh()
 
     assert events == [
@@ -272,6 +282,7 @@ async def test_lookup_error_during_restore_does_not_fail_refresh() -> None:
         ),
     )
 
+    coordinator.signal_refresh_requested()
     await coordinator.request_refresh()
 
     assert events == [
@@ -298,6 +309,7 @@ async def test_unexpected_restore_error_propagates() -> None:
         RuntimeError,
         match="bug",
     ):
+        coordinator.signal_refresh_requested()
         await coordinator.request_refresh()
 
 
@@ -328,6 +340,7 @@ async def test_teardown_attempts_every_participant_before_raising() -> None:
     )
 
     with pytest.raises(ExceptionGroup) as error:
+        coordinator.signal_refresh_requested()
         await coordinator.request_refresh()
 
     assert events == [
@@ -335,3 +348,62 @@ async def test_teardown_attempts_every_participant_before_raising() -> None:
         "microphone:dispose",
     ]
     assert len(error.value.exceptions) == 2
+
+
+@pytest.mark.anyio
+async def test_signals_during_refresh_are_coalesced_without_another_request_task() -> None:
+    # Arrange
+    events: list[str] = []
+    sleep = ControlledSleep()
+
+    coordinator = PortAudioRefreshCoordinator(
+        sleep=sleep,
+        settle_seconds=0.5,
+    )
+
+    coordinator.register(
+        FakeParticipant("system", events),
+    )
+    coordinator.register(
+        FakeParticipant("microphone", events),
+    )
+
+    coordinator.signal_refresh_requested()
+
+    refresh = asyncio.create_task(
+        coordinator.request_refresh(),
+    )
+
+    await _wait_until(
+        lambda: len(sleep.calls) == 1,
+    )
+
+    # Simulate several Core Audio callbacks while the capture lifecycle
+    # that initiated the refresh is still awaiting the coordinator.
+    coordinator.signal_refresh_requested()
+    coordinator.signal_refresh_requested()
+    coordinator.signal_refresh_requested()
+
+    await sleep.release_next()
+
+    # The generation changed during the quiet period, so the coordinator
+    # must wait for another complete quiet period.
+    await _wait_until(
+        lambda: len(sleep.calls) == 2,
+    )
+
+    await sleep.release_next()
+
+    await refresh
+
+    # The capture's local event may still cause it to call request_refresh()
+    # again after returning from the first await.
+    await coordinator.request_refresh()
+
+    # Assert
+    assert events == [
+        "system:dispose",
+        "microphone:dispose",
+        "system:restore",
+        "microphone:restore",
+    ]

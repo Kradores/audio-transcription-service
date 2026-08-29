@@ -9,6 +9,7 @@ import pyaudiowpatch
 import pytest
 
 from app.audio.capture import (
+    RECOVERY_INITIAL_DELAY_SECONDS,
     CaptureDeviceProvider,
     CaptureDeviceProviderFactory,
     PyAudioCapture,
@@ -140,7 +141,11 @@ class FakeAudioCapture:
 
 class FakePortAudioRefreshRequester:
     def __init__(self) -> None:
+        self.signals = 0
         self.requests = 0
+
+    def signal_refresh_requested(self) -> None:
+        self.signals += 1
 
     async def request_refresh(self) -> None:
         self.requests += 1
@@ -1610,3 +1615,158 @@ async def test_start_enters_recovery_when_initial_device_discovery_raises_oserro
 
     finally:
         await capture.stop()
+
+
+@pytest.mark.anyio
+async def test_recovery_retry_wait_is_interrupted_by_default_device_change() -> None:
+    # Arrange
+    sleep = ControlledSleep()
+
+    capture = _create_capture(
+        sleep=sleep,
+    )
+
+    capture._started = True
+
+    wait_task = asyncio.create_task(
+        capture._wait_for_recovery_retry(5.0),
+    )
+
+    await _wait_until(
+        lambda: sleep.calls == [5.0],
+    )
+
+    # Act
+    capture._signal_default_device_changed()
+
+    interrupted = await wait_task
+
+    # Assert
+    assert interrupted is True
+    assert capture._device_change_event.is_set()
+
+
+@pytest.mark.anyio
+async def test_recovery_retry_wait_completes_after_delay_without_device_change() -> None:
+    # Arrange
+    sleep = ControlledSleep()
+
+    capture = _create_capture(
+        sleep=sleep,
+    )
+
+    capture._started = True
+
+    wait_task = asyncio.create_task(
+        capture._wait_for_recovery_retry(5.0),
+    )
+
+    await _wait_until(
+        lambda: sleep.calls == [5.0],
+    )
+
+    # Act
+    await sleep.release_next()
+
+    interrupted = await wait_task
+
+    # Assert
+    assert interrupted is False
+    assert not capture._device_change_event.is_set()
+
+
+@pytest.mark.anyio
+async def test_default_device_change_interrupts_device_unavailable_backoff() -> None:
+    # Arrange
+    sleep = ControlledSleep()
+    requester = FakePortAudioRefreshRequester()
+
+    capture = _create_capture(
+        portaudio_refresh=requester,
+        sleep=sleep,
+    )
+
+    capture._started = True
+    capture._recovery_active = True
+    capture._stream = None
+
+    with patch.object(
+        capture,
+        "_open_fresh_stream",
+        new_callable=AsyncMock,
+        side_effect=OSError(
+            -9996,
+            "Invalid device info",
+        ),
+    ):
+        lifecycle = asyncio.create_task(
+            capture._run(),
+        )
+
+        await _wait_until(
+            lambda: sleep.calls == [RECOVERY_INITIAL_DELAY_SECONDS],
+        )
+
+        # Act
+        capture._signal_default_device_changed()
+
+        await _wait_until(
+            lambda: requester.requests == 1,
+        )
+
+        # Assert
+        assert requester.requests == 1
+
+        capture._started = False
+        lifecycle.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await lifecycle
+
+
+@pytest.mark.anyio
+async def test_source_local_recovery_does_not_open_stream_during_portaudio_refresh() -> None:
+    capture = _create_capture(
+        sleep=AsyncMock(
+            side_effect=asyncio.CancelledError,
+        ),
+    )
+
+    capture._started = True
+    capture._stream = None
+    capture._portaudio_refresh_active = True
+
+    with patch.object(
+        capture,
+        "_open_fresh_stream",
+        new_callable=AsyncMock,
+    ) as open_fresh_stream, pytest.raises(asyncio.CancelledError):
+        await capture._run()
+
+    open_fresh_stream.assert_not_awaited()
+
+
+def test_prepare_for_portaudio_refresh_blocks_source_local_recovery() -> None:
+    capture = _create_capture()
+    capture._started = True
+
+    capture.prepare_for_portaudio_refresh()
+
+    assert capture._portaudio_refresh_active is True
+
+
+@pytest.mark.anyio
+async def test_failed_coordinated_restore_reenables_source_local_recovery() -> None:
+    capture = _create_capture()
+    capture._started = True
+    capture._portaudio_refresh_active = True
+
+    with patch.object(
+        capture,
+        "_open_fresh_stream",
+        new_callable=AsyncMock,
+        side_effect=OSError(-9996, "Invalid device info"),
+    ), pytest.raises(OSError):
+        await capture.restore_after_portaudio_refresh()
+
+    assert capture._portaudio_refresh_active is False

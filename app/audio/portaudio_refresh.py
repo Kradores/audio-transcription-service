@@ -7,7 +7,7 @@ from typing import Protocol
 
 type Sleep = Callable[[float], Awaitable[None]]
 
-DEFAULT_PORTAUDIO_SETTLE_SECONDS = 0.25
+DEFAULT_PORTAUDIO_SETTLE_SECONDS = 0.5
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +23,11 @@ class PortAudioRefreshParticipant(Protocol):
 
 
 class PortAudioRefreshRequester(Protocol):
+    def signal_refresh_requested(self) -> None:
+        """Record that a process-wide refresh is required."""
+
     async def request_refresh(self) -> None:
-        """Request one coordinated process-wide PortAudio refresh."""
+        """Process any pending coordinated PortAudio refresh."""
 
 
 class PortAudioRefreshCoordinator:
@@ -49,17 +52,24 @@ class PortAudioRefreshCoordinator:
     ) -> None:
         self._participants.append(participant)
 
-    async def request_refresh(self) -> None:
+    def signal_refresh_requested(self) -> None:
         self._requested_generation += 1
+
+    async def request_refresh(self) -> None:
         request_generation = self._requested_generation
 
+        if request_generation <= self._completed_generation:
+            return
+
         async with self._refresh_lock:
-            if request_generation <= self._completed_generation:
+            if self._requested_generation <= self._completed_generation:
                 return
+
+            refresh_generation = self._requested_generation
 
             logger.info(
                 "process-wide PortAudio refresh started generation=%d",
-                request_generation,
+                refresh_generation,
             )
 
             self._dispose_all_participants()

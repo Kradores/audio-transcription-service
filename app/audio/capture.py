@@ -319,6 +319,7 @@ class PyAudioCapture(AudioCapture):
         self._discontinuity_handler: Callable[[], None] | None = None
         self._recovery_active = False
         self._capture_frame_duration_logged = False
+        self._portaudio_refresh_active = False
 
         self._device_monitor.set_change_handler(
             self._handle_default_device_changed,
@@ -343,7 +344,7 @@ class PyAudioCapture(AudioCapture):
             self._device_monitor.start()
 
             with contextlib.suppress(LookupError, OSError):
-                    await self._open_fresh_stream()
+                await self._open_fresh_stream()
 
         except Exception:
             self._started = False
@@ -410,6 +411,8 @@ class PyAudioCapture(AudioCapture):
         if not self._started:
             return
 
+        self._portaudio_refresh_active = True
+
         self._mark_recovery_started(
             reason="default_device_changed",
         )
@@ -417,19 +420,17 @@ class PyAudioCapture(AudioCapture):
         self._dispose_audio_session()
 
     async def restore_after_portaudio_refresh(self) -> None:
-        if not self._started:
-            return
-
         try:
-            await self._open_fresh_stream()
-        except LookupError, OSError:
-            # Leave the stream absent.
-            # The ordinary source-local recovery loop will retry.
-            raise
+            if not self._started:
+                return
 
-        if self._recovery_active:
-            logger.info("audio capture recovered")
-            self._recovery_active = False
+            await self._open_fresh_stream()
+
+            if self._recovery_active:
+                logger.info("audio capture recovered")
+                self._recovery_active = False
+        finally:
+            self._portaudio_refresh_active = False
 
     async def _open_fresh_stream(self) -> None:
         self._dispose_audio_session()
@@ -589,6 +590,12 @@ class PyAudioCapture(AudioCapture):
                 )
                 continue
 
+            if self._portaudio_refresh_active:
+                await self._sleep(
+                    RECOVERY_MONITOR_INTERVAL_SECONDS,
+                )
+                continue
+
             if self._stream is None:
                 if not self._recovery_active:
                     logger.warning(
@@ -614,12 +621,16 @@ class PyAudioCapture(AudioCapture):
 
                     self._dispose_audio_session()
 
-                    await self._sleep(delay)
-
-                    delay = min(
-                        delay * 2,
-                        RECOVERY_MAX_DELAY_SECONDS,
+                    device_changed = await self._wait_for_recovery_retry(
+                        delay,
                     )
+
+                    if not device_changed:
+                        delay = min(
+                            delay * 2,
+                            RECOVERY_MAX_DELAY_SECONDS,
+                        )
+
                     continue
 
                 delay = RECOVERY_INITIAL_DELAY_SECONDS
@@ -660,7 +671,7 @@ class PyAudioCapture(AudioCapture):
         if not self._started:
             return
 
-        self._device_change_generation += 1
+        self._portaudio_refresh.signal_refresh_requested()
         self._device_change_event.set()
 
     def _mark_recovery_started(
@@ -710,3 +721,43 @@ class PyAudioCapture(AudioCapture):
         self._next_frame_timestamp = timestamp + frame_duration
 
         return timestamp
+
+    async def _wait_for_recovery_retry(
+        self,
+        delay: float,
+    ) -> bool:
+        """Return True when a default-device change interrupted the retry wait."""
+
+        if self._device_change_event.is_set():
+            return True
+
+        sleep_task = asyncio.ensure_future(
+            self._sleep(delay),
+        )
+        device_change_task = asyncio.create_task(
+            self._device_change_event.wait(),
+        )
+
+        try:
+            done, _ = await asyncio.wait(
+                (
+                    sleep_task,
+                    device_change_task,
+                ),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            return device_change_task in done
+        finally:
+            for task in (
+                sleep_task,
+                device_change_task,
+            ):
+                if not task.done():
+                    task.cancel()
+
+            await asyncio.gather(
+                sleep_task,
+                device_change_task,
+                return_exceptions=True,
+            )
