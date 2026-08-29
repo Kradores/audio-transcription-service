@@ -140,3 +140,123 @@ CPU/resource usage remains acceptable for normal desktop use
 ```
 
 Transcript-quality improvements must not compromise these runtime guarantees.
+
+
+## As of 2026-08-29 — reliable multi-source Windows capture
+
+### Completed
+
+✅ Two independent capture paths:
+
+```text
+system_audio
+microphone
+```
+
+✅ Shared monotonic conversation timeline
+
+✅ Source-specific normalization, VAD, segmentation, and transcription
+aggregation
+
+✅ Shared bounded transcription executor
+
+✅ Concurrent Faster-Whisper execution
+
+✅ `worker_count=2` selected as the balanced default after real-call
+benchmarking
+
+✅ Source-tagged SQLite persistence
+
+✅ Windows default render monitoring:
+
+```text
+eRender / eConsole
+```
+
+✅ Windows default microphone monitoring:
+
+```text
+eCapture / eConsole
+```
+
+✅ ADR-043 — process-wide PortAudio refresh
+
+A controlled two-PyAudio experiment demonstrated that recreating only one
+PyAudio instance can retain stale default-device enumeration while another
+instance remains alive.
+
+Default-device changes now coordinate:
+
+```text
+all streams closed
+        ↓
+all PyAudio sessions terminated
+        ↓
+notification burst settles
+        ↓
+fresh source-owned sessions created
+        ↓
+current defaults rediscovered
+```
+
+✅ Duplicate Core Audio notification bursts coalesced into one refresh
+
+✅ Source-local native recovery suspended during coordinated refresh
+
+✅ Settings-based output switching validated in both directions
+
+✅ Settings-based microphone switching validated in both directions
+
+✅ Physical disconnect/reconnect validated
+
+✅ Startup with microphone unavailable validated
+
+✅ Later microphone availability/recovery validated
+
+✅ Recovery backoff interrupted immediately by a default-device notification
+
+✅ Both processing paths receive discontinuity reset after coordinated refresh
+
+✅ Capture timeline preserved through recovery
+
+✅ Capture transport remained healthy with:
+
+```text
+frames_dropped=0
+```
+
+✅ Graceful shutdown validated after repeated native refreshes
+
+### Quality gate
+
+```text
+pytest:
+402 passed
+
+mypy:
+Success: no issues found in 103 source files
+
+ruff:
+All checks passed
+```
+
+### Current architecture milestone
+
+The complete two-sided Windows capture foundation is now operational:
+
+```text
+system audio ─┐
+              ├─ independent real-time processing
+microphone ───┘
+              ↓
+per-source aggregation
+              ↓
+shared bounded concurrent transcription
+              ↓
+source-tagged persistence
+```
+
+Native Windows default-device recovery is now reliable with both audio sources
+active.
+
+ADR-043 is implemented and real-device validated.

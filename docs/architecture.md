@@ -308,6 +308,7 @@ PyAudioCapture
         │
         ▼
 frame delivery resumes
+```
 
 `PyAudioCapture` remains the owner of native audio-device discovery, stream
 lifecycle, and recovery. The device monitor only reports that the Windows
@@ -325,3 +326,128 @@ A successful recovery creates a capture discontinuity. Before recovered audio
 is processed, SpeechPipeline resets the normalizer, VAD, and speech segment
 assembler so that state from the previous capture continuity domain cannot
 cross into the new one.
+
+
+## Multi-source capture architecture
+
+The service has two independent real-time source-processing paths:
+
+```text
+              shared conversation timeline
+                         │
+             ┌───────────┴───────────┐
+             │                       │
+             ▼                       ▼
+      system_audio               microphone
+             │                       │
+        AudioCapture              AudioCapture
+             │                       │
+      AudioNormalizer           AudioNormalizer
+             │                       │
+          AudioVad                 AudioVad
+             │                       │
+ SpeechSegmentAssembler    SpeechSegmentAssembler
+             │                       │
+TranscriptionSegmentAggregator  TranscriptionSegmentAggregator
+             │                       │
+             └───────────┬───────────┘
+                         ▼
+             shared TranscriptionExecutor
+                    bounded queue
+                         │
+                  worker_count = 2
+                    ┌────┴────┐
+                    ▼         ▼
+                 worker 1  worker 2
+                    │         │
+                    └────┬────┘
+                         ▼
+               shared Whisper model
+                         │
+                  sourced results
+                         │
+                TranscriptRecorder
+                         │
+               TranscriptRepository
+                         │
+                       SQLite
+```
+
+Stateful real-time components remain independent per source.
+
+Source identity is attached when source-specific speech crosses into the shared
+transcription execution boundary.
+
+Both captures use one shared monotonic conversation timeline.
+
+## Windows native capture lifecycle
+
+System-audio and microphone capture normally own independent native sessions.
+
+Ordinary source failures therefore remain isolated:
+
+```text
+system stream unavailable
+        ↓
+system-local recovery
+
+microphone stream unavailable
+        ↓
+microphone-local recovery
+```
+
+Windows default-device changes have a different lifecycle requirement.
+
+Real-device testing demonstrated that PortAudio device/default enumeration is
+effectively process-wide while multiple PyAudio instances exist.
+
+The composition root therefore provides one shared
+`PortAudioRefreshCoordinator` to both capture implementations.
+
+```text
+eRender/eConsole change ──────┐
+                              │
+                              ▼
+                    PortAudioRefreshCoordinator
+                              ▲
+                              │
+eCapture/eConsole change ─────┘
+                              │
+                              ▼
+                   close BOTH native streams
+                              │
+                   terminate BOTH PyAudio
+                              │
+                    wait for notifications
+                         to settle
+                              │
+                 ┌────────────┴────────────┐
+                 ▼                         ▼
+           fresh system PyAudio      fresh microphone PyAudio
+                 │                         │
+      current default loopback     current WASAPI default input
+                 │                         │
+                 └────────────┬────────────┘
+                              ▼
+                         capture resumes
+```
+
+The coordinator owns only this process-wide native refresh boundary.
+
+It does not own:
+
+- concrete device selection;
+- capture queues;
+- audio processing;
+- VAD;
+- segmentation;
+- transcription;
+- normal source-local recovery.
+
+During coordinated refresh, source-local native reopening is suspended so
+PortAudio remains fully terminated until the settle phase is complete.
+
+Both processing paths receive a discontinuity because both native sessions are
+refreshed.
+
+The shared conversation timeline is not reset.

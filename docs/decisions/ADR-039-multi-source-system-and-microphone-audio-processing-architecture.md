@@ -495,3 +495,7 @@ Implementation following this ADR should proceed in small increments:
 11. Validate the complete architecture with a real two-person call.
 
 Microphone-specific capture policy, including Windows input-device discovery and default-device behavior, will be decided separately without reopening the multi-source topology established here.
+
+## Related decisions
+
+- ADR-043: Coordinate Process-Wide PortAudio Refresh Across Multiple Audio Sources

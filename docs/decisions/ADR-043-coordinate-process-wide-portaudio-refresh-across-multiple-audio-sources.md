@@ -1,9 +1,10 @@
 # ADR-043: Coordinate Process-Wide PortAudio Refresh Across Multiple Audio Sources
 
-### Status
-Accepted
+## Status
 
-### Context
+Accepted — implemented and validated on real Windows audio hardware.
+
+## Context
 
 The service operates two independent Windows capture paths:
 
@@ -49,7 +50,7 @@ Therefore recreating one Python `PyAudio` wrapper does not provide a genuinely r
 
 The process-wide native PortAudio lifecycle must reach a fully terminated state before device/default enumeration is reliably refreshed.
 
-### Decision
+## Decision
 
 Windows default-device changes that require rediscovery of the active PortAudio/WASAPI defaults will trigger a **process-wide coordinated PortAudio refresh**.
 
@@ -128,7 +129,7 @@ A temporarily unavailable microphone therefore must not indefinitely prevent sys
 
 Duplicate or near-simultaneous render/capture default-device notifications must be coalesced so one Windows transition does not cause repeated full PortAudio restarts.
 
-### Rationale
+## Rationale
 
 The experiments establish that PortAudio refresh semantics are effectively process-wide when multiple `PyAudio()` wrappers are active.
 
@@ -136,7 +137,7 @@ Keeping independent source streams remains desirable, but pretending that their 
 
 The coordinator makes the actual native constraint explicit while preserving source-local processing ownership everywhere else.
 
-### Consequences
+## Consequences
 
 Positive:
 
@@ -156,7 +157,7 @@ Negative:
 - The application gains a process-wide audio-infrastructure component.
 - Windows device switches create slightly larger capture gaps than strictly source-local recovery would.
 
-### Alternatives considered
+## Alternatives considered
 
 **Continue recreating only the affected `PyAudio()` instance**
 
@@ -188,7 +189,7 @@ Rejected for now.
 
 Separate processes would provide genuinely separate PortAudio runtimes but introduce unnecessary IPC, deployment, lifecycle, and observability complexity.
 
-### Testing requirements
+## Testing requirements
 
 - A default change request tears down all current PyAudio sessions before any recreation.
 - Recreation occurs only after full teardown.
@@ -208,3 +209,289 @@ Separate processes would provide genuinely separate PortAudio runtimes but intro
   - Microphone Array → Headset through Settings;
   - physical disconnect and reconnect;
   - startup with one unavailable source.
+
+## Implementation validation
+
+ADR-043 has been implemented and validated with automated tests and real
+Windows audio hardware.
+
+The implementation introduces one application-owned
+`PortAudioRefreshCoordinator` shared by the system-audio and microphone
+capture paths.
+
+Normal native resource ownership remains source-local:
+
+```text
+system_audio capture
+    ├── stream
+    ├── PyAudio session
+    ├── device provider
+    └── recovery state
+
+microphone capture
+    ├── stream
+    ├── PyAudio session
+    ├── device provider
+    └── recovery state
+```
+
+Windows default-device changes use the coordinated process-wide boundary:
+
+```text
+Core Audio default-device notification
+        ↓
+signal shared refresh generation
+        ↓
+coalesce duplicate / near-simultaneous notifications
+        ↓
+mark both captures as participating in coordinated refresh
+        ↓
+close both native streams
+        ↓
+terminate both PyAudio sessions
+        ↓
+wait for the notification burst to settle
+        ↓
+recreate fresh source-owned PyAudio sessions
+        ↓
+system_audio resolves current default WASAPI loopback
+microphone resolves current WASAPI defaultInputDevice
+        ↓
+reopen independently
+        ↓
+resume capture
+```
+
+The refresh-request generation is signaled immediately when the matching
+Core Audio notification reaches the capture lifecycle.
+
+This is intentionally separate from execution of the asynchronous coordinated
+refresh.
+
+The separation ensures that additional notifications arriving while a capture
+is already awaiting refresh still advance the shared generation and extend the
+same logical refresh rather than creating another full PortAudio restart.
+
+The notification settle window was validated against real physical-device
+transitions where Windows emitted several render and capture endpoint changes
+for one hardware action.
+
+Source-local recovery is suspended while a capture is participating in the
+coordinated refresh.
+
+This preserves the required invariant:
+
+> no source may recreate a PyAudio session while the coordinator is waiting
+> for PortAudio to reach and remain in the fully terminated state.
+
+After coordinated restore completes, or if restoration of that source fails
+with an expected device-availability error, normal source-local recovery
+becomes active again.
+
+### Recoverable unavailable source
+
+Startup with no usable microphone was validated.
+
+PyAudioWPatch reports the missing WASAPI default input as:
+
+```text
+OSError(-9996, "Invalid device info")
+```
+
+This is treated as an expected device-availability condition rather than an
+application startup failure.
+
+The validated behavior is:
+
+```text
+system_audio available
+        ↓
+system capture runs
+
+microphone unavailable
+        ↓
+microphone pipeline remains alive
+        ↓
+bounded exponential recovery retry
+        ↓
+application remains running
+```
+
+When a usable microphone later appears, the Core Audio notification interrupts
+the ordinary recovery backoff immediately and causes coordinated PortAudio
+refresh.
+
+The microphone then joins the existing conversation without restarting the
+application or resetting the shared conversation timeline.
+
+### Microphone default discovery
+
+Microphone discovery now uses the WASAPI-specific default:
+
+```python
+get_default_wasapi_device(d_in=True)
+```
+
+rather than PortAudio's generic default-input lookup.
+
+The returned device must expose at least one input channel.
+
+This was validated with:
+
+```text
+Headset (Razer Barracuda X (BT))
+Microphone Array (Realtek(R) Audio)
+```
+
+and correctly followed the Windows `eCapture/eConsole` default in both
+directions.
+
+### Real-device validation
+
+The coordinated lifecycle was validated on Windows with both capture sources
+running.
+
+Successful scenarios:
+
+```text
+Windows Settings:
+Headphones → Speakers
+Speakers → Headphones
+
+Windows Settings:
+Headset → Microphone Array
+Microphone Array → Headset
+
+Physical device:
+disconnect
+reconnect
+
+Startup:
+microphone unavailable
+microphone later becomes available
+```
+
+Observed native formats changed correctly with the selected endpoints,
+including:
+
+```text
+Bluetooth output:
+44.1 kHz stereo
+
+Realtek output:
+48 kHz stereo
+
+Razer microphone:
+16 kHz mono
+
+Realtek microphone:
+48 kHz stereo
+```
+
+Physical disconnect/reconnect produced bursts of Core Audio notifications.
+
+Those bursts were successfully coalesced into one process-wide refresh.
+
+For example:
+
+```text
+refresh started generation=6
+additional notifications arrive
+refresh completed generation=9
+```
+
+and:
+
+```text
+refresh started generation=11
+refresh completed generation=11
+```
+
+No immediate second full refresh followed the same physical transition.
+
+Both capture paths resumed against the correct current defaults.
+
+Both source processing paths received discontinuity notifications.
+
+Capture transport remained healthy:
+
+```text
+system_audio frames_dropped=0
+microphone frames_dropped=0
+```
+
+Application shutdown remained clean after repeated refresh operations.
+
+### Automated verification
+
+The completed implementation was verified with:
+
+```text
+pytest:
+402 passed
+
+mypy:
+Success: no issues found in 103 source files
+
+ruff:
+All checks passed
+```
+
+The test coverage includes:
+
+- all participants disposed before any participant is recreated;
+- notification settling occurs only after full teardown;
+- duplicate notifications extend one logical refresh;
+- same-source notifications arriving while refresh is already running are
+  included in the shared generation;
+- one participant restore failure does not prevent restoration attempts for
+  other participants;
+- unexpected restoration failures remain visible;
+- default-device notifications delegate to process-wide coordination;
+- ordinary inactive-stream recovery remains source-local;
+- startup device-discovery `OSError` enters recovery instead of failing the
+  service;
+- recovery backoff is interrupted immediately by a default-device
+  notification;
+- source-local recovery cannot recreate PortAudio during an active coordinated
+  refresh;
+- failed coordinated restoration re-enables source-local recovery;
+- both production capture paths share the same coordinator through the
+  composition root.
+
+## Superseded aspects of earlier decisions
+
+ADR-039 and ADR-040 correctly established independent source-owned capture
+resources and source-local recovery.
+
+ADR-043 refines one specific assumption from those decisions.
+
+For ordinary capture failures:
+
+```text
+system failure → system-local recovery
+microphone failure → microphone-local recovery
+```
+
+remains valid.
+
+For Windows default-device changes requiring refreshed PortAudio enumeration:
+
+```text
+render or capture default changes
+        ↓
+process-wide native PortAudio refresh
+```
+
+is authoritative.
+
+This refinement is necessary because real-device experimentation demonstrated
+that PortAudio's default-device enumeration remains effectively process-wide
+while any PyAudio instance remains alive.
+
+## Related decisions
+
+- ADR-035 — Audio Capture Discontinuity Propagation and Processing-State Reset
+- ADR-038 — Recover WASAPI Loopback Capture on Windows Default Output Device Changes
+- ADR-039 — Multi-Source System and Microphone Audio Processing Architecture
+- ADR-040 — Follow and Recover the Windows Default Microphone Input Device

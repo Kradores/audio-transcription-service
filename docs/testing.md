@@ -403,3 +403,111 @@ without compromising the existing guarantees:
 - queues remain bounded;
 - sustained overload must not crash the service;
 - capture and transcription pressure remain independently observable.
+
+
+## Coordinated Windows PortAudio refresh
+
+Default-device recovery requires both deterministic unit tests and real
+hardware validation.
+
+Unit tests must not attempt to reproduce Windows or PortAudio itself.
+
+They verify application-owned lifecycle semantics using fakes and controlled
+async scheduling.
+
+### Coordinator behavior
+
+Tests cover:
+
+- all registered capture participants are disposed before any participant is
+  recreated;
+- the notification-settle period begins only after all participants are
+  disposed;
+- duplicate and concurrent notifications are coalesced;
+- shared refresh generation advances immediately when a device-change signal
+  arrives;
+- notifications arriving while a refresh caller is already awaiting the
+  coordinator extend the same logical refresh;
+- a later `request_refresh()` is a no-op when that generation was already
+  completed;
+- expected `LookupError`/`OSError` from one participant restoration does not
+  prevent restoration attempts for other participants;
+- unexpected restoration failures remain visible;
+- teardown attempts all participants before reporting teardown failure.
+
+### Capture behavior
+
+Capture tests cover:
+
+- matching default-device notifications request process-wide refresh;
+- ordinary inactive-stream failure remains source-local;
+- coordinated preparation disposes the capture's native PortAudio session;
+- source-local native reopening is suspended while coordinated refresh is
+  active;
+- coordinated restoration opens a fresh source-owned session;
+- failure during coordinated restoration re-enables source-local recovery;
+- startup device-discovery `LookupError` and `OSError` enter recovery instead
+  of terminating the service;
+- recovery backoff is interruptible by a default-device notification;
+- microphone discovery uses WASAPI `defaultInputDevice`;
+- an input device with no input channels is rejected;
+- the generic PortAudio default-input lookup is not used for microphone
+  selection.
+
+### Composition behavior
+
+Composition tests prove:
+
+- one `PortAudioRefreshCoordinator` is created for the conversation;
+- the same coordinator is injected into both captures;
+- both captures are registered as refresh participants;
+- each capture retains its own device-provider policy and native session.
+
+### Real-device validation matrix
+
+The automated suite cannot establish whether Windows and PortAudio actually
+refresh native enumeration correctly.
+
+ADR-043 therefore requires manual real-device validation on Windows.
+
+Validated scenarios:
+
+| Scenario | Expected result |
+| --- | --- |
+| Headphones → Speakers in Windows Settings | system capture follows Speakers |
+| Speakers → Headphones in Windows Settings | system capture follows Headphones |
+| Headset → Microphone Array in Settings | microphone follows Microphone Array |
+| Microphone Array → Headset in Settings | microphone follows Headset |
+| Physical headset disconnect | current Windows defaults are rediscovered |
+| Physical headset reconnect | current Windows defaults are rediscovered |
+| Start with no usable microphone | application remains alive |
+| Enable microphone after startup | microphone joins running conversation |
+| Notification burst | one coordinated refresh |
+| Application shutdown after refresh | clean shutdown |
+
+Validation must inspect:
+
+- selected device name;
+- native channel count;
+- native sample rate;
+- refresh generation behavior;
+- source discontinuity delivery;
+- continued shared conversation timestamps;
+- `frames_dropped`;
+- clean shutdown.
+
+The latest ADR-043 validation completed with:
+
+```text
+402 passed
+2 existing PyTorch/Python 3.14 deprecation warnings
+
+mypy:
+Success: no issues found in 103 source files
+
+ruff:
+All checks passed
+```
+
+The two warnings originate from `torch.jit.load` under Python 3.14 and are not
+related to audio-device recovery.

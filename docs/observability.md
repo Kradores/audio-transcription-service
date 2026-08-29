@@ -98,72 +98,6 @@ capture frames quickly enough.
 
 ---
 
-## Capture recovery
-
-System-audio and microphone recovery are independent.
-
-System-audio recovery follows:
-
-```text
-eRender / eConsole change
-        ↓
-capture device-change signal
-        ↓
-settle/debounce period
-        ↓
-capture recovery
-        ↓
-fresh PyAudio session
-        ↓
-current default loopback selected
-        ↓
-capture recovered
-```
-
-Microphone recovery follows the equivalent:
-
-```text
-eCapture / eConsole change
-        ↓
-capture device-change signal
-        ↓
-settle/debounce period
-        ↓
-capture recovery
-        ↓
-fresh PyAudio session
-        ↓
-current default input selected
-        ↓
-capture recovered
-```
-
-A recovery triggers a discontinuity only for the affected source.
-
-`SpeechPipeline` resets:
-
-```text
-AudioNormalizer
-AudioVad
-SpeechSegmentAssembler
-```
-
-before processing recovered audio.
-
-A short audio gap during a real Windows device transition is expected.
-
-Windows may temporarily expose no usable endpoint while devices disappear,
-appear, or change profile.
-
-The recovery guarantee is therefore not gapless audio.
-
-The guarantee is:
-
-> Once Windows exposes a usable selected default endpoint, capture recovers
-> automatically without restarting the application.
-
----
-
 ## Speech pipeline
 
 There is one `SpeechPipeline` per source:
@@ -946,4 +880,198 @@ avg_queue_wait=...
 max_queue_wait=...
 avg_transcription_duration=...
 max_transcription_duration=...
+```
+
+
+## Windows capture and PortAudio refresh
+
+Default-device recovery must be observable separately from ordinary
+source-local device recovery.
+
+### Core Audio notification
+
+Matching monitor events are logged with:
+
+```text
+default audio device changed
+flow=...
+role=...
+endpoint_id=...
+```
+
+The capture boundary then logs:
+
+```text
+audio capture default device change signaled
+endpoint_id=...
+```
+
+The monitored authoritative endpoints are:
+
+```text
+system_audio:
+flow=eRender
+role=eConsole
+
+microphone:
+flow=eCapture
+role=eConsole
+```
+
+### Process-wide PortAudio refresh
+
+The coordinated lifecycle emits:
+
+```text
+process-wide PortAudio refresh started
+generation=N
+```
+
+and:
+
+```text
+process-wide PortAudio refresh completed
+generation=M
+```
+
+`M` may be greater than `N`.
+
+This is expected when additional Core Audio notifications arrive during the
+same hardware/default-device transition.
+
+For example:
+
+```text
+refresh started generation=6
+...
+refresh completed generation=9
+```
+
+means generations 6 through 9 were coalesced into one physical PortAudio
+refresh.
+
+It does not indicate four separate native restarts.
+
+An immediately following second:
+
+```text
+process-wide PortAudio refresh started
+```
+
+for the same logical device transition may indicate insufficient notification
+coalescing and should be investigated.
+
+### Capture recovery
+
+Each participating capture logs:
+
+```text
+audio capture recovery started reason=default_device_changed
+```
+
+followed by the newly selected device and:
+
+```text
+audio capture recovered
+```
+
+The expected order during coordinated refresh is:
+
+```text
+refresh started
+        ↓
+both captures enter recovery
+        ↓
+notification settling
+        ↓
+device selected source A
+source A recovered
+        ↓
+device selected source B
+source B recovered
+        ↓
+refresh completed
+```
+
+No source should select/reopen a native device during the coordinator's
+pre-recreation settle period.
+
+Doing so would violate the PortAudio full-teardown invariant.
+
+### Source unavailable
+
+Expected hardware/device discovery failures remain recoverable and use:
+
+```text
+audio capture recovery started reason=device_unavailable
+audio capture recovery failed; retrying
+    error_type=...
+    error=...
+    delay=...
+```
+
+A currently observed Windows/PyAudioWPatch condition when no usable WASAPI
+input exists is:
+
+```text
+OSError(-9996, "Invalid device info")
+```
+
+This is an expected device-availability condition.
+
+The application should remain alive.
+
+Retry uses bounded exponential backoff.
+
+A matching Core Audio default-device notification interrupts that backoff
+immediately rather than waiting for the current retry delay.
+
+### Device selection
+
+Successful capture recreation logs the actual selected device:
+
+```text
+audio capture device selected
+name=...
+index=...
+channels=...
+sample_rate=...
+```
+
+Device indexes are diagnostic only.
+
+They are transient PortAudio enumeration values and must not be interpreted
+as stable identity.
+
+The device name and native format are useful for confirming that recovery
+followed the current Windows default.
+
+### Capture health after refresh
+
+At shutdown, inspect:
+
+```text
+frames_dropped
+```
+
+for each capture.
+
+Real-device ADR-043 validation completed repeated Settings switches,
+physical disconnect/reconnect, and unavailable-device recovery with:
+
+```text
+frames_dropped=0
+```
+
+on both sources.
+
+Capture discontinuity logs should also appear for every processing path whose
+native capture session was refreshed:
+
+```text
+capture discontinuity detected; resetting processing state
+source=system_audio
+
+capture discontinuity detected; resetting processing state
+source=microphone
 ```

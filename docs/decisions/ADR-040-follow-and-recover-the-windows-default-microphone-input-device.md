@@ -543,3 +543,7 @@ Implementation following this ADR should proceed incrementally:
 11. Validate startup with no usable microphone.
 12. Validate simultaneous system-audio and microphone capture.
 13. Run a real two-person call and verify both sides are persisted with correct source identity and comparable timestamps.
+
+## Related decisions
+
+- ADR-043: Coordinate Process-Wide PortAudio Refresh Across Multiple Audio Sources
