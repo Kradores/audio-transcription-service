@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import assert_never
 
-from faster_whisper import WhisperModel  # type: ignore[import-untyped]
 from silero_vad import VADIterator, load_silero_vad
 
 from app.application import Application
@@ -21,6 +21,7 @@ from app.audio.resampler import SoXRResamplerFactory
 from app.audio.timeline import AudioTimeline, MonotonicAudioTimeline
 from app.audio.windows_device_monitor import WindowsAudioDeviceMonitor
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
+from app.core.config.enums import WhisperRuntime
 from app.core.config.loader import ConfigurationLoader
 from app.core.config.models import (
     AudioProcessingSettings,
@@ -36,6 +37,12 @@ from app.storage.sqlite import SQLiteTranscriptRepository
 from app.transcription.aggregation import TranscriptionSegmentAggregatorImpl
 from app.transcription.contracts import AudioSource
 from app.transcription.faster_whisper import FasterWhisperTranscriber
+from app.transcription.faster_whisper_factory import FasterWhisperModelFactory
+from app.transcription.faster_whisper_runtime import (
+    DefaultFasterWhisperRuntimeInitializer,
+    FasterWhisperRuntimeInitializer,
+    TheRockFasterWhisperRuntimeInitializer,
+)
 from app.transcription.protocols import (
     Transcriber,
     TranscriptionSegmentAggregator,
@@ -234,13 +241,37 @@ def create_normalizer(settings: AudioProcessingSettings) -> AudioNormalizer:
     )
 
 
-def create_whisper_model(settings: Settings) -> WhisperModel:
+def create_faster_whisper_runtime_initializer(
+    runtime: WhisperRuntime,
+) -> FasterWhisperRuntimeInitializer:
+    """Create the configured Faster-Whisper runtime initializer."""
+
+    match runtime:
+        case WhisperRuntime.DEFAULT:
+            return DefaultFasterWhisperRuntimeInitializer()
+
+        case WhisperRuntime.THEROCK:
+            return TheRockFasterWhisperRuntimeInitializer()
+
+    assert_never(runtime)
+
+
+def create_whisper_model(settings: Settings) -> WhisperModelProtocol:
     """Create the configured Faster-Whisper model."""
-    return WhisperModel(
-        settings.whisper.model.value,
+
+    runtime_initializer = create_faster_whisper_runtime_initializer(
+        settings.whisper.runtime,
+    )
+
+    factory = FasterWhisperModelFactory(
+        runtime_initializer=runtime_initializer,
+    )
+
+    return factory.create(
+        model=settings.whisper.model.value,
         device=settings.whisper.device.value,
         compute_type=settings.whisper.compute_type.value,
-        num_workers=settings.transcription.worker_count,
+        worker_count=settings.transcription.worker_count,
     )
 
 

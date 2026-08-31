@@ -61,6 +61,7 @@ def valid_configuration_document() -> dict[str, Any]:
         },
         "whisper": {
             "model": "small",
+            "runtime": "default",
             "device": "cpu",
             "compute_type": "int8",
         },
@@ -136,6 +137,10 @@ class SettingsBuilder:
 
     def with_vad_enabled(self, enabled: bool) -> SettingsBuilder:
         self._document["vad"]["enabled"] = enabled
+        return self
+
+    def with_whisper_runtime(self, runtime: str) -> SettingsBuilder:
+        self._document["whisper"]["runtime"] = runtime
         return self
 
     def with_whisper_model(self, model: str) -> SettingsBuilder:

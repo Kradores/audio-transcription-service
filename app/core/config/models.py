@@ -11,6 +11,7 @@ from app.core.config.enums import (
     WhisperComputeType,
     WhisperDevice,
     WhisperModel,
+    WhisperRuntime,
 )
 
 
@@ -98,6 +99,7 @@ class WhisperSettings(BaseConfigurationModel):
     """Configuration options for the OpenAI Whisper speech-to-text model."""
 
     model: WhisperModel
+    runtime: WhisperRuntime
     device: WhisperDevice
     compute_type: WhisperComputeType
 

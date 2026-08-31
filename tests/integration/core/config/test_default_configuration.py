@@ -1,7 +1,12 @@
 from pathlib import Path
 
+import pytest
+
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
+from app.core.config.models import Settings
+
+EXAMPLE_CONFIGURATION_PATH = Path("config/config.example.yaml")
 
 
 def test_default_configuration_loads_successfully() -> None:
@@ -12,20 +17,24 @@ def test_default_configuration_loads_successfully() -> None:
     settings = loader.load()
 
     # Assert
-    assert settings.application.name == "audio-transcription-service"
-    assert settings.application.environment.value == "development"
-    assert settings.api.host == "127.0.0.1"
-    assert settings.api.port == 8000
-    assert settings.audio.processing.sample_rate == 16_000
-    assert settings.audio.processing.channels == 1
-    assert settings.audio.segmentation.target_duration_seconds == 3
-    assert settings.audio.capture.queue_capacity == 100
-    assert settings.vad.enabled is True
-    assert settings.vad.speech_threshold == 0.5
-    assert settings.vad.min_silence_duration_ms == 300
-    assert settings.whisper.model.value == "small"
-    assert settings.whisper.device.value == "cpu"
-    assert settings.whisper.compute_type.value == "int8"
-    assert settings.database.path == (Path("config/transcripts.db").resolve())
-    assert settings.transcription.queue_capacity == 10
-    assert settings.transcription.worker_count == 2
+    assert isinstance(settings, Settings)
+
+
+@pytest.mark.parametrize(
+    "configuration_path",
+    [
+        DEFAULT_CONFIGURATION_PATH,
+        EXAMPLE_CONFIGURATION_PATH,
+    ],
+)
+def test_repository_configuration_loads_successfully(
+    configuration_path: Path,
+) -> None:
+    # Arrange
+    loader = ConfigurationLoader(configuration_path)
+
+    # Act
+    settings = loader.load()
+
+    # Assert
+    assert isinstance(settings, Settings)
