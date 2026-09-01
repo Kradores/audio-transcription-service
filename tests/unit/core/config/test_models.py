@@ -11,6 +11,7 @@ from app.core.config.enums import (
     WhisperComputeType,
     WhisperDevice,
     WhisperModel,
+    WhisperRuntime,
 )
 from app.core.config.models import (
     ApiSettings,
@@ -66,7 +67,9 @@ def test_vad_settings_accepts_valid_values() -> None:
 
 def test_whisper_settings_accepts_valid_values() -> None:
     settings = SettingsBuilder().build()
+
     assert settings.whisper.model is WhisperModel.SMALL
+    assert settings.whisper.runtime is WhisperRuntime.DEFAULT
     assert settings.whisper.device is WhisperDevice.CPU
     assert settings.whisper.compute_type is WhisperComputeType.INT8
 
@@ -399,3 +402,24 @@ def test_transcription_worker_count_rejects_invalid_values(
 ) -> None:
     with pytest.raises(ValidationError):
         (SettingsBuilder().with_transcription_worker_count(worker_count).build())
+
+
+@pytest.mark.parametrize(
+    ("runtime", "expected"),
+    [
+        ("default", WhisperRuntime.DEFAULT),
+        ("therock", WhisperRuntime.THEROCK),
+    ],
+)
+def test_whisper_settings_accepts_supported_runtimes(
+    runtime: str,
+    expected: WhisperRuntime,
+) -> None:
+    settings = SettingsBuilder().with_whisper_runtime(runtime).build()
+
+    assert settings.whisper.runtime is expected
+
+
+def test_whisper_settings_rejects_unknown_runtime() -> None:
+    with pytest.raises(ValidationError):
+        SettingsBuilder().with_whisper_runtime("unsupported").build()

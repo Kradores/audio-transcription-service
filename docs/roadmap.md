@@ -120,10 +120,12 @@ architecture.
      where justified by evidence.
 
 5. **Resource behavior**
-   - retain two workers as the default;
-   - treat higher worker counts as explicit machine-specific tuning;
-   - avoid automatic worker scaling until there is evidence that it can be
-     done reliably.
+   - retain the validated runtime-specific worker defaults:
+   - CPU: two workers;
+   - AMD/TheRock: one worker;
+   - treat other worker counts as explicit machine-specific tuning;
+   - avoid automatic worker scaling until there is evidence that it can be done
+     reliably.
 
 ### Definition of success
 
@@ -260,3 +262,71 @@ Native Windows default-device recovery is now reliable with both audio sources
 active.
 
 ADR-043 is implemented and real-device validated.
+
+
+## ✅ Completed milestone — AMD GPU transcription runtime
+
+As of 2026-09-01, the AMD GPU investigation and integration are complete for
+the validated Windows `gfx1031` environment.
+
+The service now supports two transcription runtime profiles:
+
+```text
+CPU
+    Faster-Whisper
+    device=cpu
+    compute_type=int8
+    worker_count=2
+
+AMD
+    Faster-Whisper
+    custom CTranslate2
+    TheRock / HIP
+    device=cuda
+    compute_type=float16
+    worker_count=1
+```
+
+Silero VAD remains CPU-backed in both cases.
+
+Completed work includes:
+
+- TheRock runtime feasibility investigation;
+- rejection of the unstable official ROCm Windows path;
+- exact CTranslate2 4.8.1 source pinning;
+- HIP `gfx1031` native build;
+- native shutdown-deadlock diagnosis;
+- replacement of the non-OpenMP CTranslate2 fallback with Intel OpenMP;
+- reproducible prerequisite validation;
+- reproducible CTranslate2 source preparation;
+- reproducible native configuration/build;
+- native dependency inspection;
+- reproducible Python wheel packaging;
+- pinned fresh-runtime installation;
+- real GPU smoke inference;
+- exact runtime DLL hash verification;
+- 20-minute sustained teardown regression;
+- isolated full-application dependency preparation;
+- CPU Silero + AMD Whisper hybrid-runtime validation;
+- real two-source application acceptance;
+- clean coordinated application shutdown;
+- zero capture-frame drops during the acceptance run;
+- zero transcription rejection/failure during the acceptance run;
+- one normal AMD setup entry point through `scripts/amd/prepare.ps1`.
+
+Final application-level executor result:
+
+```text
+submitted=166
+completed=166
+rejected=0
+failed=0
+queue_high_water_mark=2
+```
+
+ADR-044 records the final runtime, native-build, and fallback policy.
+
+The AMD integration is considered complete for the currently supported target.
+
+Further AMD GPU architectures require independent artifact and acceptance
+validation.

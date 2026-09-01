@@ -1,0 +1,10 @@
+fastapi==0.141.1
+pyaudiowpatch==0.2.12.8
+pycaw==20251023
+pydantic==2.13.5
+pydantic-settings==2.15.0
+silero-vad==6.2.1
+soxr==1.1.0
+torch==2.13.0
+torchaudio==2.11.0
+uvicorn==0.52.4

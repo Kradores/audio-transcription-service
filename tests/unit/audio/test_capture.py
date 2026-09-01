@@ -1736,11 +1736,14 @@ async def test_source_local_recovery_does_not_open_stream_during_portaudio_refre
     capture._stream = None
     capture._portaudio_refresh_active = True
 
-    with patch.object(
-        capture,
-        "_open_fresh_stream",
-        new_callable=AsyncMock,
-    ) as open_fresh_stream, pytest.raises(asyncio.CancelledError):
+    with (
+        patch.object(
+            capture,
+            "_open_fresh_stream",
+            new_callable=AsyncMock,
+        ) as open_fresh_stream,
+        pytest.raises(asyncio.CancelledError),
+    ):
         await capture._run()
 
     open_fresh_stream.assert_not_awaited()
@@ -1761,12 +1764,15 @@ async def test_failed_coordinated_restore_reenables_source_local_recovery() -> N
     capture._started = True
     capture._portaudio_refresh_active = True
 
-    with patch.object(
-        capture,
-        "_open_fresh_stream",
-        new_callable=AsyncMock,
-        side_effect=OSError(-9996, "Invalid device info"),
-    ), pytest.raises(OSError):
+    with (
+        patch.object(
+            capture,
+            "_open_fresh_stream",
+            new_callable=AsyncMock,
+            side_effect=OSError(-9996, "Invalid device info"),
+        ),
+        pytest.raises(OSError),
+    ):
         await capture.restore_after_portaudio_refresh()
 
     assert capture._portaudio_refresh_active is False

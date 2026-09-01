@@ -17,6 +17,11 @@ class LogLevel(StrEnum):
     CRITICAL = "CRITICAL"
 
 
+class WhisperRuntime(StrEnum):
+    DEFAULT = "default"
+    THEROCK = "therock"
+
+
 class WhisperDevice(StrEnum):
     CPU = "cpu"
     CUDA = "cuda"

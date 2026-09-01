@@ -6,14 +6,26 @@ import sys
 import time
 from pathlib import Path
 
+from tests.integration.constants import INTEGRATION_CONFIGURATION_PATH
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STARTUP_TIMEOUT_SECONDS = 30.0
 
 
-def test_application_module_starts_and_remains_running() -> None:
+def test_application_process_starts_and_remains_running() -> None:
     # Arrange
+    config_path = INTEGRATION_CONFIGURATION_PATH.resolve()
+
     process = subprocess.Popen(
-        [sys.executable, "-m", "app"],
+        [
+            sys.executable,
+            "-c",
+            (
+                "from pathlib import Path; "
+                "from app.main import main; "
+                f"main(Path({str(config_path)!r}))"
+            ),
+        ],
         cwd=PROJECT_ROOT,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

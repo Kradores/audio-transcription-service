@@ -16,11 +16,11 @@ from app.composition import (
     create_transcription_executor,
     create_vad,
 )
-from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
 from app.services.speech_pipeline import SpeechPipeline
 from app.transcription.aggregation import TranscriptionSegmentAggregatorImpl
 from app.transcription.contracts import AudioSource
+from tests.integration.constants import INTEGRATION_CONFIGURATION_PATH
 
 FIXTURE_PATH = Path(__file__).parents[2] / "fixtures" / "audio" / "english_speech.wav"
 
@@ -77,7 +77,7 @@ def _read_wav(path: Path) -> AudioFrame:
 @pytest.mark.anyio
 async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None:
     # Arrange
-    settings = ConfigurationLoader(DEFAULT_CONFIGURATION_PATH).load()
+    settings = ConfigurationLoader(INTEGRATION_CONFIGURATION_PATH).load()
 
     frame = _read_wav(FIXTURE_PATH)
     capture = FixtureAudioCapture(frame)

@@ -270,3 +270,117 @@ path when necessary.
 Database schema initialization is performed during application composition.
 
 Schema migrations are intentionally not introduced yet.
+
+
+## AMD GPU transcription development environment
+
+AMD/TheRock development uses a separate isolated runtime from the project's
+normal CPU `.venv`.
+
+The normal CPU workflow remains:
+
+```powershell
+uv sync
+uv run python -m app
+```
+
+### AMD setup — start here
+
+Do not manually execute every script under `scripts/amd`.
+
+The normal AMD entry point is:
+
+```powershell
+.\scripts\amd\prepare.ps1
+```
+
+This performs the required sequence:
+
+```text
+prerequisite validation
+        ↓
+pinned CTranslate2 source preparation
+        ↓
+HIP + Intel OpenMP native build
+        ↓
+native dependency validation
+        ↓
+custom wheel build
+        ↓
+fresh GPU runtime smoke test
+        ↓
+application dependencies
+        ↓
+CPU Silero validation
+        ↓
+AMD CTranslate2 revalidation
+        ↓
+application-ready isolated runtime
+```
+
+For a clean native rebuild:
+
+```powershell
+.\scripts\amd\prepare.ps1 -Clean
+```
+
+For the expensive sustained teardown regression as part of preparation:
+
+```powershell
+.\scripts\amd\prepare.ps1 `
+    -Clean `
+    -RunLongValidation
+```
+
+See `scripts/amd/README.md` for the responsibility of each individual stage
+script.
+
+### AMD application configuration
+
+The validated AMD transcription configuration is:
+
+```yaml
+transcription:
+  worker_count: 1
+
+whisper:
+  runtime: therock
+  model: small
+  device: cuda
+  compute_type: float16
+```
+
+`cuda` is the CTranslate2 device identifier used by its HIP backend.
+
+Do not change it to `rocm`.
+
+### Running the AMD application
+
+After preparation succeeds:
+
+```powershell
+$amdPython = Join-Path `
+    $env:TEMP `
+    "audio-transcription-service-amd\runtime-test-venv\Scripts\python.exe"
+
+& $amdPython -m app
+```
+
+Run the application directly when validating graceful shutdown.
+
+Do not pipe the process through `Tee-Object` for lifecycle acceptance because
+interrupting the PowerShell pipeline can prevent the final application-owned
+shutdown logs from being observed reliably.
+
+The application already owns rotating file logging.
+
+### Dependency isolation
+
+Do not run `uv sync` against the generated AMD runtime.
+
+Do not rely on an ambiguous `uv run` invocation when testing that runtime.
+
+The custom CTranslate2 wheel is part of the validated AMD native runtime and
+must not be replaced accidentally by dependency resolution.
+
+The CPU `.venv` and isolated AMD runtime intentionally remain independent.

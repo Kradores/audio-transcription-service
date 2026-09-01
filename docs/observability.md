@@ -1075,3 +1075,79 @@ source=system_audio
 capture discontinuity detected; resetting processing state
 source=microphone
 ```
+
+
+## AMD transcription runtime
+
+AMD transcription observability must distinguish native runtime availability
+from normal transcription throughput.
+
+The AMD preparation scripts verify and report:
+
+```text
+CTranslate2 version
+loaded CTranslate2 DLL hash
+GPU count
+supported compute types
+real inference success
+model destruction
+process exit
+```
+
+The application-level runtime continues to use the normal transcription
+observability:
+
+```text
+transcription worker started
+transcription inference completed
+transcription completed
+transcript recorded
+transcription worker stopped
+transcription executor stopped
+```
+
+For the validated AMD runtime, healthy shutdown includes:
+
+```text
+Application shutdown requested
+        ↓
+source captures stop
+        ↓
+source pipelines stop
+        ↓
+accepted executor work drains
+        ↓
+transcription worker stops
+        ↓
+transcription executor stops
+        ↓
+conversation pipeline stops
+        ↓
+process exits
+```
+
+A `therock` initialization failure is not represented as degraded CPU
+operation.
+
+It is a startup failure.
+
+This distinction is intentional so operators cannot mistake silent CPU
+fallback for successful GPU acceleration.
+
+The same executor summary remains authoritative for capacity diagnosis.
+
+For the application-level AMD acceptance run:
+
+```text
+worker_count=1
+max_active_workers=1
+submitted=166
+completed=166
+rejected=0
+failed=0
+queue_high_water_mark=2
+avg_queue_wait=0.191
+```
+
+The AMD and CPU worker-count observations are hardware/runtime-specific
+operating points rather than universal performance guarantees.

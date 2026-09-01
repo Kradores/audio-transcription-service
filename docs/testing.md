@@ -511,3 +511,120 @@ All checks passed
 
 The two warnings originate from `torch.jit.load` under Python 3.14 and are not
 related to audio-device recovery.
+
+
+## AMD / TheRock transcription validation
+
+AMD support has multiple validation levels.
+
+They intentionally test different failure boundaries.
+
+### Normal preparation acceptance
+
+The normal entry point is:
+
+```powershell
+.\scripts\amd\prepare.ps1
+```
+
+This validates:
+
+- pinned build prerequisites;
+- exact CTranslate2 source revision;
+- HIP + Intel OpenMP native configuration;
+- native DLL dependencies;
+- custom wheel packaging;
+- fresh TheRock runtime installation;
+- exact script-produced CTranslate2 DLL loading;
+- GPU discovery;
+- `float16` support;
+- real Faster-Whisper inference;
+- model destruction;
+- child-process exit;
+- application dependency compatibility;
+- CPU-only PyTorch/Silero behavior;
+- preservation of the custom CTranslate2 runtime after application dependency
+  installation.
+
+Developers should not manually run every stage script for ordinary setup.
+
+Individual scripts remain directly executable for stage-specific diagnosis.
+
+### Sustained teardown regression
+
+The long-running native lifecycle test is:
+
+```powershell
+.\scripts\amd\test_long_runtime.ps1
+```
+
+or as part of complete preparation:
+
+```powershell
+.\scripts\amd\prepare.ps1 `
+    -RunLongValidation
+```
+
+The validated 20-minute run produced:
+
+```text
+transcriptions=1039
+duration_seconds=1200.3
+average_inference_seconds=1.155
+maximum_inference_seconds=1.633
+model_destruction_seconds=0.044
+exit_code=0
+```
+
+This test exists specifically because the original CTranslate2
+`OPENMP_RUNTIME=NONE` build could pass short inference tests and still deadlock
+during sustained-use teardown.
+
+A short smoke test is therefore not considered sufficient evidence for native
+shutdown correctness.
+
+### Real application AMD acceptance
+
+The final acceptance test must use the complete application:
+
+```text
+system_audio
++
+microphone
++
+CPU Silero
++
+per-source aggregation
++
+shared executor
++
+AMD Faster-Whisper
++
+SQLite persistence
+```
+
+The validated application run produced:
+
+```text
+system_audio frames_dropped=0
+system_audio segments_rejected=0
+
+microphone frames_dropped=0
+microphone segments_rejected=0
+
+worker_count=1
+submitted=166
+completed=166
+rejected=0
+failed=0
+queue_high_water_mark=2
+avg_queue_wait=0.191
+```
+
+Graceful shutdown completed after draining and persisting the final accepted
+transcription.
+
+The Python process then returned normally.
+
+This real application test is the final acceptance boundary for the current
+AMD integration.

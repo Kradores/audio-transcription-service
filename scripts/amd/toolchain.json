@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "platform": {
+    "os": "windows",
+    "architecture": "x86_64"
+  },
+  "required": {
+    "python": "3.14.6",
+    "ctranslate2": {
+      "version": "4.8.1",
+      "source_repository": "https://github.com/OpenNMT/CTranslate2.git",
+      "source_tag": "v4.8.1",
+      "source_commit": "0d8bcd362ac75ef860ef161d6f0efad0ae439ff0",
+      "hip_enabled": true,
+      "hip_architecture": "gfx1031",
+      "openmp_runtime": "INTEL"
+    },
+    "therock": {
+      "package_index": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "packages": {
+        "rocm": "10.1.0a20260829",
+        "rocm-sdk-core": "10.1.0a20260829",
+        "rocm-sdk-devel": "10.1.0a20260829",
+        "rocm-sdk-device-gfx1031": "10.1.0a20260829",
+        "rocm-sdk-libraries": "10.1.0a20260829"
+      }
+    },
+    "intel_oneapi": {
+      "version": "2026.1",
+      "artifacts": {
+        "openmp_import_library": {
+          "relative_path": "lib\\libiomp5md.lib",
+          "sha256": "F282D5C65DD65FF089DE7047BD5ADF901AD2356E14A9333F7BB122859F8F1EBF"
+        },
+        "openmp_runtime": {
+          "relative_path": "bin\\libiomp5md.dll",
+          "sha256": "EE527C978999653EB18EDC3EF372B4E95D4AD9A7691B6D08817BE9D38C7D0A02"
+        },
+        "openmp_header": {
+          "relative_path": "opt\\compiler\\include\\omp.h"
+        }
+      }
+    }
+  },
+  "observed_build_tools": {
+    "uv": "0.12.2",
+    "cmake": "4.4.2",
+    "ninja": "1.13.0.git.kitware.jobserver-pipe-1",
+    "amd_clang": {
+      "version": "24.0.0git",
+      "commit": "2aec646c60f9347e7fab6a27964f220615732ef4"
+    },
+    "hip": "7.16.26344-97ab4d1f88",
+    "msvc_compiler": "19.51.36256",
+    "msvc_linker": "14.51.36256.0"
+  },
+  "reference_artifacts": {
+    "ctranslate2_dll_sha256": "FC285C8654D40A22B79863D31BB013B05C75ECACFA26EADEDEA6BB4FBCF688DC",
+    "scripted_rebuild_ctranslate2_dll_sha256": "BB79CF683495CDC02BFB076549396B810CAFFECA1572E4C08AD2BEE842048188",
+    "packaged_libiomp5md_dll_sha256": "EE527C978999653EB18EDC3EF372B4E95D4AD9A7691B6D08817BE9D38C7D0A02",
+    "scripted_wheel_sha256": "7D0B5C04FFB53E387C296117F22519D0C1B356A3A207DC0504E992FB98A28429"
+  }
+}

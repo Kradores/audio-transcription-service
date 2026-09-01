@@ -18,6 +18,7 @@ from app.audio.protocols import AudioCapture
 from app.audio.timeline import MonotonicAudioTimeline
 from app.composition import (
     create_application,
+    create_faster_whisper_runtime_initializer,
     create_microphone_capture,
     create_normalizer,
     create_speech_pipeline,
@@ -27,8 +28,14 @@ from app.composition import (
     create_vad,
     create_whisper_model,
 )
+from app.core.config.enums import WhisperRuntime
 from app.services.transcription_executor import TranscriptionExecutor
 from app.transcription.contracts import AudioSource
+from app.transcription.faster_whisper_runtime import (
+    DefaultFasterWhisperRuntimeInitializer,
+    FasterWhisperRuntimeInitializer,
+    TheRockFasterWhisperRuntimeInitializer,
+)
 from app.vad.protocols import AudioVad
 from app.vad.silero import SileroVADAdapter
 from tests.unit.core.config.builders import SettingsBuilder, valid_configuration_document
@@ -373,19 +380,25 @@ def test_create_application_builds_two_source_pipelines_with_shared_executor(
     assert calls[1].kwargs["transcription_executor"] is transcription_executor
 
 
-@patch("app.composition.WhisperModel")
-def test_create_whisper_model_uses_transcription_worker_count(
-    whisper_model: MagicMock,
+@patch("app.composition.FasterWhisperModelFactory")
+def test_create_whisper_model_passes_configuration_to_factory(
+    factory_type: MagicMock,
 ) -> None:
-    settings = SettingsBuilder().with_transcription_worker_count(3).build()
+    settings = SettingsBuilder().with_whisper_runtime("therock").build()
 
-    create_whisper_model(settings)
+    model = MagicMock()
+    factory = factory_type.return_value
+    factory.create.return_value = model
 
-    whisper_model.assert_called_once_with(
-        settings.whisper.model.value,
+    result = create_whisper_model(settings)
+
+    assert result is model
+
+    factory.create.assert_called_once_with(
+        model=settings.whisper.model.value,
         device=settings.whisper.device.value,
         compute_type=settings.whisper.compute_type.value,
-        num_workers=3,
+        worker_count=settings.transcription.worker_count,
     )
 
 
@@ -500,3 +513,41 @@ def test_create_application_wires_shared_portaudio_refresh_coordinator(
 
     coordinator.register.assert_any_call(system_capture)
     coordinator.register.assert_any_call(microphone_capture)
+
+
+@pytest.mark.parametrize(
+    ("runtime", "expected_type"),
+    [
+        (
+            WhisperRuntime.DEFAULT,
+            DefaultFasterWhisperRuntimeInitializer,
+        ),
+        (
+            WhisperRuntime.THEROCK,
+            TheRockFasterWhisperRuntimeInitializer,
+        ),
+    ],
+)
+def test_create_faster_whisper_runtime_initializer_selects_configured_runtime(
+    runtime: WhisperRuntime,
+    expected_type: type[FasterWhisperRuntimeInitializer],
+) -> None:
+    initializer = create_faster_whisper_runtime_initializer(runtime)
+
+    assert isinstance(initializer, expected_type)
+
+
+@patch("app.composition.FasterWhisperModelFactory")
+def test_create_whisper_model_uses_configured_runtime(
+    factory_type: MagicMock,
+) -> None:
+    settings = SettingsBuilder().with_whisper_runtime("therock").build()
+
+    create_whisper_model(settings)
+
+    initializer = factory_type.call_args.kwargs["runtime_initializer"]
+
+    assert isinstance(
+        initializer,
+        TheRockFasterWhisperRuntimeInitializer,
+    )
