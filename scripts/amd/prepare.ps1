@@ -1,5 +1,3 @@
-# File: scripts/amd/prepare.ps1
-
 [CmdletBinding()]
 param(
     [switch]$Clean,
