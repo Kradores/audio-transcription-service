@@ -123,3 +123,27 @@ We have successfully completed:
 - ADR-041;
 - and we're now at 367 passing tests;
 - full quality gate: Ruff, mypy, pytest.
+
+
+## As of 2026-09-01
+
+**Implemented**
+
+- optional AMD GPU Faster-Whisper transcription on Windows;
+- TheRock/HIP runtime support for the validated `gfx1031` target;
+- custom CTranslate2 4.8.1 Windows HIP wheel;
+- Intel OpenMP CTranslate2 build fixing the sustained-use shutdown deadlock;
+- explicit `default` and `therock` Whisper runtime selection;
+- delayed CTranslate2/Faster-Whisper import after backend runtime initialization;
+- CPU Silero VAD + AMD GPU Whisper hybrid execution;
+- AMD transcription default of one executor worker;
+- fail-fast behavior for explicitly configured but unavailable TheRock runtime;
+- reproducible AMD prerequisite, source, build, wheel, smoke, sustained, and
+  application-runtime validation scripts;
+- single normal AMD preparation entry point:
+  `scripts/amd/prepare.ps1`;
+- 20-minute sustained GPU teardown validation;
+- complete two-source real application AMD acceptance with zero capture drops,
+  zero transcription rejection, zero transcription failures, and clean
+  shutdown;
+- ADR-044.

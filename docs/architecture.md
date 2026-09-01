@@ -93,44 +93,6 @@ audio-transcription-service/
 └── LICENSE
 ```
 
-## Audio architecture (partial)
-```
-                         Application
-                              │
-                              ▼
-                     ┌─────────────────┐
-                     │  AudioCapture   │
-                     │   abstraction   │
-                     └────────┬────────┘
-                              │
-                              ▼
-                  ┌──────────────────────┐
-                  │ WASAPIAudioCapture   │
-                  │      adapter         │
-                  └──────────┬───────────┘
-                             │
-                             ▼
-                     PyAudioWPatch
-                             │
-                             ▼
-                       Windows WASAPI
-                             │
-                             ▼
-                    Default output mix
-                             │
-                             ▼
-                    ┌─────────────────┐
-                    │ Audio frames    │
-                    │ + timestamps    │
-                    └────────┬────────┘
-                             │
-                             ▼
-                       Audio Pipeline
-                             │
-                             ▼
-                      VAD → Whisper
-```
-
 
 ## Current capture decisions
 | Area                        | Decision                                     |
@@ -272,9 +234,26 @@ The `Transcriber` contract remains synchronous. The worker is responsible for
 executing that synchronous contract without blocking the real-time processing
 path.
 
-The initial implementation uses a single transcription worker. Additional
-workers are not introduced unless runtime measurements demonstrate that a
-single worker cannot maintain the required throughput.
+The transcription executor owns one or more configured transcription workers.
+
+Workers execute the synchronous `Transcriber` contract without blocking either
+real-time source-processing path.
+
+The worker count is runtime configuration rather than a fixed architectural
+constant.
+
+The currently validated defaults are:
+
+```text
+CPU Faster-Whisper:
+worker_count=2
+
+AMD/TheRock Faster-Whisper:
+worker_count=1
+```
+
+All workers use the shared model ownership established by the transcription
+composition while retaining worker-local transcriber wrappers.
 
 The capture transport remains responsible for buffering native audio frames.
 It is not used as the primary buffering mechanism for transcription latency.
@@ -355,7 +334,7 @@ TranscriptionSegmentAggregator  TranscriptionSegmentAggregator
              shared TranscriptionExecutor
                     bounded queue
                          │
-                  worker_count = 2
+                  configured worker count
                     ┌────┴────┐
                     ▼         ▼
                  worker 1  worker 2
@@ -451,3 +430,67 @@ Both processing paths receive a discontinuity because both native sessions are
 refreshed.
 
 The shared conversation timeline is not reset.
+
+
+## Faster-Whisper runtime architecture
+
+Faster-Whisper has an application-owned runtime-selection boundary.
+
+```text
+                          Whisper configuration
+                                  │
+                     ┌────────────┴────────────┐
+                     │                         │
+                  default                   therock
+                     │                         │
+                     ▼                         ▼
+              no-op runtime            TheRock initializer
+                initializer                    │
+                     │                preload HIP libraries
+                     │                         │
+                     └────────────┬────────────┘
+                                  ▼
+                      FasterWhisperFactory
+                         delayed imports
+                                  │
+                                  ▼
+                        shared Whisper model
+                                  │
+                                  ▼
+                    TranscriptionExecutor
+```
+
+The runtime initializer executes before CTranslate2/Faster-Whisper imports.
+
+This is required for the TheRock backend because its native HIP libraries must
+be available before CTranslate2 loads its native DLL.
+
+AMD acceleration is intentionally limited to the transcription backend.
+
+The complete ML execution model is:
+
+```text
+Audio
+  ↓
+Silero VAD
+  ↓
+CPU PyTorch
+  ↓
+Speech segments
+  ↓
+Faster-Whisper
+  ↓
+CTranslate2
+  ↓
+TheRock / HIP
+  ↓
+AMD GPU
+```
+
+Silero does not depend on the AMD GPU runtime.
+
+An explicitly configured `therock` runtime is required to initialize
+successfully.
+
+Backend failure is a startup error and does not silently switch the
+transcription backend to CPU.
