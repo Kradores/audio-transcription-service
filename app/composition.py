@@ -52,8 +52,6 @@ from app.vad.assembler import SpeechSegmentAssemblerImpl
 from app.vad.protocols import AudioVad, SpeechSegmentAssembler
 from app.vad.silero import SileroVADAdapter
 
-# app/composition.py
-
 
 def create_application(
     config_path: Path = DEFAULT_CONFIGURATION_PATH,
@@ -149,6 +147,7 @@ def create_source_pipeline(
 
     aggregator = TranscriptionSegmentAggregatorImpl(
         settings.transcription.aggregation,
+        source=source,
     )
 
     return create_speech_pipeline(

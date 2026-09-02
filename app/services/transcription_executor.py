@@ -364,18 +364,25 @@ class TranscriptionExecutorImpl:
                         )
 
                     logger.info(
-                        "transcription completed worker_id=%d source=%s start=%.3f end=%.3f",
+                        "transcription completed worker_id=%d source=%s "
+                        "start=%.3f end=%.3f duration=%.3f "
+                        "language=%s confidence=%s",
                         worker_id,
                         item.source.value,
                         result.start,
                         result.end,
+                        result.end - result.start,
+                        result.language,
+                        (f"{result.confidence:.3f}" if result.confidence is not None else "none"),
                     )
 
                     logger.debug(
-                        "transcription result worker_id=%d source=%s language=%s text=%r",
+                        "transcription result worker_id=%d source=%s "
+                        "language=%s confidence=%s text=%r",
                         worker_id,
                         item.source.value,
                         result.language,
+                        result.confidence,
                         result.text,
                     )
 

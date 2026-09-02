@@ -13,8 +13,13 @@ class FakeWhisperSegment:
 
 
 class FakeWhisperInfo:
-    def __init__(self, language: str) -> None:
+    def __init__(
+        self,
+        language: str,
+        language_probability: float,
+    ) -> None:
         self.language = language
+        self.language_probability = language_probability
 
 
 class FakeWhisperModel:
@@ -22,9 +27,11 @@ class FakeWhisperModel:
         self,
         segments: Iterable[FakeWhisperSegment],
         language: str,
+        language_probability: float = 0.9,
     ) -> None:
         self._segments = tuple(segments)
         self._language = language
+        self._language_probability = language_probability
         self.received_audio: np.ndarray | None = None
 
     def transcribe(
@@ -35,7 +42,10 @@ class FakeWhisperModel:
 
         return (
             iter(self._segments),
-            FakeWhisperInfo(self._language),
+            FakeWhisperInfo(
+                self._language,
+                self._language_probability,
+            ),
         )
 
 
@@ -77,7 +87,7 @@ def test_transcribe_returns_segment_level_result() -> None:
     # Assert
     assert result.text == "Hello world"
     assert result.language == "en"
-    assert result.confidence is None
+    assert result.confidence == 0.9
     assert result.start == 10.0
     assert result.end == 11.0
 
@@ -143,5 +153,8 @@ def test_transcribe_logs_inference_timing_and_result(
     assert any(
         "transcription started start=10.000 duration=1.000" in message for message in messages
     )
-    assert any("transcription inference completed" in message for message in messages)
+    assert any(
+        "transcription inference completed" in message and "language_probability=0.900" in message
+        for message in messages
+    )
     assert result.text == "Hello"

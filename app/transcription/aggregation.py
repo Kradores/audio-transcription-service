@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 
 import numpy as np
@@ -7,7 +8,12 @@ import numpy as np
 from app.audio.contracts import SpeechSegment
 from app.core.config.constants import PROCESSING_FRAME_DURATION_SECONDS
 from app.core.config.models import TranscriptionAggregationSettings
-from app.transcription.contracts import TranscriptionSegmentAggregatorStats
+from app.transcription.contracts import (
+    AudioSource,
+    TranscriptionSegmentAggregatorStats,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class TranscriptionSegmentAggregatorImpl:
@@ -16,9 +22,13 @@ class TranscriptionSegmentAggregatorImpl:
     def __init__(
         self,
         settings: TranscriptionAggregationSettings,
+        *,
+        source: AudioSource,
     ) -> None:
         self._settings = settings
+        self._source = source
         self._pending: SpeechSegment | None = None
+        self._pending_semantic_segments = 0
 
         self._segments_received = 0
         self._segments_emitted = 0
@@ -44,12 +54,18 @@ class TranscriptionSegmentAggregatorImpl:
         self._segments_received += 1
 
         if not self._settings.enabled:
-            return self._emit(segment)
+            return self._emit(
+                segment,
+                semantic_segments=1,
+            )
 
         pending = self._pending
 
         if pending is None:
-            return self._handle_new_pending_candidate(segment)
+            return self._handle_new_pending_candidate(
+                segment,
+                semantic_segments=1,
+            )
 
         gap_seconds = self._gap_seconds(
             pending,
@@ -71,7 +87,10 @@ class TranscriptionSegmentAggregatorImpl:
 
                 return (
                     *emitted,
-                    *self._handle_new_pending_candidate(segment),
+                    *self._handle_new_pending_candidate(
+                        segment,
+                        semantic_segments=1,
+                    ),
                 )
 
             trim_samples = self._overlap_samples(
@@ -84,7 +103,10 @@ class TranscriptionSegmentAggregatorImpl:
 
                 return (
                     *emitted,
-                    *self._handle_new_pending_candidate(segment),
+                    *self._handle_new_pending_candidate(
+                        segment,
+                        semantic_segments=1,
+                    ),
                 )
 
         if gap_seconds > self._settings.max_gap_seconds:
@@ -92,7 +114,10 @@ class TranscriptionSegmentAggregatorImpl:
 
             return (
                 *emitted,
-                *self._handle_new_pending_candidate(segment),
+                *self._handle_new_pending_candidate(
+                    segment,
+                    semantic_segments=1,
+                ),
             )
 
         gap_samples = 0
@@ -114,7 +139,10 @@ class TranscriptionSegmentAggregatorImpl:
 
             return (
                 *emitted,
-                *self._handle_new_pending_candidate(segment),
+                *self._handle_new_pending_candidate(
+                    segment,
+                    semantic_segments=1,
+                ),
             )
 
         combined = self._combine(
@@ -124,10 +152,16 @@ class TranscriptionSegmentAggregatorImpl:
             trim_samples=trim_samples,
         )
 
+        semantic_segments = self._pending_semantic_segments + 1
+
         self._segments_combined += 1
         self._pending = None
+        self._pending_semantic_segments = 0
 
-        return self._handle_new_pending_candidate(combined)
+        return self._handle_new_pending_candidate(
+            combined,
+            semantic_segments=semantic_segments,
+        )
 
     def advance(
         self,
@@ -155,12 +189,21 @@ class TranscriptionSegmentAggregatorImpl:
         if pending is None:
             return ()
 
+        semantic_segments = self._pending_semantic_segments
+
         self._pending = None
-        return self._emit(pending)
+        self._pending_semantic_segments = 0
+
+        return self._emit(
+            pending,
+            semantic_segments=semantic_segments,
+        )
 
     def _emit(
         self,
         segment: SpeechSegment,
+        *,
+        semantic_segments: int,
     ) -> tuple[SpeechSegment, ...]:
         self._segments_emitted += 1
         self._output_seconds_total += segment.duration
@@ -169,19 +212,37 @@ class TranscriptionSegmentAggregatorImpl:
             segment.duration,
         )
 
+        logger.info(
+            "transcription aggregate emitted "
+            "source=%s start=%.3f duration=%.3f end=%.3f "
+            "semantic_segments=%d combined=%s",
+            self._source.value,
+            segment.timestamp,
+            segment.duration,
+            segment.timestamp + segment.duration,
+            semantic_segments,
+            semantic_segments > 1,
+        )
+
         return (segment,)
 
     def _handle_new_pending_candidate(
         self,
         segment: SpeechSegment,
+        *,
+        semantic_segments: int,
     ) -> tuple[SpeechSegment, ...]:
         if (
             segment.duration >= self._settings.target_duration_seconds
             or self._settings.max_wait_seconds == 0.0
         ):
-            return self._emit(segment)
+            return self._emit(
+                segment,
+                semantic_segments=semantic_segments,
+            )
 
         self._pending = segment
+        self._pending_semantic_segments = semantic_segments
         return ()
 
     @staticmethod

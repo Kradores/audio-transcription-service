@@ -34,18 +34,19 @@ class FasterWhisperTranscriber:
         result = TranscriptionResult(
             text=text,
             language=info.language,
-            confidence=None,
+            confidence=info.language_probability,
             start=segment.timestamp,
             end=segment.timestamp + segment.duration,
         )
 
         logger.info(
             "transcription inference completed start=%.3f duration=%.3f "
-            "inference_duration=%.3f language=%s",
+            "inference_duration=%.3f language=%s language_probability=%.3f",
             segment.timestamp,
             segment.duration,
             time.perf_counter() - started_at,
             result.language,
+            info.language_probability,
         )
         logger.debug(
             "transcription result start=%.3f end=%.3f text=%r",

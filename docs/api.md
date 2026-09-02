@@ -55,7 +55,8 @@ start
 end
 ```
 with:
-- `confidence`: optional `float`;
+- `confidence`: optional normalized `float`; its concrete meaning is adapter-defined;
+- for `FasterWhisperTranscriber`, `confidence` is the detected-language probability returned by Faster-Whisper and is **not** a transcript-text accuracy score;
 - `start` / `end`: transcription segment timestamps;
 - represents one complete `SpeechSegment` transcription.
 

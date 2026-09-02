@@ -25,6 +25,7 @@ class WhisperInfoProtocol(Protocol):
     """Minimal transcription metadata exposed by Faster-Whisper."""
 
     language: str
+    language_probability: float
 
 
 class WhisperModelProtocol(Protocol):

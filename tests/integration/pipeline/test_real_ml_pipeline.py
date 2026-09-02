@@ -95,6 +95,7 @@ async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None
 
     aggregator = TranscriptionSegmentAggregatorImpl(
         settings.transcription.aggregation,
+        source=AudioSource.SYSTEM_AUDIO,
     )
 
     database = sqlite3.connect(":memory:")

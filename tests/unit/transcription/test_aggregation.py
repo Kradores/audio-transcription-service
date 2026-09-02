@@ -6,6 +6,7 @@ import pytest
 from app.audio.contracts import AudioFormat, SpeechSegment
 from app.core.config.models import TranscriptionAggregationSettings
 from app.transcription.aggregation import TranscriptionSegmentAggregatorImpl
+from app.transcription.contracts import AudioSource
 
 SAMPLE_RATE = 16_000
 
@@ -59,6 +60,7 @@ def test_short_segment_is_buffered() -> None:
     # Arrange
     aggregator = TranscriptionSegmentAggregatorImpl(
         create_settings(),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     segment = create_segment(duration=1.0)
 
@@ -77,6 +79,7 @@ def test_segment_at_target_duration_is_emitted_immediately() -> None:
         create_settings(
             target_duration_seconds=5.0,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     segment = create_segment(duration=5.0)
 
@@ -93,6 +96,7 @@ def test_segment_above_target_duration_is_emitted_immediately() -> None:
         create_settings(
             target_duration_seconds=5.0,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     segment = create_segment(duration=7.0)
 
@@ -107,6 +111,7 @@ def test_flush_emits_pending_segment() -> None:
     # Arrange
     aggregator = TranscriptionSegmentAggregatorImpl(
         create_settings(),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     segment = create_segment(duration=1.0)
 
@@ -123,6 +128,7 @@ def test_flush_clears_pending_segment() -> None:
     # Arrange
     aggregator = TranscriptionSegmentAggregatorImpl(
         create_settings(),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     segment = create_segment(duration=1.0)
 
@@ -143,6 +149,7 @@ def test_advance_does_not_emit_before_max_wait_expires() -> None:
         create_settings(
             max_wait_seconds=2.0,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     segment = create_segment(
         timestamp=10.0,
@@ -164,6 +171,7 @@ def test_advance_emits_when_max_wait_expires() -> None:
         create_settings(
             max_wait_seconds=2.0,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     segment = create_segment(
         timestamp=10.0,
@@ -185,6 +193,7 @@ def test_advance_clears_expired_pending_segment() -> None:
         create_settings(
             max_wait_seconds=2.0,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     segment = create_segment(
         timestamp=10.0,
@@ -208,6 +217,7 @@ def test_disabled_aggregation_emits_segment_immediately() -> None:
         create_settings(
             enabled=False,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     segment = create_segment(duration=1.0)
 
@@ -224,6 +234,7 @@ def test_zero_max_wait_emits_short_segment_immediately() -> None:
         create_settings(
             max_wait_seconds=0.0,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     segment = create_segment(duration=1.0)
 
@@ -240,6 +251,7 @@ def test_second_segment_does_not_replace_pending_segment() -> None:
         create_settings(
             max_gap_seconds=1.5,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -266,6 +278,7 @@ def test_stats_describe_received_and_emitted_segments() -> None:
     # Arrange
     aggregator = TranscriptionSegmentAggregatorImpl(
         create_settings(),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     short_segment = create_segment(
         timestamp=10.0,
@@ -297,6 +310,7 @@ def test_stats_snapshot_is_immutable() -> None:
     # Arrange
     aggregator = TranscriptionSegmentAggregatorImpl(
         create_settings(),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     stats = aggregator.stats
 
@@ -309,6 +323,7 @@ def test_stats_are_returned_as_snapshots() -> None:
     # Arrange
     aggregator = TranscriptionSegmentAggregatorImpl(
         create_settings(),
+        source=AudioSource.SYSTEM_AUDIO,
     )
 
     before = aggregator.stats
@@ -334,6 +349,7 @@ def test_contiguous_short_segments_are_combined() -> None:
         create_settings(
             target_duration_seconds=5.0,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -379,6 +395,7 @@ def test_combined_segment_is_emitted_when_target_is_reached() -> None:
         create_settings(
             target_duration_seconds=5.0,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -412,6 +429,7 @@ def test_multiple_contiguous_segments_are_combined_until_target() -> None:
         create_settings(
             target_duration_seconds=5.0,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -466,6 +484,7 @@ def test_segment_is_not_combined_when_max_duration_would_be_exceeded() -> None:
             target_duration_seconds=8.0,
             max_duration_seconds=10.0,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -496,6 +515,7 @@ def test_combination_may_reach_exact_max_duration() -> None:
             target_duration_seconds=10.0,
             max_duration_seconds=10.0,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -523,6 +543,7 @@ def test_positive_gap_is_filled_with_silence() -> None:
             target_duration_seconds=5.0,
             max_gap_seconds=1.5,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -576,6 +597,7 @@ def test_small_overlap_is_trimmed_and_segments_are_combined() -> None:
         create_settings(
             target_duration_seconds=5.0,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -624,6 +646,7 @@ def test_stats_count_combined_input_segments() -> None:
         create_settings(
             target_duration_seconds=5.0,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
 
     first = create_segment(
@@ -660,6 +683,7 @@ def test_half_second_gap_inserts_exact_sample_count() -> None:
     # Arrange
     aggregator = TranscriptionSegmentAggregatorImpl(
         create_settings(),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -692,6 +716,7 @@ def test_gap_equal_to_max_gap_is_combined() -> None:
             target_duration_seconds=5.0,
             max_gap_seconds=1.5,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -722,6 +747,7 @@ def test_gap_above_max_gap_forms_boundary() -> None:
         create_settings(
             max_gap_seconds=1.5,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -749,6 +775,7 @@ def test_synthesized_gap_counts_toward_target_duration() -> None:
             target_duration_seconds=5.0,
             max_gap_seconds=1.5,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -782,6 +809,7 @@ def test_synthesized_gap_counts_toward_max_duration() -> None:
             max_duration_seconds=10.0,
             max_gap_seconds=1.5,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -808,6 +836,7 @@ def test_stats_include_synthesized_silence_in_output_duration() -> None:
         create_settings(
             target_duration_seconds=5.0,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -838,6 +867,7 @@ def test_overlap_equal_to_processing_frame_duration_is_combined() -> None:
     # Arrange
     aggregator = TranscriptionSegmentAggregatorImpl(
         create_settings(),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -865,6 +895,7 @@ def test_overlap_above_processing_frame_duration_forms_boundary() -> None:
     # Arrange
     aggregator = TranscriptionSegmentAggregatorImpl(
         create_settings(),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -891,6 +922,7 @@ def test_trimmed_overlap_counts_toward_actual_target_duration() -> None:
         create_settings(
             target_duration_seconds=2.0,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -918,6 +950,7 @@ def test_trimmed_overlap_uses_actual_duration_for_maximum() -> None:
             target_duration_seconds=1.99,
             max_duration_seconds=1.99,
         ),
+        source=AudioSource.SYSTEM_AUDIO,
     )
     first = create_segment(
         timestamp=10.0,
@@ -936,3 +969,62 @@ def test_trimmed_overlap_uses_actual_duration_for_maximum() -> None:
     # Assert
     assert len(result) == 1
     assert result[0].duration == pytest.approx(1.99)
+
+
+def test_emitted_aggregate_logs_source_and_semantic_segment_count(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(),
+        source=AudioSource.MICROPHONE,
+    )
+    first = create_segment(
+        timestamp=10.0,
+        duration=1.0,
+    )
+    second = create_segment(
+        timestamp=11.0,
+        duration=1.0,
+    )
+
+    # Act
+    with caplog.at_level(
+        "INFO",
+        logger="app.transcription.aggregation",
+    ):
+        assert aggregator.process(first) == ()
+        assert aggregator.process(second) == ()
+        aggregator.flush()
+
+    # Assert
+    messages = [record.getMessage() for record in caplog.records]
+
+    assert any(
+        "transcription aggregate emitted "
+        "source=microphone start=10.000 duration=2.000 end=12.000 "
+        "semantic_segments=2 combined=True" in message
+        for message in messages
+    )
+
+
+def test_single_segment_aggregate_logs_not_combined(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Arrange
+    aggregator = TranscriptionSegmentAggregatorImpl(
+        create_settings(target_duration_seconds=1.0),
+        source=AudioSource.MICROPHONE,
+    )
+
+    # Act
+    with caplog.at_level(
+        "INFO",
+        logger="app.transcription.aggregation",
+    ):
+        aggregator.process(create_segment(duration=1.0))
+
+    # Assert
+    messages = [record.getMessage() for record in caplog.records]
+
+    assert any("semantic_segments=1 combined=False" in message for message in messages)

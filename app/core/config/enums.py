@@ -41,5 +41,5 @@ class WhisperModel(StrEnum):
     BASE = "base"
     SMALL = "small"
     MEDIUM = "medium"
-    LARGE = "large"
+    LARGE = "large-v3"
     TURBO = "turbo"

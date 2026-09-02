@@ -907,7 +907,8 @@ async def test_executor_completion_log_includes_worker_identity(
 
     assert any(
         "transcription completed "
-        "worker_id=1 source=microphone start=3.000 end=4.000" in record.getMessage()
+        "worker_id=1 source=microphone start=3.000 end=4.000 "
+        "duration=1.000 language=en confidence=none" in record.getMessage()
         for record in caplog.records
     )
 

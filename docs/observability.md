@@ -383,7 +383,7 @@ Individual executor-worker logs include:
 
 ```text
 transcription worker started worker_id=...
-transcription completed worker_id=... source=... start=... end=...
+transcription completed worker_id=... source=... start=... end=... duration=... language=... confidence=...
 transcription execution failed worker_id=... source=... start=... end=...
 transcription worker stopped worker_id=...
 ```
@@ -414,10 +414,16 @@ with:
 - segment start;
 - segment duration;
 - inference duration;
-- detected language.
+- detected language;
+- detected-language probability.
+
+For the Faster-Whisper adapter, `TranscriptionResult.confidence` is populated
+from Faster-Whisper's language probability. It therefore represents confidence
+in the detected language, not confidence that the transcript text is correct.
 
 These logs are useful for investigating individual unusually slow or
-incorrect transcriptions.
+incorrect transcriptions and for correlating short inputs with unstable
+language detection.
 
 Long-running throughput analysis should primarily use the aggregate
 `TranscriptionExecutor` statistics.
@@ -650,6 +656,22 @@ by `TranscriptionSegmentAggregator` toward `TranscriptionExecutor`.
 `segments_rejected` counts transcription segments rejected by the shared
 executor after aggregation.
 
+Each emitted transcription aggregate also logs:
+
+```text
+transcription aggregate emitted
+source=...
+start=...
+duration=...
+end=...
+semantic_segments=...
+combined=...
+```
+
+`semantic_segments` is the number of completed assembler segments represented
+by that transcription work unit. `combined=True` therefore identifies a
+work item that was formed from multiple semantic speech segments.
+
 This allows runtime diagnosis across:
 
 semantic segmentation
@@ -700,7 +722,7 @@ Worker lifecycle and execution logs include diagnostic worker identity:
 
 ```text
 transcription worker started worker_id=...
-transcription completed worker_id=... source=... start=... end=...
+transcription completed worker_id=... source=... start=... end=... duration=... language=... confidence=...
 transcription execution failed worker_id=... source=... start=... end=...
 transcription worker stopped worker_id=...
 ```
