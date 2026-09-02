@@ -41,7 +41,7 @@ function Invoke-AmdScript {
         [Parameter(Mandatory)]
         [string]$ScriptName,
 
-        [string[]]$Arguments = @()
+        [hashtable]$Arguments = @{}
     )
 
     $scriptPath = Join-Path `
@@ -86,12 +86,11 @@ Invoke-AmdScript `
     -ScriptName "test_prerequisites.ps1"
 
 
-$prepareArguments = @()
+$prepareArguments = @{}
 
 if ($Clean) {
-    $prepareArguments += "-Clean"
+    $prepareArguments["Clean"] = $true
 }
-
 
 Invoke-AmdScript `
     -Description "Prepare pinned CTranslate2 source and build workspace" `
@@ -117,10 +116,9 @@ if ($RunLongValidation) {
             "($LongValidationMinutes minutes)"
         ) `
         -ScriptName "test_long_runtime.ps1" `
-        -Arguments @(
-            "-DurationMinutes",
-            "$LongValidationMinutes"
-        )
+        -Arguments @{
+            DurationMinutes = $LongValidationMinutes
+        }
 }
 
 

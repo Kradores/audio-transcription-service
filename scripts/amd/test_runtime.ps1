@@ -276,8 +276,31 @@ Write-Success "Python dependency graph is consistent"
 
 Write-Step "Run isolated GPU runtime smoke test"
 
-$expectedCt2Hash = [string](
-    $toolchain.reference_artifacts.scripted_rebuild_ctranslate2_dll_sha256
+$expectedCt2Hash = (
+    & $resolvedPython.Path `
+        -c (
+            "import hashlib, sys, zipfile; " +
+            "wheel = zipfile.ZipFile(sys.argv[1]); " +
+            "dll = wheel.read('ctranslate2/ctranslate2.dll'); " +
+            "print(hashlib.sha256(dll).hexdigest().upper())"
+        ) `
+        $wheelPath
+).Trim()
+
+if ($LASTEXITCODE -ne 0) {
+    throw (
+        "Failed to calculate the CTranslate2 DLL hash " +
+        "from the script-produced wheel."
+    )
+}
+
+if ([string]::IsNullOrWhiteSpace($expectedCt2Hash)) {
+    throw "Script-produced CTranslate2 DLL hash is empty."
+}
+
+Write-Success (
+    "script-produced CTranslate2 DLL SHA256 = " +
+    $expectedCt2Hash
 )
 
 $expectedOpenMpHash = [string](

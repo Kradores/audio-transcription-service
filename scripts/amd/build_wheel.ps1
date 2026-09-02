@@ -246,17 +246,77 @@ Assert-FileExists `
     -Description "wheel build Python"
 
 
+$wheelBuild = $toolchain.required.python_wheel_build
+
 & uv pip install `
     --python $wheelPythonPath `
-    "pybind11==2.11.1" `
-    "setuptools" `
-    "wheel"
+    (
+        "pybind11==" +
+        $wheelBuild.pybind11
+    ) `
+    (
+        "setuptools==" +
+        $wheelBuild.setuptools
+    ) `
+    (
+        "wheel==" +
+        $wheelBuild.wheel
+    )
 
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to install wheel build dependencies."
 }
 
 Write-Success "wheel build dependencies installed"
+
+
+Write-Step "Validate Python wheel build toolchain"
+
+@'
+import importlib.metadata
+from pathlib import Path
+
+import pybind11
+import setuptools
+import wheel
+
+if setuptools.__file__ is None:
+    raise RuntimeError(
+        "setuptools resolved as a namespace package instead "
+        "of a real installation."
+    )
+
+from distutils._msvccompiler import MSVCCompiler
+
+print(
+    "pybind11_version =",
+    importlib.metadata.version("pybind11"),
+)
+print(
+    "setuptools_version =",
+    importlib.metadata.version("setuptools"),
+)
+print(
+    "setuptools_path =",
+    Path(setuptools.__file__).resolve(),
+)
+print(
+    "wheel_version =",
+    importlib.metadata.version("wheel"),
+)
+print(
+    "msvc_compiler =",
+    MSVCCompiler.__module__,
+)
+
+print("Python wheel build toolchain validated.")
+'@ | & $wheelPythonPath -
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Python wheel build toolchain validation failed."
+}
+
+Write-Success "Python wheel build toolchain validated"
 
 
 foreach ($commandName in @(

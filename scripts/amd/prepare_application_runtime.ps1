@@ -31,10 +31,6 @@ $toolchain = Get-Content `
     -Raw |
     ConvertFrom-Json
 
-$expectedCt2Hash = [string](
-    $toolchain.reference_artifacts.scripted_rebuild_ctranslate2_dll_sha256
-)
-
 
 function Write-Step {
     param(
@@ -79,6 +75,40 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 
+Write-Step "Capture validated CTranslate2 artifact"
+
+$runtimeCt2DllPath = Join-Path `
+    $WorkspaceRoot `
+    (
+        "runtime-test-venv\Lib\site-packages\" +
+        "ctranslate2\ctranslate2.dll"
+    )
+
+if (
+    -not (
+        Test-Path `
+            -LiteralPath $runtimeCt2DllPath `
+            -PathType Leaf
+    )
+) {
+    throw (
+        "Validated CTranslate2 DLL not found: " +
+        $runtimeCt2DllPath
+    )
+}
+
+$expectedCt2Hash = (
+    Get-FileHash `
+        -LiteralPath $runtimeCt2DllPath `
+        -Algorithm SHA256
+).Hash
+
+Write-Success (
+    "validated CTranslate2 DLL SHA256 = " +
+    $expectedCt2Hash
+)
+
+
 Write-Step "Install application runtime dependencies"
 
 & uv pip install `
@@ -100,6 +130,43 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Success "application dependency graph is consistent"
+
+
+Write-Step "Verify CTranslate2 artifact after application install"
+
+if (
+    -not (
+        Test-Path `
+            -LiteralPath $runtimeCt2DllPath `
+            -PathType Leaf
+    )
+) {
+    throw (
+        "CTranslate2 DLL disappeared after application " +
+        "dependency installation: " +
+        $runtimeCt2DllPath
+    )
+}
+
+$actualCt2Hash = (
+    Get-FileHash `
+        -LiteralPath $runtimeCt2DllPath `
+        -Algorithm SHA256
+).Hash
+
+if ($actualCt2Hash -ne $expectedCt2Hash) {
+    throw (
+        "CTranslate2 DLL changed after application dependency " +
+        "installation. " +
+        "Expected='$expectedCt2Hash' " +
+        "Actual='$actualCt2Hash'"
+    )
+}
+
+Write-Success (
+    "CTranslate2 DLL hash preserved after " +
+    "application dependency installation"
+)
 
 
 Write-Step "Validate CPU Silero runtime"

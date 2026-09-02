@@ -15,6 +15,11 @@
       "hip_architecture": "gfx1031",
       "openmp_runtime": "INTEL"
     },
+    "python_wheel_build": {
+      "pybind11": "2.11.1",
+      "setuptools": "80.10.2",
+      "wheel": "0.47.0"
+    },
     "therock": {
       "package_index": "https://nightly.repo.amd.com/rocm/whl-next/",
       "packages": {
