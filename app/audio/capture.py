@@ -315,7 +315,7 @@ class PyAudioCapture(AudioCapture):
         self._device_change_generation = 0
 
         self._started = False
-        self._next_frame_timestamp: float | None = None
+        self._portaudio_timeline_offset: float | None = None
         self._discontinuity_handler: Callable[[], None] | None = None
         self._recovery_active = False
         self._capture_frame_duration_logged = False
@@ -332,7 +332,7 @@ class PyAudioCapture(AudioCapture):
         self._started = True
         self._event_loop = asyncio.get_running_loop()
 
-        self._next_frame_timestamp = None
+        self._portaudio_timeline_offset = None
         self._recovery_active = False
         self._capture_frame_duration_logged = False
         self._device_change_event.clear()
@@ -432,9 +432,23 @@ class PyAudioCapture(AudioCapture):
         finally:
             self._portaudio_refresh_active = False
 
+    def _map_portaudio_timestamp(
+        self,
+        time_info: dict[str, float],
+    ) -> float:
+        input_time = time_info["input_buffer_adc_time"]
+        current_time = time_info["current_time"]
+
+        if self._portaudio_timeline_offset is None:
+            self._portaudio_timeline_offset = self._timeline.now() - current_time
+
+        timestamp = input_time + self._portaudio_timeline_offset
+
+        return max(0.0, timestamp)
+
     async def _open_fresh_stream(self) -> None:
         self._dispose_audio_session()
-        self._next_frame_timestamp = None
+        self._portaudio_timeline_offset = None
 
         audio = self._audio_factory.create()
         device_provider = self._device_provider_factory.create(audio)
@@ -509,20 +523,24 @@ class PyAudioCapture(AudioCapture):
 
     def _create_frame(
         self,
+        *,
         in_data: bytes,
         frame_count: int,
+        time_info: dict[str, float],
     ) -> AudioFrame:
         if self._format is None:
             raise RuntimeError("capture format is not initialized")
 
-        audio = np.frombuffer(in_data, dtype=np.int16).reshape(
+        audio = np.frombuffer(
+            in_data,
+            dtype=np.int16,
+        ).reshape(
             frame_count,
             self._format.channels,
         )
 
-        timestamp = self._next_timestamp(
-            frame_count=frame_count,
-            sample_rate=self._format.sample_rate,
+        timestamp = self._map_portaudio_timestamp(
+            time_info,
         )
 
         return AudioFrame(
@@ -538,7 +556,7 @@ class PyAudioCapture(AudioCapture):
         time_info: dict[str, float],
         status_flags: int,
     ) -> tuple[None, int]:
-        del time_info, status_flags
+        del status_flags
 
         if not self._capture_frame_duration_logged:
             if self._format is None:
@@ -557,6 +575,7 @@ class PyAudioCapture(AudioCapture):
         frame = self._create_frame(
             in_data=in_data,
             frame_count=frame_count,
+            time_info=time_info,
         )
 
         self._transport.submit(frame)
@@ -701,26 +720,6 @@ class PyAudioCapture(AudioCapture):
     ) -> None:
         self._mark_recovery_started(reason=reason)
         self._dispose_audio_session()
-
-    def _next_timestamp(
-        self,
-        *,
-        frame_count: int,
-        sample_rate: int,
-    ) -> float:
-        frame_duration = frame_count / sample_rate
-
-        if self._next_frame_timestamp is None:
-            timestamp = max(
-                0.0,
-                self._timeline.now() - frame_duration,
-            )
-        else:
-            timestamp = self._next_frame_timestamp
-
-        self._next_frame_timestamp = timestamp + frame_duration
-
-        return timestamp
 
     async def _wait_for_recovery_retry(
         self,

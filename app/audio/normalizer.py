@@ -13,6 +13,8 @@ from app.audio.protocols import AudioResampler, AudioResamplerFactory
 from app.core.config.constants import PROCESSING_FRAME_DURATION_SECONDS
 from app.core.config.models import AudioProcessingSettings
 
+_INPUT_TIMESTAMP_TOLERANCE_SECONDS = PROCESSING_FRAME_DURATION_SECONDS
+
 
 class AudioNormalizerImpl:
     """Normalize captured audio into fixed-size processing frames."""
@@ -40,11 +42,13 @@ class AudioNormalizerImpl:
         self._resampler: AudioResampler | None = None
         self._input_sample_rate: int | None = None
         self._buffer_timestamp: float | None = None
+        self._next_input_timestamp: float | None = None
 
     def process(
         self,
         frame: AudioFrame,
     ) -> tuple[ProcessingAudioFrame, ...]:
+        self._handle_input_timestamp(frame)
         self._ensure_resampler(frame)
 
         if self._resampler is not None and self._input_sample_rate != frame.format.sample_rate:
@@ -101,6 +105,8 @@ class AudioNormalizerImpl:
     def reset(self) -> None:
         """Discard all buffered and resampler state."""
 
+        self._reset_processing_continuity()
+
         self._buffer = np.empty(
             (0, self._processing_format.channels),
             dtype=np.float32,
@@ -110,7 +116,32 @@ class AudioNormalizerImpl:
         if self._resampler is not None:
             self._resampler.reset()
 
+        self._next_input_timestamp = None
         self._input_sample_rate = None
+
+    def _handle_input_timestamp(
+        self,
+        frame: AudioFrame,
+    ) -> None:
+        if self._next_input_timestamp is not None:
+            timestamp_delta = frame.timestamp - self._next_input_timestamp
+
+            if abs(timestamp_delta) > _INPUT_TIMESTAMP_TOLERANCE_SECONDS:
+                self._reset_processing_continuity()
+
+        frame_duration = frame.audio.shape[0] / frame.format.sample_rate
+
+        self._next_input_timestamp = frame.timestamp + frame_duration
+
+    def _reset_processing_continuity(self) -> None:
+        self._buffer = np.empty(
+            (0, self._processing_format.channels),
+            dtype=np.float32,
+        )
+        self._buffer_timestamp = None
+
+        if self._resampler is not None:
+            self._resampler.reset()
 
     def _ensure_resampler(self, frame: AudioFrame) -> None:
         input_sample_rate = frame.format.sample_rate

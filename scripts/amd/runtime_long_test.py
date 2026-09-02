@@ -6,7 +6,6 @@ import statistics
 import time
 from pathlib import Path
 
-
 PRELOAD_LIBRARIES = [
     "amd_comgr",
     "amdhip64",
@@ -36,9 +35,7 @@ def main() -> None:
     args = parse_args()
 
     if args.duration_seconds <= 0:
-        raise ValueError(
-            "duration-seconds must be greater than zero."
-        )
+        raise ValueError("duration-seconds must be greater than zero.")
 
     if not args.audio_fixture.is_file():
         raise FileNotFoundError(args.audio_fixture)
@@ -48,7 +45,7 @@ def main() -> None:
         flush=True,
     )
 
-    import rocm_sdk
+    import rocm_sdk  # type: ignore[import-not-found]
 
     rocm_sdk.initialize_process(
         preload_shortnames=PRELOAD_LIBRARIES,
@@ -59,7 +56,7 @@ def main() -> None:
         flush=True,
     )
 
-    from faster_whisper import WhisperModel
+    from faster_whisper import WhisperModel  # type: ignore[import-untyped]
 
     model = WhisperModel(
         "small",
@@ -75,8 +72,7 @@ def main() -> None:
     transcription_count = 0
 
     print(
-        "Starting long-running GPU workload "
-        f"duration_seconds={args.duration_seconds}",
+        f"Starting long-running GPU workload duration_seconds={args.duration_seconds}",
         flush=True,
     )
 
@@ -89,30 +85,19 @@ def main() -> None:
 
         segments = list(segments_iterator)
 
-        inference_duration = (
-            time.monotonic() - inference_started_at
-        )
+        inference_duration = time.monotonic() - inference_started_at
 
         text = " ".join(
-            segment.text.strip()
-            for segment in segments
-            if segment.text.strip()
+            segment.text.strip() for segment in segments if segment.text.strip()
         ).strip()
 
         if not text:
-            raise RuntimeError(
-                "Faster-Whisper returned an empty transcription."
-            )
+            raise RuntimeError("Faster-Whisper returned an empty transcription.")
 
         if info.language != "en":
-            raise RuntimeError(
-                "Unexpected language detection: "
-                f"expected=en actual={info.language}"
-            )
+            raise RuntimeError(f"Unexpected language detection: expected=en actual={info.language}")
 
-        inference_durations.append(
-            inference_duration
-        )
+        inference_durations.append(inference_duration)
         transcription_count += 1
 
         if transcription_count % 25 == 0:
@@ -129,17 +114,11 @@ def main() -> None:
     workload_duration = time.monotonic() - started_at
 
     if transcription_count == 0:
-        raise RuntimeError(
-            "Long-running workload performed no transcriptions."
-        )
+        raise RuntimeError("Long-running workload performed no transcriptions.")
 
-    average_inference = statistics.fmean(
-        inference_durations
-    )
+    average_inference = statistics.fmean(inference_durations)
 
-    maximum_inference = max(
-        inference_durations
-    )
+    maximum_inference = max(inference_durations)
 
     print(
         "Long-running workload completed "
@@ -163,13 +142,10 @@ def main() -> None:
 
     gc.collect()
 
-    teardown_duration = (
-        time.monotonic() - teardown_started_at
-    )
+    teardown_duration = time.monotonic() - teardown_started_at
 
     print(
-        "Model destruction completed "
-        f"duration_seconds={teardown_duration:.3f}",
+        f"Model destruction completed duration_seconds={teardown_duration:.3f}",
         flush=True,
     )
 

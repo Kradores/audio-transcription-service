@@ -5,7 +5,6 @@ import gc
 import hashlib
 from pathlib import Path
 
-
 PRELOAD_LIBRARIES = [
     "amd_comgr",
     "amdhip64",
@@ -53,7 +52,7 @@ def main() -> None:
 
     print("Initializing TheRock runtime...", flush=True)
 
-    import rocm_sdk
+    import rocm_sdk  # type: ignore[import-not-found]
 
     rocm_sdk.initialize_process(
         preload_shortnames=PRELOAD_LIBRARIES,
@@ -61,7 +60,7 @@ def main() -> None:
 
     print("Importing CTranslate2...", flush=True)
 
-    import ctranslate2
+    import ctranslate2  # type: ignore[import-untyped]
 
     if ctranslate2.__version__ != args.expected_ct2_version:
         raise RuntimeError(
@@ -94,27 +93,21 @@ def main() -> None:
     gpu_count = ctranslate2.get_cuda_device_count()
 
     if gpu_count < 1:
-        raise RuntimeError(
-            f"Expected at least one GPU, found {gpu_count}."
-        )
+        raise RuntimeError(f"Expected at least one GPU, found {gpu_count}.")
 
     compute_types = ctranslate2.get_supported_compute_types("cuda")
 
     if "float16" not in compute_types:
-        raise RuntimeError(
-            "CTranslate2 HIP runtime does not report float16 support."
-        )
+        raise RuntimeError("CTranslate2 HIP runtime does not report float16 support.")
 
     print(
-        "CTranslate2 runtime ready "
-        f"version={ctranslate2.__version__} "
-        f"gpu_count={gpu_count}",
+        f"CTranslate2 runtime ready version={ctranslate2.__version__} gpu_count={gpu_count}",
         flush=True,
     )
 
     print("Creating Faster-Whisper model...", flush=True)
 
-    from faster_whisper import WhisperModel
+    from faster_whisper import WhisperModel  # type: ignore[import-untyped]
 
     model = WhisperModel(
         "small",
@@ -131,27 +124,16 @@ def main() -> None:
 
     segments = list(segments_iterator)
 
-    text = " ".join(
-        segment.text.strip()
-        for segment in segments
-        if segment.text.strip()
-    ).strip()
+    text = " ".join(segment.text.strip() for segment in segments if segment.text.strip()).strip()
 
     if not text:
-        raise RuntimeError(
-            "Faster-Whisper returned an empty transcription."
-        )
+        raise RuntimeError("Faster-Whisper returned an empty transcription.")
 
     if info.language != "en":
-        raise RuntimeError(
-            "Unexpected language detection: "
-            f"expected=en actual={info.language}"
-        )
+        raise RuntimeError(f"Unexpected language detection: expected=en actual={info.language}")
 
     print(
-        "Inference completed "
-        f"language={info.language} "
-        f"segments={len(segments)}",
+        f"Inference completed language={info.language} segments={len(segments)}",
         flush=True,
     )
 

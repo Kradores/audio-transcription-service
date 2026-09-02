@@ -7,7 +7,6 @@ from typing import Any
 
 import pyaudiowpatch as pyaudio
 
-
 REPORT_INTERVAL_SECONDS = 5.0
 
 
@@ -70,25 +69,16 @@ class TimingState:
         time_info: dict[str, float],
         status_flags: int,
     ) -> None:
-        timeline_now = (
-            time.monotonic()
-            - self.timeline_origin
-        )
+        timeline_now = time.monotonic() - self.timeline_origin
 
-        frame_duration = (
-            frame_count
-            / self.sample_rate
-        )
+        frame_duration = frame_count / self.sample_rate
 
         with self.lock:
             if self.first_callback_timeline is None:
                 self.first_callback_timeline = timeline_now
 
             if self.last_callback_timeline is not None:
-                callback_gap = (
-                    timeline_now
-                    - self.last_callback_timeline
-                )
+                callback_gap = timeline_now - self.last_callback_timeline
 
                 self.last_callback_gap = callback_gap
                 self.max_callback_gap = max(
@@ -104,32 +94,20 @@ class TimingState:
                     timeline_now - frame_duration,
                 )
             else:
-                generated_timestamp = (
-                    self.generated_next_timestamp
-                )
+                generated_timestamp = self.generated_next_timestamp
 
-            generated_end = (
-                generated_timestamp
-                + frame_duration
-            )
+            generated_end = generated_timestamp + frame_duration
 
-            self.generated_next_timestamp = (
-                generated_end
-            )
+            self.generated_next_timestamp = generated_end
 
-            self.generated_lag = (
-                timeline_now
-                - generated_end
-            )
+            self.generated_lag = timeline_now - generated_end
 
             self.max_generated_lag = max(
                 self.max_generated_lag,
                 self.generated_lag,
             )
 
-            self.captured_audio_seconds += (
-                frame_duration
-            )
+            self.captured_audio_seconds += frame_duration
 
             portaudio_input = time_info.get(
                 "input_buffer_adc_time",
@@ -138,146 +116,68 @@ class TimingState:
                 "current_time",
             )
 
-            if (
-                portaudio_input is not None
-                and portaudio_current is not None
-            ):
+            if portaudio_input is not None and portaudio_current is not None:
                 if self.portaudio_offset is None:
-                    self.portaudio_offset = (
-                        timeline_now
-                        - portaudio_current
-                    )
+                    self.portaudio_offset = timeline_now - portaudio_current
 
-                    self.first_portaudio_input = (
-                        portaudio_input
-                    )
-                    self.first_portaudio_current = (
-                        portaudio_current
-                    )
+                    self.first_portaudio_input = portaudio_input
+                    self.first_portaudio_current = portaudio_current
 
-                self.last_portaudio_input = (
-                    portaudio_input
-                )
-                self.last_portaudio_current = (
-                    portaudio_current
-                )
+                self.last_portaudio_input = portaudio_input
+                self.last_portaudio_current = portaudio_current
 
-                mapped_timestamp = (
-                    portaudio_input
-                    + self.portaudio_offset
-                )
+                mapped_timestamp = portaudio_input + self.portaudio_offset
 
-                mapped_end = (
-                    mapped_timestamp
-                    + frame_duration
-                )
+                mapped_end = mapped_timestamp + frame_duration
 
-                self.portaudio_mapped_lag = (
-                    timeline_now
-                    - mapped_end
-                )
+                self.portaudio_mapped_lag = timeline_now - mapped_end
 
             if status_flags != 0:
                 self.status_events += 1
-                self.last_status_flags = (
-                    status_flags
-                )
+                self.last_status_flags = status_flags
 
             self.callbacks += 1
 
     def snapshot(
         self,
     ) -> TimingSnapshot:
-        timeline_now = (
-            time.monotonic()
-            - self.timeline_origin
-        )
+        timeline_now = time.monotonic() - self.timeline_origin
 
         with self.lock:
-            first_callback = (
-                self.first_callback_timeline
-            )
-            last_callback = (
-                self.last_callback_timeline
-            )
+            first_callback = self.first_callback_timeline
+            last_callback = self.last_callback_timeline
 
-            wall_since_first = (
-                0.0
-                if first_callback is None
-                else timeline_now
-                - first_callback
-            )
+            wall_since_first = 0.0 if first_callback is None else timeline_now - first_callback
 
             wall_since_last = (
-                timeline_now
-                if last_callback is None
-                else timeline_now
-                - last_callback
+                timeline_now if last_callback is None else timeline_now - last_callback
             )
 
             input_elapsed = None
 
-            if (
-                self.first_portaudio_input
-                is not None
-                and self.last_portaudio_input
-                is not None
-            ):
-                input_elapsed = (
-                    self.last_portaudio_input
-                    - self.first_portaudio_input
-                )
+            if self.first_portaudio_input is not None and self.last_portaudio_input is not None:
+                input_elapsed = self.last_portaudio_input - self.first_portaudio_input
 
             current_elapsed = None
 
-            if (
-                self.first_portaudio_current
-                is not None
-                and self.last_portaudio_current
-                is not None
-            ):
-                current_elapsed = (
-                    self.last_portaudio_current
-                    - self.first_portaudio_current
-                )
+            if self.first_portaudio_current is not None and self.last_portaudio_current is not None:
+                current_elapsed = self.last_portaudio_current - self.first_portaudio_current
 
             return TimingSnapshot(
                 source=self.source,
                 callbacks=self.callbacks,
-                captured_audio_seconds=(
-                    self.captured_audio_seconds
-                ),
-                wall_since_first_callback=(
-                    wall_since_first
-                ),
-                wall_since_last_callback=(
-                    wall_since_last
-                ),
-                last_callback_gap=(
-                    self.last_callback_gap
-                ),
-                max_callback_gap=(
-                    self.max_callback_gap
-                ),
-                generated_lag=(
-                    self.generated_lag
-                ),
-                max_generated_lag=(
-                    self.max_generated_lag
-                ),
-                portaudio_mapped_lag=(
-                    self.portaudio_mapped_lag
-                ),
-                portaudio_input_elapsed=(
-                    input_elapsed
-                ),
-                portaudio_current_elapsed=(
-                    current_elapsed
-                ),
+                captured_audio_seconds=(self.captured_audio_seconds),
+                wall_since_first_callback=(wall_since_first),
+                wall_since_last_callback=(wall_since_last),
+                last_callback_gap=(self.last_callback_gap),
+                max_callback_gap=(self.max_callback_gap),
+                generated_lag=(self.generated_lag),
+                max_generated_lag=(self.max_generated_lag),
+                portaudio_mapped_lag=(self.portaudio_mapped_lag),
+                portaudio_input_elapsed=(input_elapsed),
+                portaudio_current_elapsed=(current_elapsed),
                 status_events=self.status_events,
-                last_status_flags=(
-                    self.last_status_flags
-                ),
+                last_status_flags=(self.last_status_flags),
             )
 
 
@@ -317,15 +217,9 @@ def open_capture(
     device: dict[str, Any],
     timeline_origin: float,
 ) -> CaptureHandle:
-    sample_rate = int(
-        device["defaultSampleRate"]
-    )
-    channels = int(
-        device["maxInputChannels"]
-    )
-    device_index = int(
-        device["index"]
-    )
+    sample_rate = int(device["defaultSampleRate"])
+    channels = int(device["maxInputChannels"])
+    device_index = int(device["index"])
 
     state = TimingState(
         source=source,
@@ -410,19 +304,14 @@ def print_snapshot(
 ) -> None:
     if snapshot.callbacks == 0:
         print(
-            f"{snapshot.source}: "
-            "callbacks=0 "
-            f"since_start={snapshot.wall_since_last_callback:.3f}s"
+            f"{snapshot.source}: callbacks=0 since_start={snapshot.wall_since_last_callback:.3f}s"
         )
         return
 
     ratio = 0.0
 
     if snapshot.wall_since_first_callback > 0:
-        ratio = (
-            snapshot.captured_audio_seconds
-            / snapshot.wall_since_first_callback
-        )
+        ratio = snapshot.captured_audio_seconds / snapshot.wall_since_first_callback
 
     print(
         f"{snapshot.source}: "
@@ -466,14 +355,10 @@ def main() -> None:
     system_audio = pyaudio.PyAudio()
     microphone_audio = pyaudio.PyAudio()
 
-    system_device = (
-        system_audio.get_default_wasapi_loopback()
-    )
+    system_device = system_audio.get_default_wasapi_loopback()
 
-    microphone_device = (
-        microphone_audio.get_default_wasapi_device(
-            d_in=True,
-        )
+    microphone_device = microphone_audio.get_default_wasapi_device(
+        d_in=True,
     )
 
     system = open_capture(

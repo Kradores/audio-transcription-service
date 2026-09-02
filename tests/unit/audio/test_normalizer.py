@@ -309,9 +309,11 @@ def test_normalizer_preserves_leftover_samples_between_frames() -> None:
 
     first = create_frame(
         np.ones((400, 1), dtype=np.int16),
+        timestamp=0.0,
     )
     second = create_frame(
         np.full((240, 1), 2, dtype=np.int16),
+        timestamp=0.025,
     )
 
     # Act
@@ -324,15 +326,27 @@ def test_normalizer_preserves_leftover_samples_between_frames() -> None:
 
     np.testing.assert_array_equal(
         first_output[0].audio[:, 0],
-        np.full(320, 1 / 32768.0, dtype=np.float32),
+        np.full(
+            320,
+            1 / 32768.0,
+            dtype=np.float32,
+        ),
     )
 
     np.testing.assert_array_equal(
         second_output[0].audio[:, 0],
         np.concatenate(
             (
-                np.full(80, 1 / 32768.0, dtype=np.float32),
-                np.full(240, 2 / 32768.0, dtype=np.float32),
+                np.full(
+                    80,
+                    1 / 32768.0,
+                    dtype=np.float32,
+                ),
+                np.full(
+                    240,
+                    2 / 32768.0,
+                    dtype=np.float32,
+                ),
             ),
         ),
     )
@@ -837,3 +851,185 @@ def test_normalizer_reset_does_not_flush_resampler() -> None:
     # Assert
     assert resampler.reset_called
     assert not resampler.flush_called
+
+
+def test_normalizer_preserves_gap_and_discards_pre_gap_buffer() -> None:
+    # Arrange
+    normalizer = create_normalizer()
+
+    first = create_frame(
+        np.ones((400, 1), dtype=np.int16),
+        timestamp=10.0,
+    )
+
+    second = create_frame(
+        np.full((320, 1), 2, dtype=np.int16),
+        timestamp=40.0,
+    )
+
+    # Act
+    first_output = normalizer.process(first)
+    second_output = normalizer.process(second)
+
+    # Assert
+    assert len(first_output) == 1
+    assert len(second_output) == 1
+
+    assert first_output[0].timestamp == pytest.approx(10.0)
+
+    # A real capture gap must remain visible downstream.
+    assert second_output[0].timestamp == pytest.approx(40.0)
+
+    # The 80 samples buffered from before the gap must not
+    # be combined with audio captured after the gap.
+    np.testing.assert_array_equal(
+        second_output[0].audio[:, 0],
+        np.full(
+            320,
+            2 / 32768.0,
+            dtype=np.float32,
+        ),
+    )
+
+
+def test_normalizer_keeps_contiguous_input_on_one_timeline() -> None:
+    settings = create_settings(sample_rate=16_000)
+
+    normalizer = AudioNormalizerImpl(
+        settings,
+        SoXRResamplerFactory(),
+    )
+
+    first = AudioFrame(
+        audio=np.zeros((960, 1), dtype=np.int16),
+        timestamp=10.0,
+        format=AudioFormat(
+            sample_rate=48_000,
+            channels=1,
+            sample_type="int16",
+        ),
+    )
+
+    second = AudioFrame(
+        audio=np.zeros((960, 1), dtype=np.int16),
+        timestamp=10.02,
+        format=AudioFormat(
+            sample_rate=48_000,
+            channels=1,
+            sample_type="int16",
+        ),
+    )
+
+    output = normalizer.process(first) + normalizer.process(second)
+
+    assert output
+
+    assert output[0].timestamp == pytest.approx(10.0)
+
+    for previous, current in zip(
+        output,
+        output[1:],
+        strict=False,
+    ):
+        expected = previous.timestamp + previous.audio.shape[0] / previous.format.sample_rate
+
+        assert current.timestamp == pytest.approx(
+            expected,
+        )
+
+
+def test_normalizer_tolerates_small_input_timestamp_difference() -> None:
+    normalizer = create_normalizer()
+
+    first = create_frame(
+        np.ones((400, 1), dtype=np.int16),
+        timestamp=10.0,
+    )
+
+    second = create_frame(
+        np.full((240, 1), 2, dtype=np.int16),
+        timestamp=10.030,
+    )
+
+    first_output = normalizer.process(first)
+    second_output = normalizer.process(second)
+
+    assert len(first_output) == 1
+    assert len(second_output) == 1
+
+    assert first_output[0].timestamp == pytest.approx(10.0)
+
+    # Expected next native timestamp was 10.025.
+    # A 5 ms difference remains one continuous stream.
+    assert second_output[0].timestamp == pytest.approx(10.02)
+
+    np.testing.assert_array_equal(
+        second_output[0].audio[:, 0],
+        np.concatenate(
+            (
+                np.full(
+                    80,
+                    1 / 32768.0,
+                    dtype=np.float32,
+                ),
+                np.full(
+                    240,
+                    2 / 32768.0,
+                    dtype=np.float32,
+                ),
+            ),
+        ),
+    )
+
+
+def test_normalizer_timestamp_gap_resets_resampler() -> None:
+    resampler = FakeAudioResampler(
+        outputs=[
+            np.empty((0, 1), dtype=np.float32),
+            np.empty((0, 1), dtype=np.float32),
+        ],
+    )
+
+    normalizer = AudioNormalizerImpl(
+        create_settings(),
+        FakeAudioResamplerFactory(resampler),
+    )
+
+    normalizer.process(
+        create_frame(
+            np.zeros((320, 1), dtype=np.int16),
+            timestamp=10.0,
+        ),
+    )
+
+    normalizer.process(
+        create_frame(
+            np.zeros((320, 1), dtype=np.int16),
+            timestamp=40.0,
+        ),
+    )
+
+    assert resampler.reset_called
+
+
+def test_normalizer_reset_starts_new_timestamp_continuity() -> None:
+    normalizer = create_normalizer()
+
+    normalizer.process(
+        create_frame(
+            np.zeros((320, 1), dtype=np.int16),
+            timestamp=10.0,
+        ),
+    )
+
+    normalizer.reset()
+
+    output = normalizer.process(
+        create_frame(
+            np.zeros((320, 1), dtype=np.int16),
+            timestamp=100.0,
+        ),
+    )
+
+    assert len(output) == 1
+    assert output[0].timestamp == pytest.approx(100.0)
