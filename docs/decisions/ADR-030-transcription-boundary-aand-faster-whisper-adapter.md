@@ -225,3 +225,20 @@ the replaceable transcription component.
 * ADR-023: VAD and Speech Buffer Semantics
 * ADR-028: Voice Activity Detection Architecture and Silero Boundary
 * ADR-029: Speech Segment Assembler Contract and State Machine
+
+## Superseded aspects
+
+ADR-045 extends the transcription call with an optional explicit language
+selection while preserving the synchronous, application-owned, source-agnostic
+`Transcriber` boundary:
+
+```python
+transcribe(
+    segment: SpeechSegment,
+    *,
+    language: str | None = None,
+) -> TranscriptionResult
+```
+
+Language state and multilingual switching policy remain outside the concrete
+transcriber.

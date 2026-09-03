@@ -414,12 +414,16 @@ with:
 - segment start;
 - segment duration;
 - inference duration;
-- detected language;
-- detected-language probability.
+- result language;
+- language confidence when automatic detection was used;
+- whether language was auto-detected or explicitly selected.
 
 For the Faster-Whisper adapter, `TranscriptionResult.confidence` is populated
-from Faster-Whisper's language probability. It therefore represents confidence
-in the detected language, not confidence that the transcript text is correct.
+from Faster-Whisper's language probability only when language detection is
+automatic. Explicit/configured/state-selected language produces
+`confidence=None`, because Faster-Whisper's explicit-language probability is
+not independent detection evidence. The value is never transcript-text
+accuracy confidence.
 
 These logs are useful for investigating individual unusually slow or
 incorrect transcriptions and for correlating short inputs with unstable

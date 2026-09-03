@@ -56,15 +56,24 @@ end
 ```
 with:
 - `confidence`: optional normalized `float`; its concrete meaning is adapter-defined;
-- for `FasterWhisperTranscriber`, `confidence` is the detected-language probability returned by Faster-Whisper and is **not** a transcript-text accuracy score;
+- for `FasterWhisperTranscriber`, `confidence` is the detected-language probability returned by Faster-Whisper only when language detection is automatic;
+- explicitly selected language produces `confidence=None`, because Faster-Whisper's explicit-language probability is not independent detection evidence;
+- `confidence` is **not** a transcript-text accuracy score;
 - `start` / `end`: transcription segment timestamps;
 - represents one complete `SpeechSegment` transcription.
 
 ## Transcriber
 ```py
-transcribe(segment: SpeechSegment) -> TranscriptionResult
+transcribe(
+    segment: SpeechSegment,
+    *,
+    language: str | None = None,
+) -> TranscriptionResult
 ```
-The `Transcriber` contract is intentionally synchronous:
+The `Transcriber` contract is intentionally synchronous.
+
+`language=None` requests automatic language detection. A concrete language code requests explicit-language decoding. Language-selection policy remains outside the concrete transcriber.
+
 Execution scheduling is owned by the application pipeline.
 
 The pipeline may execute the synchronous Transcriber through a dedicated
