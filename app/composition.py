@@ -26,7 +26,10 @@ from app.core.config.loader import ConfigurationLoader
 from app.core.config.models import (
     AudioProcessingSettings,
     AudioSegmentationSettings,
+    AutoTranscriptionLanguageSettings,
+    FixedTranscriptionLanguageSettings,
     Settings,
+    TranscriptionLanguageSettings,
 )
 from app.core.logging import configure_logging
 from app.services.conversation_pipeline import ConversationPipeline
@@ -43,8 +46,10 @@ from app.transcription.faster_whisper_runtime import (
     FasterWhisperRuntimeInitializer,
     TheRockFasterWhisperRuntimeInitializer,
 )
+from app.transcription.processor import TranscriptionProcessorImpl
 from app.transcription.protocols import (
     Transcriber,
+    TranscriptionProcessor,
     TranscriptionSegmentAggregator,
     WhisperModelProtocol,
 )
@@ -281,6 +286,26 @@ def create_transcriber(
     return FasterWhisperTranscriber(model)
 
 
+def create_transcription_processor(
+    *,
+    transcriber: Transcriber,
+    language_settings: TranscriptionLanguageSettings,
+) -> TranscriptionProcessor:
+    if isinstance(
+        language_settings,
+        (
+            AutoTranscriptionLanguageSettings,
+            FixedTranscriptionLanguageSettings,
+        ),
+    ):
+        return TranscriptionProcessorImpl(
+            transcriber=transcriber,
+            language_settings=language_settings,
+        )
+
+    raise ValueError("adaptive transcription language mode is not implemented yet")
+
+
 def create_transcription_executor(
     *,
     database: sqlite3.Connection,
@@ -288,8 +313,12 @@ def create_transcription_executor(
 ) -> TranscriptionExecutor:
     model = create_whisper_model(settings)
 
-    transcribers = tuple(
-        create_transcriber(model) for _ in range(settings.transcription.worker_count)
+    processors = tuple(
+        create_transcription_processor(
+            transcriber=FasterWhisperTranscriber(model),
+            language_settings=settings.transcription.language,
+        )
+        for _ in range(settings.transcription.worker_count)
     )
 
     repository = SQLiteTranscriptRepository(database)
@@ -298,7 +327,7 @@ def create_transcription_executor(
     recorder = TranscriptRecorderImpl(repository)
 
     return TranscriptionExecutorImpl(
-        transcribers=transcribers,
+        processors=processors,
         on_result=recorder.record,
         queue_capacity=settings.transcription.queue_capacity,
     )

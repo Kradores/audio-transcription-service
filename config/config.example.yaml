@@ -35,6 +35,7 @@ transcription:
 
   language:
     mode: auto
+    language: null
 
   aggregation:
     enabled: true

@@ -9,12 +9,11 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.transcription.contracts import (
-    SourcedTranscriptionResult,
     TranscriptionWorkItem,
 )
 from app.transcription.protocols import (
     SourcedTranscriptionResultHandler,
-    Transcriber,
+    TranscriptionProcessor,
 )
 
 logger = logging.getLogger(__name__)
@@ -93,17 +92,17 @@ class TranscriptionExecutorImpl:
 
     def __init__(
         self,
-        transcribers: Sequence[Transcriber],
+        processors: Sequence[TranscriptionProcessor],
         on_result: SourcedTranscriptionResultHandler,
         queue_capacity: int,
     ) -> None:
         if queue_capacity < 1:
             raise ValueError("queue_capacity must be at least 1")
 
-        if not transcribers:
-            raise ValueError("at least one transcriber is required")
+        if not processors:
+            raise ValueError("at least one transcription processor is required")
 
-        self._transcribers = tuple(transcribers)
+        self._processors = tuple(processors)
         self._on_result = on_result
 
         self._queue: asyncio.Queue[_QueuedWorkItem | _Shutdown] = asyncio.Queue(
@@ -142,7 +141,7 @@ class TranscriptionExecutorImpl:
             failed=self._failed,
             queue_depth=self._queue.qsize(),
             queue_high_water_mark=self._queue_high_water_mark,
-            worker_count=len(self._transcribers),
+            worker_count=len(self._processors),
             active_workers=self._active_workers,
             active_workers_high_water_mark=self._active_workers_high_water_mark,
             queue_wait_seconds_total=self._queue_wait_seconds_total,
@@ -168,12 +167,12 @@ class TranscriptionExecutorImpl:
             asyncio.create_task(
                 self._run(
                     worker_id=worker_id,
-                    transcriber=transcriber,
+                    processor=processor,
                 ),
                 name=f"transcription-executor-worker-{worker_id}",
             )
-            for worker_id, transcriber in enumerate(
-                self._transcribers,
+            for worker_id, processor in enumerate(
+                self._processors,
                 start=1,
             )
         )
@@ -186,7 +185,7 @@ class TranscriptionExecutorImpl:
         logger.info(
             "transcription executor started queue_capacity=%d worker_count=%d",
             self._queue.maxsize,
-            len(self._transcribers),
+            len(self._processors),
         )
 
     def submit(self, item: TranscriptionWorkItem) -> bool:
@@ -313,7 +312,7 @@ class TranscriptionExecutorImpl:
         self,
         *,
         worker_id: int,
-        transcriber: Transcriber,
+        processor: TranscriptionProcessor,
     ) -> None:
         logger.info(
             "transcription worker started worker_id=%d",
@@ -348,9 +347,9 @@ class TranscriptionExecutorImpl:
                     )
 
                     try:
-                        result = await asyncio.to_thread(
-                            transcriber.transcribe,
-                            item.segment,
+                        sourced_result = await asyncio.to_thread(
+                            processor.process,
+                            item,
                         )
                     finally:
                         self._active_workers -= 1
@@ -362,6 +361,8 @@ class TranscriptionExecutorImpl:
                             self._transcription_seconds_max,
                             transcription_seconds,
                         )
+
+                    result = sourced_result.result
 
                     logger.info(
                         "transcription completed worker_id=%d source=%s "
@@ -386,12 +387,7 @@ class TranscriptionExecutorImpl:
                         result.text,
                     )
 
-                    self._on_result(
-                        SourcedTranscriptionResult(
-                            source=item.source,
-                            result=result,
-                        )
-                    )
+                    self._on_result(sourced_result)
 
                     self._completed += 1
 

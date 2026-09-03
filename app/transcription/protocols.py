@@ -10,6 +10,7 @@ from app.transcription.contracts import (
     SourcedTranscriptionResult,
     TranscriptionResult,
     TranscriptionSegmentAggregatorStats,
+    TranscriptionWorkItem,
 )
 
 type SourcedTranscriptionResultHandler = Callable[[SourcedTranscriptionResult], None]
@@ -50,6 +51,16 @@ class Transcriber(Protocol):
         language: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe one speech segment with optional explicit language selection."""
+
+
+class TranscriptionProcessor(Protocol):
+    """Apply transcription policy to one sourced transcription work item."""
+
+    def process(
+        self,
+        item: TranscriptionWorkItem,
+    ) -> SourcedTranscriptionResult:
+        """Process one transcription work item."""
 
 
 class TranscriptionSegmentAggregator(Protocol):

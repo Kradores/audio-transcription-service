@@ -403,11 +403,13 @@ def test_create_whisper_model_passes_configuration_to_factory(
 
 
 @patch("app.composition.TranscriptionExecutorImpl")
-@patch("app.composition.create_transcriber")
+@patch("app.composition.create_transcription_processor")
+@patch("app.composition.FasterWhisperTranscriber")
 @patch("app.composition.create_whisper_model")
-def test_create_transcription_executor_creates_one_transcriber_per_worker(
+def test_create_transcription_executor_creates_one_processor_per_worker(
     create_whisper_model: MagicMock,
-    create_transcriber: MagicMock,
+    faster_whisper_transcriber: MagicMock,
+    create_transcription_processor: MagicMock,
     transcription_executor_impl: MagicMock,
 ) -> None:
     settings = SettingsBuilder().with_transcription_worker_count(3).build()
@@ -422,7 +424,14 @@ def test_create_transcription_executor_creates_one_transcriber_per_worker(
         MagicMock(),
         MagicMock(),
     ]
-    create_transcriber.side_effect = transcribers
+    faster_whisper_transcriber.side_effect = transcribers
+
+    processors = [
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+    ]
+    create_transcription_processor.side_effect = processors
 
     create_transcription_executor(
         database=database,
@@ -431,18 +440,43 @@ def test_create_transcription_executor_creates_one_transcriber_per_worker(
 
     create_whisper_model.assert_called_once_with(settings)
 
-    assert create_transcriber.call_count == 3
-    assert create_transcriber.call_args_list == [
+    assert faster_whisper_transcriber.call_count == 3
+    assert faster_whisper_transcriber.call_args_list == [
         ((model,), {}),
         ((model,), {}),
         ((model,), {}),
+    ]
+
+    assert create_transcription_processor.call_count == 3
+    assert create_transcription_processor.call_args_list == [
+        (
+            (),
+            {
+                "transcriber": transcribers[0],
+                "language_settings": settings.transcription.language,
+            },
+        ),
+        (
+            (),
+            {
+                "transcriber": transcribers[1],
+                "language_settings": settings.transcription.language,
+            },
+        ),
+        (
+            (),
+            {
+                "transcriber": transcribers[2],
+                "language_settings": settings.transcription.language,
+            },
+        ),
     ]
 
     transcription_executor_impl.assert_called_once()
 
     call = transcription_executor_impl.call_args
 
-    assert call.kwargs["transcribers"] == tuple(transcribers)
+    assert call.kwargs["processors"] == tuple(processors)
     assert call.kwargs["queue_capacity"] == settings.transcription.queue_capacity
 
 
