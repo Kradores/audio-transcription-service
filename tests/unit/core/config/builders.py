@@ -4,6 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from app.core.config.enums import TranscriptionLanguageMode
 from app.core.config.models import Settings
 
 
@@ -196,6 +197,20 @@ class SettingsBuilder:
 
     def with_transcription_worker_count(self, worker_count: int) -> SettingsBuilder:
         self._document["transcription"]["worker_count"] = worker_count
+        return self
+
+    def with_adaptive_transcription_language(
+        self, adaptive_language: dict[str, Any] | None = None
+    ) -> SettingsBuilder:
+        if adaptive_language is None:
+            adaptive_language = {
+                "mode": TranscriptionLanguageMode.ADAPTIVE,
+                "initial_language": None,
+                "min_probe_duration_seconds": 3.0,
+                "switch_probability_threshold": 0.85,
+                "switch_confirmations": 2,
+            }
+        self._document["transcription"]["language"] = adaptive_language
         return self
 
 

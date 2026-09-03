@@ -581,7 +581,7 @@ def test_executor_initial_concurrency_stats() -> None:
 
 
 @pytest.mark.anyio
-async def test_executor_processes_two_transcriptions_concurrently() -> None:
+async def test_executor_processes_different_sources_concurrently() -> None:
     first_started = threading.Event()
     second_started = threading.Event()
     release = threading.Event()
@@ -613,10 +613,17 @@ async def test_executor_processes_two_transcriptions_concurrently() -> None:
     await executor.start()
 
     assert executor.submit(
-        create_transcription_work_item(timestamp=0.0),
+        create_transcription_work_item(
+            source=AudioSource.MICROPHONE,
+            timestamp=0.0,
+        )
     )
+
     assert executor.submit(
-        create_transcription_work_item(timestamp=1.0),
+        create_transcription_work_item(
+            source=AudioSource.SYSTEM_AUDIO,
+            timestamp=1.0,
+        )
     )
 
     await asyncio.to_thread(first_started.wait)
@@ -737,7 +744,7 @@ async def test_executor_wait_reports_unexpected_worker_termination() -> None:
 
 
 @pytest.mark.anyio
-async def test_executor_allows_results_to_complete_out_of_submission_order() -> None:
+async def test_executor_allows_different_sources_to_complete_out_of_submission_order() -> None:
     first_started = threading.Event()
     second_started = threading.Event()
 
@@ -781,10 +788,17 @@ async def test_executor_allows_results_to_complete_out_of_submission_order() -> 
     await executor.start()
 
     assert executor.submit(
-        create_transcription_work_item(timestamp=0.0),
+        create_transcription_work_item(
+            source=AudioSource.MICROPHONE,
+            timestamp=0.0,
+        )
     )
+
     assert executor.submit(
-        create_transcription_work_item(timestamp=1.0),
+        create_transcription_work_item(
+            source=AudioSource.SYSTEM_AUDIO,
+            timestamp=1.0,
+        )
     )
 
     await asyncio.to_thread(first_started.wait)
@@ -885,7 +899,7 @@ async def test_executor_completion_log_includes_worker_identity(
     )
 
     assert any(
-        "worker_count=2 max_active_workers=2" in record.getMessage() for record in caplog.records
+        "worker_count=2 max_active_workers=1" in record.getMessage() for record in caplog.records
     )
 
 
@@ -943,3 +957,76 @@ async def test_cancelling_wait_does_not_cancel_executor_lifecycle() -> None:
     assert executor.stats.submitted == 1
     assert executor.stats.completed == 1
     assert executor.stats.failed == 0
+
+
+@pytest.mark.anyio
+async def test_executor_serializes_work_from_same_source() -> None:
+    first_started = threading.Event()
+    second_started = threading.Event()
+    release_first = threading.Event()
+
+    processed_timestamps: list[float] = []
+
+    class FirstProcessor:
+        def process(
+            self,
+            item: TranscriptionWorkItem,
+        ) -> SourcedTranscriptionResult:
+            processed_timestamps.append(item.segment.timestamp)
+            first_started.set()
+            release_first.wait()
+
+            return create_sourced_result(item)
+
+    class SecondProcessor:
+        def process(
+            self,
+            item: TranscriptionWorkItem,
+        ) -> SourcedTranscriptionResult:
+            processed_timestamps.append(item.segment.timestamp)
+            second_started.set()
+
+            return create_sourced_result(item)
+
+    executor = TranscriptionExecutorImpl(
+        processors=(
+            FirstProcessor(),
+            SecondProcessor(),
+        ),
+        on_result=lambda _: None,
+        queue_capacity=10,
+    )
+
+    await executor.start()
+
+    assert executor.submit(
+        create_transcription_work_item(
+            source=AudioSource.MICROPHONE,
+            timestamp=0.0,
+        )
+    )
+
+    assert executor.submit(
+        create_transcription_work_item(
+            source=AudioSource.MICROPHONE,
+            timestamp=1.0,
+        )
+    )
+
+    await asyncio.to_thread(first_started.wait)
+
+    # Give the second executor worker a chance to dequeue the second item.
+    await asyncio.sleep(0.05)
+
+    assert not second_started.is_set()
+
+    release_first.set()
+
+    await asyncio.to_thread(second_started.wait)
+
+    await executor.stop()
+
+    assert processed_timestamps == [
+        0.0,
+        1.0,
+    ]

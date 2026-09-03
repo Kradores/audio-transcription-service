@@ -35,7 +35,8 @@ transcription:
 
   language:
     mode: auto
-    language: null
+    # when setting mode: fixed, you should choose a 2 char language code (en, ro, ru, ...)
+    # language: en
 
   aggregation:
     enabled: true

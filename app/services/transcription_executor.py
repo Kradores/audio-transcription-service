@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.transcription.contracts import (
+    AudioSource,
     TranscriptionWorkItem,
 )
 from app.transcription.protocols import (
@@ -108,6 +109,8 @@ class TranscriptionExecutorImpl:
         self._queue: asyncio.Queue[_QueuedWorkItem | _Shutdown] = asyncio.Queue(
             maxsize=queue_capacity,
         )
+
+        self._source_locks = {source: asyncio.Lock() for source in AudioSource}
 
         self._worker_tasks: tuple[asyncio.Task[None], ...] = ()
         self._worker_failure: asyncio.Future[BaseException] | None = None
@@ -328,6 +331,7 @@ class TranscriptionExecutorImpl:
                         return
 
                     item = queued_item.item
+                    source_lock = self._source_locks[item.source]
 
                     transcription_started_at = time.perf_counter()
 
@@ -340,56 +344,61 @@ class TranscriptionExecutorImpl:
                     )
                     self._queue_wait_samples += 1
 
-                    self._active_workers += 1
-                    self._active_workers_high_water_mark = max(
-                        self._active_workers_high_water_mark,
-                        self._active_workers,
-                    )
-
-                    try:
-                        sourced_result = await asyncio.to_thread(
-                            processor.process,
-                            item,
-                        )
-                    finally:
-                        self._active_workers -= 1
-
-                        transcription_seconds = time.perf_counter() - transcription_started_at
-
-                        self._transcription_seconds_total += transcription_seconds
-                        self._transcription_seconds_max = max(
-                            self._transcription_seconds_max,
-                            transcription_seconds,
+                    async with source_lock:
+                        self._active_workers += 1
+                        self._active_workers_high_water_mark = max(
+                            self._active_workers_high_water_mark,
+                            self._active_workers,
                         )
 
-                    result = sourced_result.result
+                        try:
+                            sourced_result = await asyncio.to_thread(
+                                processor.process,
+                                item,
+                            )
+                        finally:
+                            self._active_workers -= 1
 
-                    logger.info(
-                        "transcription completed worker_id=%d source=%s "
-                        "start=%.3f end=%.3f duration=%.3f "
-                        "language=%s confidence=%s",
-                        worker_id,
-                        item.source.value,
-                        result.start,
-                        result.end,
-                        result.end - result.start,
-                        result.language,
-                        (f"{result.confidence:.3f}" if result.confidence is not None else "none"),
-                    )
+                            transcription_seconds = time.perf_counter() - transcription_started_at
 
-                    logger.debug(
-                        "transcription result worker_id=%d source=%s "
-                        "language=%s confidence=%s text=%r",
-                        worker_id,
-                        item.source.value,
-                        result.language,
-                        result.confidence,
-                        result.text,
-                    )
+                            self._transcription_seconds_total += transcription_seconds
+                            self._transcription_seconds_max = max(
+                                self._transcription_seconds_max,
+                                transcription_seconds,
+                            )
 
-                    self._on_result(sourced_result)
+                        result = sourced_result.result
 
-                    self._completed += 1
+                        logger.info(
+                            "transcription completed worker_id=%d source=%s "
+                            "start=%.3f end=%.3f duration=%.3f "
+                            "language=%s confidence=%s",
+                            worker_id,
+                            item.source.value,
+                            result.start,
+                            result.end,
+                            result.end - result.start,
+                            result.language,
+                            (
+                                f"{result.confidence:.3f}"
+                                if result.confidence is not None
+                                else "none"
+                            ),
+                        )
+
+                        logger.debug(
+                            "transcription result worker_id=%d source=%s "
+                            "language=%s confidence=%s text=%r",
+                            worker_id,
+                            item.source.value,
+                            result.language,
+                            result.confidence,
+                            result.text,
+                        )
+
+                        self._on_result(sourced_result)
+
+                        self._completed += 1
 
                 except Exception:
                     if isinstance(queued_item, _Shutdown):

@@ -24,6 +24,7 @@ from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.enums import WhisperRuntime
 from app.core.config.loader import ConfigurationLoader
 from app.core.config.models import (
+    AdaptiveTranscriptionLanguageSettings,
     AudioProcessingSettings,
     AudioSegmentationSettings,
     AutoTranscriptionLanguageSettings,
@@ -37,6 +38,8 @@ from app.services.speech_pipeline import SpeechPipeline
 from app.services.transcription_executor import TranscriptionExecutor, TranscriptionExecutorImpl
 from app.storage.recorder import TranscriptRecorderImpl
 from app.storage.sqlite import SQLiteTranscriptRepository
+from app.transcription.adaptive_language_state import AdaptiveLanguageStateStore
+from app.transcription.adaptive_processor import AdaptiveTranscriptionProcessor
 from app.transcription.aggregation import TranscriptionSegmentAggregatorImpl
 from app.transcription.contracts import AudioSource
 from app.transcription.faster_whisper import FasterWhisperTranscriber
@@ -290,6 +293,7 @@ def create_transcription_processor(
     *,
     transcriber: Transcriber,
     language_settings: TranscriptionLanguageSettings,
+    adaptive_state_store: AdaptiveLanguageStateStore | None = None,
 ) -> TranscriptionProcessor:
     if isinstance(
         language_settings,
@@ -303,7 +307,14 @@ def create_transcription_processor(
             language_settings=language_settings,
         )
 
-    raise ValueError("adaptive transcription language mode is not implemented yet")
+    if adaptive_state_store is None:
+        raise ValueError("adaptive transcription language mode requires a shared state store")
+
+    return AdaptiveTranscriptionProcessor(
+        transcriber=transcriber,
+        settings=language_settings,
+        state_store=adaptive_state_store,
+    )
 
 
 def create_transcription_executor(
@@ -311,12 +322,25 @@ def create_transcription_executor(
     database: sqlite3.Connection,
     settings: Settings,
 ) -> TranscriptionExecutor:
+    language_settings = settings.transcription.language
+
+    adaptive_state_store: AdaptiveLanguageStateStore | None = None
+
+    if isinstance(
+        language_settings,
+        AdaptiveTranscriptionLanguageSettings,
+    ):
+        adaptive_state_store = AdaptiveLanguageStateStore(
+            initial_language=language_settings.initial_language,
+        )
+
     model = create_whisper_model(settings)
 
     processors = tuple(
         create_transcription_processor(
             transcriber=FasterWhisperTranscriber(model),
             language_settings=settings.transcription.language,
+            adaptive_state_store=adaptive_state_store,
         )
         for _ in range(settings.transcription.worker_count)
     )

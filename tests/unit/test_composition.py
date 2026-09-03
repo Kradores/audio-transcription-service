@@ -25,11 +25,13 @@ from app.composition import (
     create_system_audio_capture,
     create_transcriber,
     create_transcription_executor,
+    create_transcription_processor,
     create_vad,
     create_whisper_model,
 )
 from app.core.config.enums import WhisperRuntime
 from app.services.transcription_executor import TranscriptionExecutor
+from app.transcription.adaptive_language_state import AdaptiveLanguageStateStore
 from app.transcription.contracts import AudioSource
 from app.transcription.faster_whisper_runtime import (
     DefaultFasterWhisperRuntimeInitializer,
@@ -454,6 +456,7 @@ def test_create_transcription_executor_creates_one_processor_per_worker(
             {
                 "transcriber": transcribers[0],
                 "language_settings": settings.transcription.language,
+                "adaptive_state_store": None,
             },
         ),
         (
@@ -461,6 +464,7 @@ def test_create_transcription_executor_creates_one_processor_per_worker(
             {
                 "transcriber": transcribers[1],
                 "language_settings": settings.transcription.language,
+                "adaptive_state_store": None,
             },
         ),
         (
@@ -468,6 +472,7 @@ def test_create_transcription_executor_creates_one_processor_per_worker(
             {
                 "transcriber": transcribers[2],
                 "language_settings": settings.transcription.language,
+                "adaptive_state_store": None,
             },
         ),
     ]
@@ -478,6 +483,55 @@ def test_create_transcription_executor_creates_one_processor_per_worker(
 
     assert call.kwargs["processors"] == tuple(processors)
     assert call.kwargs["queue_capacity"] == settings.transcription.queue_capacity
+
+
+@patch("app.composition.TranscriptionExecutorImpl")
+@patch("app.composition.create_transcription_processor")
+@patch("app.composition.FasterWhisperTranscriber")
+@patch("app.composition.create_whisper_model")
+def test_create_transcription_executor_shares_adaptive_language_state_across_workers(
+    create_whisper_model: MagicMock,
+    faster_whisper_transcriber: MagicMock,
+    create_transcription_processor: MagicMock,
+    transcription_executor_impl: MagicMock,
+) -> None:
+    settings = (
+        SettingsBuilder()
+        .with_transcription_worker_count(2)
+        .with_adaptive_transcription_language()
+        .build()
+    )
+
+    database = sqlite3.connect(":memory:")
+
+    model = MagicMock()
+    create_whisper_model.return_value = model
+
+    transcribers = [
+        MagicMock(),
+        MagicMock(),
+    ]
+    faster_whisper_transcriber.side_effect = transcribers
+
+    processors = [
+        MagicMock(),
+        MagicMock(),
+    ]
+    create_transcription_processor.side_effect = processors
+
+    create_transcription_executor(
+        database=database,
+        settings=settings,
+    )
+
+    first_store = create_transcription_processor.call_args_list[0].kwargs["adaptive_state_store"]
+    second_store = create_transcription_processor.call_args_list[1].kwargs["adaptive_state_store"]
+
+    assert isinstance(
+        first_store,
+        AdaptiveLanguageStateStore,
+    )
+    assert first_store is second_store
 
 
 def test_system_and_microphone_captures_share_portaudio_refresh_coordinator() -> None:
@@ -585,3 +639,16 @@ def test_create_whisper_model_uses_configured_runtime(
         initializer,
         TheRockFasterWhisperRuntimeInitializer,
     )
+
+
+def test_create_transcription_processor_requires_shared_state_for_adaptive_mode() -> None:
+    settings = SettingsBuilder().with_adaptive_transcription_language().build()
+
+    with pytest.raises(
+        ValueError,
+        match="requires a shared state store",
+    ):
+        create_transcription_processor(
+            transcriber=MagicMock(),
+            language_settings=settings.transcription.language,
+        )
