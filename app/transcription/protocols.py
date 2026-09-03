@@ -34,15 +34,22 @@ class WhisperModelProtocol(Protocol):
     def transcribe(
         self,
         audio: np.ndarray,
+        *,
+        language: str | None = None,
     ) -> tuple[Iterable[WhisperSegmentProtocol], WhisperInfoProtocol]:
-        """Transcribe normalized audio."""
+        """Transcribe normalized audio with optional explicit language selection."""
 
 
 class Transcriber(Protocol):
     """Application-facing synchronous transcription contract."""
 
-    def transcribe(self, segment: SpeechSegment) -> TranscriptionResult:
-        """Transcribe one speech segment."""
+    def transcribe(
+        self,
+        segment: SpeechSegment,
+        *,
+        language: str | None = None,
+    ) -> TranscriptionResult:
+        """Transcribe one speech segment with optional explicit language selection."""
 
 
 class TranscriptionSegmentAggregator(Protocol):

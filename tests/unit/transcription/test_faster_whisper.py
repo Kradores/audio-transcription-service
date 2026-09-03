@@ -33,12 +33,16 @@ class FakeWhisperModel:
         self._language = language
         self._language_probability = language_probability
         self.received_audio: np.ndarray | None = None
+        self.received_language: str | None = None
 
     def transcribe(
         self,
         audio: np.ndarray,
+        *,
+        language: str | None = None,
     ) -> tuple[Iterable[FakeWhisperSegment], FakeWhisperInfo]:
         self.received_audio = audio
+        self.received_language = language
 
         return (
             iter(self._segments),
@@ -88,6 +92,7 @@ def test_transcribe_returns_segment_level_result() -> None:
     assert result.text == "Hello world"
     assert result.language == "en"
     assert result.confidence == 0.9
+    assert model.received_language is None
     assert result.start == 10.0
     assert result.end == 11.0
 
@@ -151,10 +156,63 @@ def test_transcribe_logs_inference_timing_and_result(
     # Assert
     messages = [record.getMessage() for record in caplog.records]
     assert any(
-        "transcription started start=10.000 duration=1.000" in message for message in messages
+        "transcription started start=10.000 duration=1.000" in message
+        and "language_selection=auto" in message
+        for message in messages
     )
     assert any(
-        "transcription inference completed" in message and "language_probability=0.900" in message
+        "transcription inference completed" in message
+        and "confidence=0.900" in message
+        and "language_source=detected" in message
         for message in messages
     )
     assert result.text == "Hello"
+
+
+def test_transcribe_passes_explicit_language_to_model() -> None:
+    # Arrange
+    model = FakeWhisperModel(
+        segments=[FakeWhisperSegment("Da.")],
+        language="ro",
+        language_probability=1.0,
+    )
+    transcriber = FasterWhisperTranscriber(model)
+
+    # Act
+    result = transcriber.transcribe(
+        create_segment(),
+        language="ro",
+    )
+
+    # Assert
+    assert model.received_language == "ro"
+    assert result.text == "Da."
+    assert result.language == "ro"
+    assert result.confidence is None
+
+
+def test_transcribe_logs_explicit_language_without_detection_confidence(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Arrange
+    model = FakeWhisperModel(
+        segments=[FakeWhisperSegment("Da.")],
+        language="ro",
+        language_probability=1.0,
+    )
+    transcriber = FasterWhisperTranscriber(model)
+
+    # Act
+    with caplog.at_level("INFO", logger="app.transcription.faster_whisper"):
+        transcriber.transcribe(
+            create_segment(),
+            language="ro",
+        )
+
+    # Assert
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("language_selection=ro" in message for message in messages)
+    assert any(
+        "confidence=none" in message and "language_source=explicit" in message
+        for message in messages
+    )

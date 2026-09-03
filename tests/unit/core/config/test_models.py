@@ -8,14 +8,18 @@ from pydantic import ValidationError
 from app.core.config.enums import (
     ApplicationEnvironment,
     LogLevel,
+    TranscriptionLanguageMode,
     WhisperComputeType,
     WhisperDevice,
     WhisperModel,
     WhisperRuntime,
 )
 from app.core.config.models import (
+    AdaptiveTranscriptionLanguageSettings,
     ApiSettings,
     ApplicationSettings,
+    AutoTranscriptionLanguageSettings,
+    FixedTranscriptionLanguageSettings,
     Settings,
 )
 
@@ -423,3 +427,124 @@ def test_whisper_settings_accepts_supported_runtimes(
 def test_whisper_settings_rejects_unknown_runtime() -> None:
     with pytest.raises(ValidationError):
         SettingsBuilder().with_whisper_runtime("unsupported").build()
+
+
+def test_transcription_language_auto_mode_accepts_valid_configuration() -> None:
+    settings = SettingsBuilder().build()
+
+    language = settings.transcription.language
+
+    assert isinstance(language, AutoTranscriptionLanguageSettings)
+    assert language.mode is TranscriptionLanguageMode.AUTO
+
+
+def test_transcription_language_auto_mode_rejects_mode_specific_fields() -> None:
+    document = valid_configuration_document()
+    document["transcription"]["language"] = {
+        "mode": "auto",
+        "language": "ro",
+    }
+
+    with pytest.raises(ValidationError):
+        Settings.model_validate(document)
+
+
+def test_transcription_language_fixed_mode_requires_language() -> None:
+    document = valid_configuration_document()
+    document["transcription"]["language"] = {
+        "mode": "fixed",
+    }
+
+    with pytest.raises(ValidationError):
+        Settings.model_validate(document)
+
+
+def test_transcription_language_fixed_mode_accepts_language() -> None:
+    document = valid_configuration_document()
+    document["transcription"]["language"] = {
+        "mode": "fixed",
+        "language": "RO",
+    }
+
+    settings = Settings.model_validate(document)
+    language = settings.transcription.language
+
+    assert isinstance(language, FixedTranscriptionLanguageSettings)
+    assert language.mode is TranscriptionLanguageMode.FIXED
+    assert language.language == "ro"
+
+
+def test_transcription_language_adaptive_mode_accepts_valid_configuration() -> None:
+    document = valid_configuration_document()
+    document["transcription"]["language"] = {
+        "mode": "adaptive",
+        "initial_language": None,
+        "min_probe_duration_seconds": 3.0,
+        "switch_probability_threshold": 0.85,
+        "switch_confirmations": 2,
+    }
+
+    settings = Settings.model_validate(document)
+    language = settings.transcription.language
+
+    assert isinstance(language, AdaptiveTranscriptionLanguageSettings)
+    assert language.mode is TranscriptionLanguageMode.ADAPTIVE
+    assert language.initial_language is None
+    assert language.min_probe_duration_seconds == 3.0
+    assert language.switch_probability_threshold == 0.85
+    assert language.switch_confirmations == 2
+
+
+def test_transcription_language_adaptive_mode_normalizes_initial_language() -> None:
+    document = valid_configuration_document()
+    document["transcription"]["language"] = {
+        "mode": "adaptive",
+        "initial_language": " RO ",
+        "min_probe_duration_seconds": 3.0,
+        "switch_probability_threshold": 0.85,
+        "switch_confirmations": 2,
+    }
+
+    settings = Settings.model_validate(document)
+    language = settings.transcription.language
+
+    assert isinstance(language, AdaptiveTranscriptionLanguageSettings)
+    assert language.initial_language == "ro"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("min_probe_duration_seconds", 0.0),
+        ("min_probe_duration_seconds", -0.1),
+        ("switch_probability_threshold", 0.0),
+        ("switch_probability_threshold", 1.01),
+        ("switch_confirmations", 0),
+    ],
+)
+def test_transcription_language_adaptive_mode_rejects_invalid_values(
+    field: str,
+    value: float | int,
+) -> None:
+    document = valid_configuration_document()
+    document["transcription"]["language"] = {
+        "mode": "adaptive",
+        "initial_language": None,
+        "min_probe_duration_seconds": 3.0,
+        "switch_probability_threshold": 0.85,
+        "switch_confirmations": 2,
+    }
+    document["transcription"]["language"][field] = value
+
+    with pytest.raises(ValidationError):
+        Settings.model_validate(document)
+
+
+def test_transcription_language_rejects_unknown_mode() -> None:
+    document = valid_configuration_document()
+    document["transcription"]["language"] = {
+        "mode": "unsupported",
+    }
+
+    with pytest.raises(ValidationError):
+        Settings.model_validate(document)

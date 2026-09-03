@@ -17,6 +17,12 @@ class LogLevel(StrEnum):
     CRITICAL = "CRITICAL"
 
 
+class TranscriptionLanguageMode(StrEnum):
+    AUTO = "auto"
+    FIXED = "fixed"
+    ADAPTIVE = "adaptive"
+
+
 class WhisperRuntime(StrEnum):
     DEFAULT = "default"
     THEROCK = "therock"

@@ -43,7 +43,12 @@ class FakeTranscriber:
     def __init__(self) -> None:
         self.transcribed: list[SpeechSegment] = []
 
-    def transcribe(self, segment: SpeechSegment) -> TranscriptionResult:
+    def transcribe(
+        self,
+        segment: SpeechSegment,
+        *,
+        language: str | None = None,
+    ) -> TranscriptionResult:
         self.transcribed.append(segment)
 
         return TranscriptionResult(
@@ -116,7 +121,12 @@ async def test_executor_submit_does_not_block_while_transcription_is_running() -
     release = threading.Event()
 
     class BlockingTranscriber:
-        def transcribe(self, segment: SpeechSegment) -> TranscriptionResult:
+        def transcribe(
+            self,
+            segment: SpeechSegment,
+            *,
+            language: str | None = None,
+        ) -> TranscriptionResult:
             started.set()
             release.wait()
 
@@ -157,7 +167,12 @@ async def test_executor_rejects_segment_when_queue_is_full() -> None:
     release = threading.Event()
 
     class BlockingTranscriber:
-        def transcribe(self, segment: SpeechSegment) -> TranscriptionResult:
+        def transcribe(
+            self,
+            segment: SpeechSegment,
+            *,
+            language: str | None = None,
+        ) -> TranscriptionResult:
             started.set()
             release.wait()
 
@@ -199,7 +214,12 @@ async def test_executor_recovers_after_queue_overflow() -> None:
     result_received = threading.Event()
 
     class BlockingTranscriber:
-        def transcribe(self, segment: SpeechSegment) -> TranscriptionResult:
+        def transcribe(
+            self,
+            segment: SpeechSegment,
+            *,
+            language: str | None = None,
+        ) -> TranscriptionResult:
             block_transcriber.wait()  # Pause the worker thread here
             return TranscriptionResult(
                 text="text",
@@ -239,7 +259,12 @@ async def test_executor_continues_after_transcription_failure() -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        def transcribe(self, segment: SpeechSegment) -> TranscriptionResult:
+        def transcribe(
+            self,
+            segment: SpeechSegment,
+            *,
+            language: str | None = None,
+        ) -> TranscriptionResult:
             self.calls += 1
 
             if self.calls == 1:
@@ -329,7 +354,12 @@ async def test_executor_stats_track_rejected_submissions() -> None:
     release = threading.Event()
 
     class BlockingTranscriber:
-        def transcribe(self, segment: SpeechSegment) -> TranscriptionResult:
+        def transcribe(
+            self,
+            segment: SpeechSegment,
+            *,
+            language: str | None = None,
+        ) -> TranscriptionResult:
             started.set()
             release.wait()
 
@@ -397,7 +427,12 @@ async def test_executor_stats_track_transcription_failures() -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        def transcribe(self, segment: SpeechSegment) -> TranscriptionResult:
+        def transcribe(
+            self,
+            segment: SpeechSegment,
+            *,
+            language: str | None = None,
+        ) -> TranscriptionResult:
             self.calls += 1
 
             if self.calls <= 2:
@@ -438,7 +473,12 @@ async def test_executor_stats_track_max_queue_depth() -> None:
     release = threading.Event()
 
     class BlockingTranscriber:
-        def transcribe(self, segment: SpeechSegment) -> TranscriptionResult:
+        def transcribe(
+            self,
+            segment: SpeechSegment,
+            *,
+            language: str | None = None,
+        ) -> TranscriptionResult:
             started.set()
             release.wait()
 
@@ -604,6 +644,8 @@ async def test_executor_processes_two_transcriptions_concurrently() -> None:
         def transcribe(
             self,
             segment: SpeechSegment,
+            *,
+            language: str | None = None,
         ) -> TranscriptionResult:
             self.calls += 1
             self._started.set()
@@ -662,6 +704,8 @@ async def test_executor_accounts_for_all_accepted_work_after_shutdown() -> None:
         def transcribe(
             self,
             segment: SpeechSegment,
+            *,
+            language: str | None = None,
         ) -> TranscriptionResult:
             if int(segment.timestamp) % 2 == 0:
                 raise RuntimeError("transcription failed")
@@ -773,6 +817,8 @@ async def test_executor_allows_results_to_complete_out_of_submission_order() -> 
         def transcribe(
             self,
             segment: SpeechSegment,
+            *,
+            language: str | None = None,
         ) -> TranscriptionResult:
             if segment.timestamp == 0.0:
                 first_started.set()
@@ -926,6 +972,8 @@ async def test_cancelling_wait_does_not_cancel_executor_lifecycle() -> None:
         def transcribe(
             self,
             segment: SpeechSegment,
+            *,
+            language: str | None = None,
         ) -> TranscriptionResult:
             transcriber_started.set()
             release_transcriber.wait()

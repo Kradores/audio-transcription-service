@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.core.config.enums import (
     ApplicationEnvironment,
     LogLevel,
+    TranscriptionLanguageMode,
     WhisperComputeType,
     WhisperDevice,
     WhisperModel,
@@ -110,6 +111,47 @@ class DatabaseSettings(BaseConfigurationModel):
     path: Path
 
 
+type LanguageCode = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        to_lower=True,
+        min_length=1,
+    ),
+]
+
+
+class AutoTranscriptionLanguageSettings(BaseConfigurationModel):
+    """Detect language independently for each transcription work item."""
+
+    mode: Literal[TranscriptionLanguageMode.AUTO]
+
+
+class FixedTranscriptionLanguageSettings(BaseConfigurationModel):
+    """Decode every transcription work item using one configured language."""
+
+    mode: Literal[TranscriptionLanguageMode.FIXED]
+    language: LanguageCode
+
+
+class AdaptiveTranscriptionLanguageSettings(BaseConfigurationModel):
+    """Maintain conversation language state while allowing language switches."""
+
+    mode: Literal[TranscriptionLanguageMode.ADAPTIVE]
+    initial_language: LanguageCode | None
+    min_probe_duration_seconds: Annotated[float, Field(gt=0.0)]
+    switch_probability_threshold: Annotated[float, Field(gt=0.0, le=1.0)]
+    switch_confirmations: Annotated[int, Field(ge=1)]
+
+
+type TranscriptionLanguageSettings = Annotated[
+    AutoTranscriptionLanguageSettings
+    | FixedTranscriptionLanguageSettings
+    | AdaptiveTranscriptionLanguageSettings,
+    Field(discriminator="mode"),
+]
+
+
 class TranscriptionAggregationSettings(BaseConfigurationModel):
     """Configuration for speech-segment aggregation before transcription."""
 
@@ -132,6 +174,7 @@ class TranscriptionSettings(BaseConfigurationModel):
 
     queue_capacity: Annotated[int, Field(ge=1, le=10_000)]
     worker_count: Annotated[int, Field(ge=1)]
+    language: TranscriptionLanguageSettings
     aggregation: TranscriptionAggregationSettings
 
 
@@ -159,6 +202,11 @@ __all__ = [
     "Settings",
     "VadSettings",
     "WhisperSettings",
-    "TranscriptionSettings",
+    "AdaptiveTranscriptionLanguageSettings",
+    "AutoTranscriptionLanguageSettings",
+    "FixedTranscriptionLanguageSettings",
+    "LanguageCode",
     "TranscriptionAggregationSettings",
+    "TranscriptionLanguageSettings",
+    "TranscriptionSettings",
 ]

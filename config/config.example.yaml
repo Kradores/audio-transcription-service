@@ -33,6 +33,9 @@ transcription:
   queue_capacity: 10
   worker_count: 1
 
+  language:
+    mode: auto
+
   aggregation:
     enabled: true
     target_duration_seconds: 5.0

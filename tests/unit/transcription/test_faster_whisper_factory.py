@@ -23,6 +23,8 @@ class FakeModel:
     def transcribe(
         self,
         audio: np.ndarray,
+        *,
+        language: str | None = None,
     ) -> tuple[Iterable[WhisperSegmentProtocol], WhisperInfoProtocol]:
         raise NotImplementedError
 

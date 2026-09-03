@@ -46,6 +46,9 @@ def valid_configuration_document() -> dict[str, Any]:
         "transcription": {
             "queue_capacity": 10,
             "worker_count": 2,
+            "language": {
+                "mode": "auto",
+            },
             "aggregation": {
                 "enabled": True,
                 "target_duration_seconds": 5.0,
