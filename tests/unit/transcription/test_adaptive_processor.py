@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
+
 import numpy as np
+import pytest
 
 from app.audio.contracts import AudioFormat, SpeechSegment
 from app.core.config.enums import TranscriptionLanguageMode
@@ -715,3 +718,110 @@ def test_language_state_is_shared_across_processor_instances() -> None:
     assert result.source == AudioSource.MICROPHONE
     assert result.result.language == "ro"
     assert result.result.confidence is None
+
+
+def test_logs_language_establishment(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = create_settings()
+    transcriber = FakeTranscriber(
+        auto_results=[
+            ("ro", 0.96),
+        ],
+    )
+    processor = create_processor(
+        transcriber=transcriber,
+        settings=settings,
+    )
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="app.transcription.adaptive_processor",
+    ):
+        processor.process(
+            create_item(
+                duration=4.0,
+            )
+        )
+
+    assert "decision=language_established" in caplog.text
+    assert "established_before=none" in caplog.text
+    assert "established_after=ro" in caplog.text
+    assert "detected_language=ro" in caplog.text
+    assert "detected_probability=0.960" in caplog.text
+
+
+def test_logs_low_confidence_fallback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = create_settings(
+        initial_language="ro",
+    )
+    transcriber = FakeTranscriber(
+        auto_results=[
+            ("en", 0.84),
+        ],
+    )
+    processor = create_processor(
+        transcriber=transcriber,
+        settings=settings,
+    )
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="app.transcription.adaptive_processor",
+    ):
+        processor.process(
+            create_item(
+                duration=4.0,
+            )
+        )
+
+    assert "decision=low_confidence_fallback" in caplog.text
+    assert "established_before=ro" in caplog.text
+    assert "established_after=ro" in caplog.text
+    assert "selected_language=ro" in caplog.text
+    assert "detected_language=en" in caplog.text
+    assert "detected_probability=0.840" in caplog.text
+
+
+def test_logs_confirmed_language_switch(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = create_settings(
+        initial_language="ro",
+    )
+    transcriber = FakeTranscriber(
+        auto_results=[
+            ("en", 0.96),
+            ("en", 0.95),
+        ],
+    )
+    processor = create_processor(
+        transcriber=transcriber,
+        settings=settings,
+    )
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="app.transcription.adaptive_processor",
+    ):
+        processor.process(
+            create_item(
+                duration=4.0,
+                timestamp=0.0,
+            )
+        )
+        processor.process(
+            create_item(
+                duration=4.0,
+                timestamp=5.0,
+            )
+        )
+
+    assert "decision=candidate_created" in caplog.text
+    assert "candidate_after=en" in caplog.text
+
+    assert "decision=language_switched" in caplog.text
+    assert "established_before=ro" in caplog.text
+    assert "established_after=en" in caplog.text
