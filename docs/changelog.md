@@ -147,3 +147,41 @@ We have successfully completed:
   zero transcription rejection, zero transcription failures, and clean
   shutdown;
 - ADR-044.
+
+
+## As of 2026-09-06
+
+**Implemented**
+
+- corrected cross-source conversation timestamps so system loopback silence no
+  longer compresses the `system_audio` timeline while microphone capture
+  continues;
+- preserved real source-timeline gaps through audio normalization;
+- validated system-audio and microphone timestamp alignment after long
+  loopback-silence periods;
+- added configurable transcription language modes:
+  `auto`, `fixed`, and `adaptive`;
+- added independent conversation-scoped adaptive language state per audio
+  source;
+- added probe-based language establishment, candidate confirmation, language
+  switching, and low-confidence fallback;
+- short speech now uses an established source language explicitly instead of
+  independently re-detecting language when adaptive mode has context;
+- added structured adaptive-language decision logging;
+- added microphone language-detection benchmark tooling using exact captured
+  transcription segments;
+- confirmed that microphone signal level can materially affect Faster-Whisper
+  language-detection probability;
+- added configurable microphone transcription gain through
+  `transcription.microphone_gain_db`;
+- microphone gain defaults to `0.0 dB` and is applied only immediately before
+  transcription;
+- system audio remains unchanged by microphone gain configuration;
+- added replaceable `TranscriptionAudioPreprocessor` implementations for
+  identity and fixed gain;
+- excessive configured gain is clipped to the normalized audio range and
+  reported through structured warning logs;
+- full quality gate green:
+  - `480 passed`;
+  - mypy clean across `117` source files;
+  - Ruff formatting and linting clean.

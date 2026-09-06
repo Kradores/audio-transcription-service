@@ -11,30 +11,37 @@ different runtime boundaries without logging every 20 ms audio frame.
 The current runtime architecture is:
 
 ```text
-System AudioCapture ─┐
-                     │
-                     ▼
-              SpeechPipeline
-                     │
-                     │ source-tagged work
-                     ▼
-              TranscriptionExecutor
-                     │
-                     ▼
-              Faster-Whisper
-                     │
-                     ▼
-             TranscriptRecorder
-                     │
-                     ▼
-                   SQLite
-
-Microphone AudioCapture
-          │
-          ▼
+System AudioCapture
+        ↓
    SpeechPipeline
-          │
-          └──────────────► shared TranscriptionExecutor
+        ↓
+   aggregation
+        ↓
+ transcription audio
+   preprocessing
+        │
+        ├──────────────────────────────┐
+        │                              │
+Microphone AudioCapture                │
+        ↓                              │
+   SpeechPipeline                      │
+        ↓                              │
+   aggregation                         │
+        ↓                              │
+ transcription audio                   │
+   preprocessing                       │
+        │                              │
+        └──────────────┬───────────────┘
+                       ▼
+             TranscriptionExecutor
+                       ↓
+             TranscriptionProcessor
+                       ↓
+                Faster-Whisper
+                       ↓
+              TranscriptRecorder
+                       ↓
+                    SQLite
 ```
 
 The primary diagnostic questions are:
@@ -431,6 +438,112 @@ language detection.
 
 Long-running throughput analysis should primarily use the aggregate
 `TranscriptionExecutor` statistics.
+
+---
+
+## Adaptive language selection
+
+When adaptive transcription-language mode is enabled, every processed work
+item emits one structured adaptive-language decision event:
+
+```text
+adaptive language decision
+source=...
+start=...
+duration=...
+decision=...
+probe=...
+established_before=...
+established_after=...
+candidate_before=...
+candidate_after=...
+candidate_confirmations=...
+selected_language=...
+detected_language=...
+detected_probability=...
+```
+
+The event describes both the evidence observed from the model and the
+conversation state transition caused by that evidence.
+
+Possible decision values include:
+
+```text
+unknown_short
+unknown_probe_insufficient_confidence
+language_established
+established_short
+probe_confirmed_established
+candidate_cleared
+candidate_created
+candidate_confirmed
+candidate_replaced
+language_switched
+low_confidence_fallback
+```
+
+`selected_language=auto` means the accepted result came from automatic
+language detection.
+
+A concrete `selected_language` means the work item was decoded explicitly in
+that language.
+
+For `low_confidence_fallback`, the event preserves the discarded automatic
+detection evidence through:
+
+```text
+detected_language
+detected_probability
+```
+
+while `selected_language` describes the explicit language used for the
+accepted transcription.
+
+Adaptive state is independent per source, so all adaptive-language diagnostics
+must be interpreted together with `source=`.
+
+---
+
+## Microphone transcription gain
+
+The effective microphone transcription gain is logged when source composition
+is created:
+
+```text
+microphone transcription gain configured
+gain_db=...
+enabled=...
+```
+
+Examples:
+
+```text
+microphone transcription gain configured gain_db=0.0 enabled=False
+microphone transcription gain configured gain_db=12.0 enabled=True
+```
+
+Normal gain processing is deliberately not logged once per transcription
+segment.
+
+If configured gain would move samples outside the normalized float32 audio
+range, the fixed-gain preprocessor clips the samples and emits a warning:
+
+```text
+transcription audio clipped
+source=microphone
+gain_db=...
+input_peak=...
+clipped_samples=...
+```
+
+A clipping warning indicates that the configured gain may be too aggressive
+for the current microphone/input configuration.
+
+The gain setting affects only microphone audio immediately before
+transcription. Capture, VAD, segmentation, aggregation, and their existing
+statistics remain unchanged.
+
+Transcript text is never included in gain-processing logs.
 
 ---
 

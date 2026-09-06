@@ -5,20 +5,23 @@
 The service now supports a complete local two-sided conversation pipeline:
 
 ```text
-System AudioCapture ──→ source-local processing ──→ aggregator ──┐
-                                                                │
-                                                                ▼
-                                                     shared bounded
-                                                  TranscriptionExecutor
-                                                      worker_count=2
-                                                                │
-                                                                ▼
-                                                         Faster-Whisper
-                                                                │
-                                                                ▼
-                                                          persistence
+System AudioCapture ─→ source-local processing ─→ aggregator ─→ preprocessor ─┐
+                                                                             │
+                                                                             ▼
+                                                                  shared bounded
+                                                               TranscriptionExecutor
+                                                                             │
+                                                                             ▼
+                                                                  source-aware
+                                                               transcription policy
+                                                                             │
+                                                                             ▼
+                                                                    Faster-Whisper
+                                                                             │
+                                                                             ▼
+                                                                      persistence
 
-Microphone AudioCapture → source-local processing → aggregator ──┘
+Microphone AudioCapture → source-local processing → aggregator → preprocessor ┘
 ```
 
 The milestone includes:
@@ -39,6 +42,8 @@ The milestone includes:
 - graceful draining of accepted transcription work;
 - application-owned rotating file logging;
 - queue, aggregation, capture, and concurrency observability.
+- per-source transcription-audio preprocessing;
+- per-source multilingual transcription policy with adaptive language state;
 
 ### ADR-042 concurrency validation
 
@@ -93,6 +98,28 @@ The next milestone is to improve the quality and operational reliability of
 real long-running conversations without destabilizing the validated execution
 architecture.
 
+### Completed quality slices
+
+Multilingual transcription quality has moved from investigation into an
+implemented source-aware policy.
+
+Completed work includes:
+
+- per-source `auto`, `fixed`, and `adaptive` language modes;
+- conversation-scoped adaptive language state;
+- probe-based language establishment and switching;
+- confirmation hysteresis for language switches;
+- explicit-language decoding for short established-language speech;
+- low-confidence fallback to the established language;
+- structured adaptive-language decision observability;
+- exact captured microphone-audio replay and language-detection benchmarking;
+- configurable microphone transcription gain;
+- `0.0 dB` gain as the safe default;
+- clipping observability for excessive configured gain.
+
+Automatic microphone gain control and automatic normalization remain outside
+the current scope.
+
 ### Current priorities
 
 1. **Long-running stability**
@@ -108,16 +135,23 @@ architecture.
    - avoid increasing queue capacity merely to hide sustained throughput
      deficits.
 
-3. **Language behavior**
-   - investigate multilingual and short-fragment language detection separately
-     from worker concurrency;
-   - do not mix language-policy changes into concurrency benchmarking.
+3. **Multilingual transcription validation**
+   - continue validating adaptive language behavior in longer real
+     conversations;
+   - include repeated genuine language switches and short speech around those
+     transitions;
+   - validate independent language behavior across `system_audio` and
+     `microphone`;
+   - tune adaptive thresholds only from measured runtime evidence.
 
 4. **Source quality**
-   - evaluate source-specific VAD/segmentation tuning only from measured
-     conversation evidence;
-   - keep system-audio and microphone processing independently configurable
-     where justified by evidence.
+   - keep microphone transcription gain optional and configuration-driven;
+   - retain `0.0 dB` as the default;
+   - validate useful gain values on additional microphone/device types before
+     recommending hardware-specific values;
+   - evaluate VAD/segmentation changes only from measured conversation evidence;
+   - do not introduce automatic gain control or normalization without new
+     evidence.
 
 5. **Resource behavior**
    - retain the validated runtime-specific worker defaults:

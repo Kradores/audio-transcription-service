@@ -1,43 +1,61 @@
 # High-Level Architecture
 
-```
-                         APPLICATION
-──────────────────────────────────────────────────────────
+```text
+                              APPLICATION
+────────────────────────────────────────────────────────────────────────
 
-                    Real-time audio path
-
-WASAPI Loopback
-      ↓
-AudioCapture
-      ↓
-AudioNormalizer
-      ↓
-VAD
-      ↓
-SpeechSegmentAssembler
-      ↓
-SpeechSegment
-      ↓
-┌───────────────────────────────┐
-│ Transcription work queue      │
-│ bounded, application-owned    │
-└───────────────┬───────────────┘
-                ↓
-       Transcription worker
-                ↓
-           Transcriber
-                ↓
-      TranscriptionResult
-                ↓
-      TranscriptResultHandler
-                ↓
-       TranscriptRecorder
-                ↓
-      TranscriptRepository
-                ↓
-──────────────────────────────────────────
-              INFRASTRUCTURE
-             SQLite
+                         shared conversation timeline
+                                   │
+                   ┌───────────────┴───────────────┐
+                   │                               │
+                   ▼                               ▼
+             system_audio                     microphone
+                   │                               │
+              AudioCapture                    AudioCapture
+                   │                               │
+             AudioNormalizer                 AudioNormalizer
+                   │                               │
+                 VAD                               VAD
+                   │                               │
+        SpeechSegmentAssembler           SpeechSegmentAssembler
+                   │                               │
+    TranscriptionSegmentAggregator   TranscriptionSegmentAggregator
+                   │                               │
+    IdentityTranscriptionAudio       TranscriptionAudioPreprocessor
+          Preprocessor                identity or configured gain
+                   │                               │
+                   └───────────────┬───────────────┘
+                                   ▼
+                      shared TranscriptionExecutor
+                         bounded work queue
+                         configured workers
+                                   │
+                                   ▼
+                        TranscriptionProcessor
+                                   │
+                   ┌───────────────┴───────────────┐
+                   │                               │
+              auto / fixed                    adaptive
+                                                │
+                                      per-source language state
+                   │                               │
+                   └───────────────┬───────────────┘
+                                   ▼
+                              Transcriber
+                                   │
+                         Faster-Whisper model
+                                   │
+                                   ▼
+                    SourcedTranscriptionResult
+                                   │
+                          TranscriptRecorder
+                                   │
+                        TranscriptRepository
+                                   │
+───────────────────────────────────┼────────────────────────────────────
+                              INFRASTRUCTURE
+                                   │
+                                 SQLite
 ```
 
 # Project Structure
@@ -195,8 +213,15 @@ This is another reason why `AudioNormalizer` deserves its own interface.
 | Semantic buffering                  | `SpeechSegmentAssembler` |
 | Segment boundaries                  | `SpeechSegmentAssembler` |
 | Maximum-duration splitting          | `SpeechSegmentAssembler` |
-| `SpeechSegment` creation            | `SpeechSegmentAssembler` |
-| Transcription                       | Whisper pipeline         |
+| `SpeechSegment` creation            | `SpeechSegmentAssembler`          |
+| Transcription aggregation           | `TranscriptionSegmentAggregator`  |
+| Transcription audio preprocessing   | `TranscriptionAudioPreprocessor`  |
+| Transcription scheduling/execution  | `TranscriptionExecutor`           |
+| Language-selection policy           | `TranscriptionProcessor`          |
+| Adaptive per-source language state  | `AdaptiveLanguageStateStore`      |
+| Speech-to-text inference            | `Transcriber`                     |
+| Transcript persistence transition   | `TranscriptRecorder`              |
+| Persistence mechanics               | `TranscriptRepository`            |
 
 
 ## key ownership statement
@@ -358,6 +383,57 @@ Source identity is attached when source-specific speech crosses into the shared
 transcription execution boundary.
 
 Both captures use one shared monotonic conversation timeline.
+
+## Transcription audio preprocessing boundary
+
+Completed semantic speech is aggregated before any transcription-specific audio
+preprocessing occurs:
+
+```text
+SpeechSegmentAssembler
+        ↓
+TranscriptionSegmentAggregator
+        ↓
+TranscriptionAudioPreprocessor
+        ↓
+TranscriptionExecutor
+```
+
+The preprocessing boundary is source-local.
+
+Current composition is:
+
+```text
+system_audio
+    → IdentityTranscriptionAudioPreprocessor
+
+microphone + microphone_gain_db == 0
+    → IdentityTranscriptionAudioPreprocessor
+
+microphone + microphone_gain_db != 0
+    → FixedGainTranscriptionAudioPreprocessor
+```
+
+Microphone gain is therefore applied only to the completed audio that will be
+submitted for transcription.
+
+It does not influence:
+
+```text
+capture
+normalization
+VAD
+speech segmentation
+transcription aggregation
+timestamps
+```
+
+The default is `0.0 dB`, so normal microphone behavior remains unchanged unless
+the user explicitly enables gain.
+
+The preprocessing boundary is intentionally replaceable. Fixed gain is the
+currently implemented policy; automatic gain control, peak normalization, and
+RMS normalization are not part of the current architecture.
 
 ## Windows native capture lifecycle
 

@@ -46,6 +46,85 @@ with ownership/invariants.
 - format
 with its invariants.
 
+## TranscriptionSegmentAggregator
+
+```py
+@property
+def stats(self) -> TranscriptionSegmentAggregatorStats: ...
+
+def process(
+    segment: SpeechSegment,
+) -> tuple[SpeechSegment, ...]: ...
+
+def advance(
+    timestamp: float,
+) -> tuple[SpeechSegment, ...]: ...
+
+def flush() -> tuple[SpeechSegment, ...]: ...
+```
+
+Application-owned boundary for combining completed semantic speech segments
+into transcription work units.
+
+Aggregation remains source-local and does not perform transcription.
+
+## TranscriptionAudioPreprocessor
+
+```py
+process(
+    segment: SpeechSegment,
+) -> SpeechSegment
+```
+
+Application-owned boundary for transforming a completed transcription audio
+segment immediately before it is submitted to `TranscriptionExecutor`.
+
+The contract remains independent of the concrete preprocessing algorithm.
+
+Current implementations are:
+
+```text
+IdentityTranscriptionAudioPreprocessor
+FixedGainTranscriptionAudioPreprocessor
+```
+
+The identity implementation may return the original `SpeechSegment`.
+
+A transforming implementation returns a segment whose transcription audio has
+been modified while preserving:
+
+```text
+timestamp
+duration
+AudioFormat
+```
+
+The input segment must not be mutated.
+
+The current fixed-gain implementation clips output samples to the normalized
+float32 range:
+
+```text
+[-1.0, 1.0]
+```
+
+## TranscriptionProcessor
+
+```py
+process(
+    item: TranscriptionWorkItem,
+) -> SourcedTranscriptionResult
+```
+
+Application-owned policy boundary between transcription execution and the
+source-agnostic `Transcriber`.
+
+The processor may use the work item's source identity to apply transcription
+policy such as per-source adaptive language selection.
+
+The concrete `Transcriber` remains independent of source identity and
+conversation state.
+
 ## TranscriptionResult
 ```
 text
