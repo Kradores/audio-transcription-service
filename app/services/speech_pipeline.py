@@ -9,7 +9,10 @@ from app.audio.contracts import ProcessingAudioFrame, SpeechSegment
 from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.services.transcription_executor import TranscriptionExecutor
 from app.transcription.contracts import AudioSource, TranscriptionWorkItem
-from app.transcription.protocols import TranscriptionSegmentAggregator
+from app.transcription.protocols import (
+    TranscriptionAudioPreprocessor,
+    TranscriptionSegmentAggregator,
+)
 from app.vad.protocols import AudioVad, SpeechSegmentAssembler
 
 logger = logging.getLogger(__name__)
@@ -48,6 +51,7 @@ class SpeechPipeline:
         vad: AudioVad,
         assembler: SpeechSegmentAssembler,
         transcription_segment_aggregator: TranscriptionSegmentAggregator,
+        transcription_audio_preprocessor: TranscriptionAudioPreprocessor,
         transcription_executor: TranscriptionExecutor,
     ) -> None:
         self._source = source
@@ -56,6 +60,7 @@ class SpeechPipeline:
         self._vad = vad
         self._assembler = assembler
         self._transcription_segment_aggregator = transcription_segment_aggregator
+        self._transcription_audio_preprocessor = transcription_audio_preprocessor
         self._transcription_executor = transcription_executor
 
         self._task: asyncio.Task[None] | None = None
@@ -291,10 +296,14 @@ class SpeechPipeline:
         self,
         segment: SpeechSegment,
     ) -> None:
+        transcription_segment = self._transcription_audio_preprocessor.process(
+            segment,
+        )
+
         accepted = self._transcription_executor.submit(
             TranscriptionWorkItem(
                 source=self._source,
-                segment=segment,
+                segment=transcription_segment,
             )
         )
 

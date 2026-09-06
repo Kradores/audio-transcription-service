@@ -32,6 +32,7 @@ audio:
 transcription:
   queue_capacity: 10
   worker_count: 1
+  microphone_gain_db: 0.0
 
   language:
     mode: auto

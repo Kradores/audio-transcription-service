@@ -1,3 +1,4 @@
+import logging
 import sqlite3
 from pathlib import Path
 from typing import cast
@@ -24,6 +25,7 @@ from app.composition import (
     create_speech_pipeline,
     create_system_audio_capture,
     create_transcriber,
+    create_transcription_audio_preprocessor,
     create_transcription_executor,
     create_transcription_processor,
     create_vad,
@@ -32,6 +34,10 @@ from app.composition import (
 from app.core.config.enums import WhisperRuntime
 from app.services.transcription_executor import TranscriptionExecutor
 from app.transcription.adaptive_language_state import AdaptiveLanguageStateStore
+from app.transcription.audio_preprocessor import (
+    FixedGainTranscriptionAudioPreprocessor,
+    IdentityTranscriptionAudioPreprocessor,
+)
 from app.transcription.contracts import AudioSource
 from app.transcription.faster_whisper_runtime import (
     DefaultFasterWhisperRuntimeInitializer,
@@ -207,6 +213,7 @@ def test_create_speech_pipeline_wires_dependencies() -> None:
     vad = MagicMock()
     assembler = MagicMock()
     transcription_segment_aggregator = MagicMock()
+    transcription_audio_preprocessor = MagicMock()
     transcription_executor = MagicMock()
 
     with patch("app.composition.SpeechPipeline") as pipeline_type:
@@ -217,6 +224,7 @@ def test_create_speech_pipeline_wires_dependencies() -> None:
             vad=vad,
             assembler=assembler,
             transcription_segment_aggregator=transcription_segment_aggregator,
+            transcription_audio_preprocessor=transcription_audio_preprocessor,
             transcription_executor=transcription_executor,
         )
 
@@ -229,6 +237,7 @@ def test_create_speech_pipeline_wires_dependencies() -> None:
         vad=vad,
         assembler=assembler,
         transcription_segment_aggregator=transcription_segment_aggregator,
+        transcription_audio_preprocessor=transcription_audio_preprocessor,
         transcription_executor=transcription_executor,
     )
 
@@ -652,3 +661,54 @@ def test_create_transcription_processor_requires_shared_state_for_adaptive_mode(
             transcriber=MagicMock(),
             language_settings=settings.transcription.language,
         )
+
+
+def test_system_audio_uses_identity_transcription_preprocessor() -> None:
+    preprocessor = create_transcription_audio_preprocessor(
+        source=AudioSource.SYSTEM_AUDIO,
+        microphone_gain_db=12.0,
+    )
+
+    assert isinstance(
+        preprocessor,
+        IdentityTranscriptionAudioPreprocessor,
+    )
+
+
+def test_zero_microphone_gain_uses_identity_transcription_preprocessor() -> None:
+    preprocessor = create_transcription_audio_preprocessor(
+        source=AudioSource.MICROPHONE,
+        microphone_gain_db=0.0,
+    )
+
+    assert isinstance(
+        preprocessor,
+        IdentityTranscriptionAudioPreprocessor,
+    )
+
+
+def test_nonzero_microphone_gain_uses_fixed_gain_preprocessor() -> None:
+    preprocessor = create_transcription_audio_preprocessor(
+        source=AudioSource.MICROPHONE,
+        microphone_gain_db=12.0,
+    )
+
+    assert isinstance(
+        preprocessor,
+        FixedGainTranscriptionAudioPreprocessor,
+    )
+
+
+def test_microphone_gain_configuration_is_observable(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(
+        logging.INFO,
+        logger="app.composition",
+    ):
+        create_transcription_audio_preprocessor(
+            source=AudioSource.MICROPHONE,
+            microphone_gain_db=12.0,
+        )
+
+    assert "microphone transcription gain configured gain_db=12.0 enabled=True" in caplog.text

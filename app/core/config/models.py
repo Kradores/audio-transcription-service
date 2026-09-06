@@ -174,6 +174,7 @@ class TranscriptionSettings(BaseConfigurationModel):
 
     queue_capacity: Annotated[int, Field(ge=1, le=10_000)]
     worker_count: Annotated[int, Field(ge=1)]
+    microphone_gain_db: Annotated[float, Field(ge=-100.0, le=100.0)]
     language: TranscriptionLanguageSettings
     aggregation: TranscriptionAggregationSettings
 

@@ -13,6 +13,7 @@ from app.audio.normalizer import AudioNormalizerImpl
 from app.audio.resampler import SoXRResamplerFactory
 from app.composition import (
     create_speech_assembler,
+    create_transcription_audio_preprocessor,
     create_transcription_executor,
     create_vad,
 )
@@ -100,6 +101,11 @@ async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None
 
     database = sqlite3.connect(":memory:")
 
+    transcription_audio_preprocessor = create_transcription_audio_preprocessor(
+        source=AudioSource.SYSTEM_AUDIO,
+        microphone_gain_db=(settings.transcription.microphone_gain_db),
+    )
+
     transcription_executor = create_transcription_executor(
         database=database,
         settings=settings,
@@ -112,6 +118,7 @@ async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None
         vad=vad,
         assembler=assembler,
         transcription_segment_aggregator=aggregator,
+        transcription_audio_preprocessor=transcription_audio_preprocessor,
         transcription_executor=transcription_executor,
     )
 

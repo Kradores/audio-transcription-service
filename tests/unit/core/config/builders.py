@@ -47,6 +47,7 @@ def valid_configuration_document() -> dict[str, Any]:
         "transcription": {
             "queue_capacity": 10,
             "worker_count": 2,
+            "microphone_gain_db": 0.0,
             "language": {
                 "mode": "auto",
             },
@@ -211,6 +212,13 @@ class SettingsBuilder:
                 "switch_confirmations": 2,
             }
         self._document["transcription"]["language"] = adaptive_language
+        return self
+
+    def with_transcription_microphone_gain_db(
+        self,
+        gain_db: float,
+    ) -> SettingsBuilder:
+        self._document["transcription"]["microphone_gain_db"] = gain_db
         return self
 
 

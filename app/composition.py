@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from pathlib import Path
 from typing import assert_never
@@ -41,6 +42,10 @@ from app.storage.sqlite import SQLiteTranscriptRepository
 from app.transcription.adaptive_language_state import AdaptiveLanguageStateStore
 from app.transcription.adaptive_processor import AdaptiveTranscriptionProcessor
 from app.transcription.aggregation import TranscriptionSegmentAggregatorImpl
+from app.transcription.audio_preprocessor import (
+    FixedGainTranscriptionAudioPreprocessor,
+    IdentityTranscriptionAudioPreprocessor,
+)
 from app.transcription.contracts import AudioSource
 from app.transcription.faster_whisper import FasterWhisperTranscriber
 from app.transcription.faster_whisper_factory import FasterWhisperModelFactory
@@ -52,6 +57,7 @@ from app.transcription.faster_whisper_runtime import (
 from app.transcription.processor import TranscriptionProcessorImpl
 from app.transcription.protocols import (
     Transcriber,
+    TranscriptionAudioPreprocessor,
     TranscriptionProcessor,
     TranscriptionSegmentAggregator,
     WhisperModelProtocol,
@@ -59,6 +65,8 @@ from app.transcription.protocols import (
 from app.vad.assembler import SpeechSegmentAssemblerImpl
 from app.vad.protocols import AudioVad, SpeechSegmentAssembler
 from app.vad.silero import SileroVADAdapter
+
+logger = logging.getLogger(__name__)
 
 
 def create_application(
@@ -158,6 +166,11 @@ def create_source_pipeline(
         source=source,
     )
 
+    transcription_audio_preprocessor = create_transcription_audio_preprocessor(
+        source=source,
+        microphone_gain_db=(settings.transcription.microphone_gain_db),
+    )
+
     return create_speech_pipeline(
         source=source,
         capture=capture,
@@ -165,6 +178,7 @@ def create_source_pipeline(
         vad=vad,
         assembler=assembler,
         transcription_segment_aggregator=aggregator,
+        transcription_audio_preprocessor=transcription_audio_preprocessor,
         transcription_executor=transcription_executor,
     )
 
@@ -289,6 +303,29 @@ def create_transcriber(
     return FasterWhisperTranscriber(model)
 
 
+def create_transcription_audio_preprocessor(
+    *,
+    source: AudioSource,
+    microphone_gain_db: float,
+) -> TranscriptionAudioPreprocessor:
+    if source is not AudioSource.MICROPHONE:
+        return IdentityTranscriptionAudioPreprocessor()
+
+    logger.info(
+        "microphone transcription gain configured gain_db=%.1f enabled=%s",
+        microphone_gain_db,
+        microphone_gain_db != 0.0,
+    )
+
+    if microphone_gain_db == 0.0:
+        return IdentityTranscriptionAudioPreprocessor()
+
+    return FixedGainTranscriptionAudioPreprocessor(
+        source=source,
+        gain_db=microphone_gain_db,
+    )
+
+
 def create_transcription_processor(
     *,
     transcriber: Transcriber,
@@ -371,6 +408,7 @@ def create_speech_pipeline(
     vad: AudioVad,
     assembler: SpeechSegmentAssembler,
     transcription_segment_aggregator: TranscriptionSegmentAggregator,
+    transcription_audio_preprocessor: TranscriptionAudioPreprocessor,
     transcription_executor: TranscriptionExecutor,
 ) -> SpeechPipeline:
     """Create the application speech-processing pipeline."""
@@ -382,5 +420,6 @@ def create_speech_pipeline(
         vad=vad,
         assembler=assembler,
         transcription_segment_aggregator=transcription_segment_aggregator,
+        transcription_audio_preprocessor=transcription_audio_preprocessor,
         transcription_executor=transcription_executor,
     )

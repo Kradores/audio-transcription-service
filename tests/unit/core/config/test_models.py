@@ -548,3 +548,27 @@ def test_transcription_language_rejects_unknown_mode() -> None:
 
     with pytest.raises(ValidationError):
         Settings.model_validate(document)
+
+
+def test_transcription_settings_accepts_microphone_gain() -> None:
+    document = valid_configuration_document()
+
+    document["transcription"]["microphone_gain_db"] = 12.0
+
+    settings = Settings.model_validate(document)
+
+    assert settings.transcription.microphone_gain_db == 12.0
+
+
+@pytest.mark.parametrize(
+    "microphone_gain_db",
+    [
+        -100.1,
+        100.1,
+    ],
+)
+def test_transcription_microphone_gain_rejects_invalid_values(
+    microphone_gain_db: float,
+) -> None:
+    with pytest.raises(ValidationError):
+        (SettingsBuilder().with_transcription_microphone_gain_db(microphone_gain_db).build())

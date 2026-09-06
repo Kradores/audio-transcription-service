@@ -23,9 +23,7 @@ def save_speech_segment_wav(
         1.0,
     )
 
-    pcm16 = (
-        audio * np.iinfo(np.int16).max
-    ).astype(np.int16)
+    pcm16 = (audio * np.iinfo(np.int16).max).astype(np.int16)
 
     with wave.open(
         str(path),

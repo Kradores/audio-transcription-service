@@ -84,3 +84,13 @@ class TranscriptionSegmentAggregator(Protocol):
 
     def flush(self) -> tuple[SpeechSegment, ...]:
         """Emit completed speech currently held by the aggregator."""
+
+
+class TranscriptionAudioPreprocessor(Protocol):
+    """Prepare completed speech audio for transcription."""
+
+    def process(
+        self,
+        segment: SpeechSegment,
+    ) -> SpeechSegment:
+        """Return the speech segment to submit for transcription."""

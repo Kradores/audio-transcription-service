@@ -33,10 +33,35 @@ transcription:
   queue_capacity: 10
   worker_count: 1
 
+  # Optional gain applied only to microphone audio immediately before
+  # transcription. This does not affect capture, VAD, or segmentation.
+  #
+  # 0.0 = no gain.
+  # Positive values amplify quiet microphone input.
+  # Negative values attenuate loud microphone input.
+  #
+  # Different microphones behave differently.
+  # Tune this only if transcription quality or language detection benefits.
+  microphone_gain_db: 0.0
+
   language:
+    # There are 3 modes for language detection:
+    #  # 1. adaptive: The system will switch to the detected language when the detected 
+    #     language was in a row a number of [switch_confirmations] times,
+    #     the confidence is above [switch_probability_threshold]
+    #     and the speech segment duration is at least [min_probe_duration_seconds].
+    #  # 2. fixed: The system will always use the initial language.
+    #  # 3. auto: The system will attempt to detect the language automatically.
     mode: auto
-    # when setting mode: fixed, you should choose a 2 char language code (en, ro, ru, ...)
+
+    # mandatory for mode: fixed, you should choose a 2 char language code (en, ro, ru, ...)
     # language: en
+
+    # mandatory for mode: adaptive
+    # initial_language: null
+    # min_probe_duration_seconds: 3.0
+    # switch_probability_threshold: 0.85
+    # switch_confirmations: 2
 
   aggregation:
     enabled: true
