@@ -34,7 +34,7 @@ transcription:
   worker_count: 1
 
   # Optional gain applied only to microphone audio immediately before
-  # transcription. This does not affect capture, VAD, or segmentation.
+  # transcription. This does not affect capture, VAD, segmentation, or aggregation.
   #
   # 0.0 = no gain.
   # Positive values amplify quiet microphone input.
