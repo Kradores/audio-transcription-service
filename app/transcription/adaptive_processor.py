@@ -28,7 +28,7 @@ class _AdaptiveLanguageDecision(StrEnum):
     CANDIDATE_CONFIRMED = "candidate_confirmed"
     CANDIDATE_REPLACED = "candidate_replaced"
     LANGUAGE_SWITCHED = "language_switched"
-    LOW_CONFIDENCE_FALLBACK = "low_confidence_fallback"
+    LOW_CONFIDENCE_PROBE = "low_confidence_probe"
 
 
 def _log_decision(
@@ -127,7 +127,27 @@ class AdaptiveTranscriptionProcessor:
             language=None,
         )
 
-        if result.language == state.established_language:
+        has_strong_evidence = (
+            result.confidence is not None
+            and result.confidence >= self._settings.switch_probability_threshold
+        )
+
+        if not has_strong_evidence:
+            _log_decision(
+                item=item,
+                decision=_AdaptiveLanguageDecision.LOW_CONFIDENCE_PROBE,
+                established_before=established_before,
+                established_after=state.established_language,
+                candidate_before=candidate_before,
+                candidate_after=state.candidate_language,
+                candidate_confirmations=state.candidate_confirmations,
+                selected_language=None,
+                probe=True,
+                detected_language=result.language,
+                detected_probability=result.confidence,
+            )
+
+        elif result.language == state.established_language:
             state.candidate_language = None
             state.candidate_confirmations = 0
 
@@ -151,10 +171,7 @@ class AdaptiveTranscriptionProcessor:
                 detected_probability=result.confidence,
             )
 
-        elif (
-            result.confidence is not None
-            and result.confidence >= self._settings.switch_probability_threshold
-        ):
+        else:
             if state.candidate_language == result.language:
                 state.candidate_confirmations += 1
                 decision = _AdaptiveLanguageDecision.CANDIDATE_CONFIRMED
@@ -186,32 +203,6 @@ class AdaptiveTranscriptionProcessor:
                 probe=True,
                 detected_language=result.language,
                 detected_probability=result.confidence,
-            )
-
-        else:
-            detected_language = result.language
-            detected_probability = result.confidence
-
-            state.candidate_language = None
-            state.candidate_confirmations = 0
-
-            result = self._transcriber.transcribe(
-                item.segment,
-                language=state.established_language,
-            )
-
-            _log_decision(
-                item=item,
-                decision=_AdaptiveLanguageDecision.LOW_CONFIDENCE_FALLBACK,
-                established_before=established_before,
-                established_after=state.established_language,
-                candidate_before=candidate_before,
-                candidate_after=state.candidate_language,
-                candidate_confirmations=state.candidate_confirmations,
-                selected_language=state.established_language,
-                probe=True,
-                detected_language=detected_language,
-                detected_probability=detected_probability,
             )
 
         return SourcedTranscriptionResult(
@@ -256,9 +247,24 @@ class AdaptiveTranscriptionProcessor:
             result.confidence is not None
             and result.confidence >= self._settings.switch_probability_threshold
         ):
-            state.established_language = result.language
+            if state.candidate_language == result.language:
+                state.candidate_confirmations += 1
+                decision = _AdaptiveLanguageDecision.CANDIDATE_CONFIRMED
+            else:
+                decision = (
+                    _AdaptiveLanguageDecision.CANDIDATE_REPLACED
+                    if state.candidate_language is not None
+                    else _AdaptiveLanguageDecision.CANDIDATE_CREATED
+                )
 
-            decision = _AdaptiveLanguageDecision.LANGUAGE_ESTABLISHED
+                state.candidate_language = result.language
+                state.candidate_confirmations = 1
+
+            if state.candidate_confirmations >= self._settings.switch_confirmations:
+                state.established_language = result.language
+                state.candidate_language = None
+                state.candidate_confirmations = 0
+                decision = _AdaptiveLanguageDecision.LANGUAGE_ESTABLISHED
         else:
             decision = _AdaptiveLanguageDecision.UNKNOWN_PROBE_INSUFFICIENT_CONFIDENCE
 

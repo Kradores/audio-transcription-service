@@ -179,9 +179,49 @@ def test_unknown_probe_with_low_confidence_does_not_establish_language() -> None
     ]
 
 
-def test_high_confidence_probe_establishes_language_for_next_short_segment() -> None:
+def test_unknown_strong_probe_creates_candidate_without_establishing_language() -> None:
     transcriber = FakeTranscriber(
         auto_results=[
+            ("ro", 0.96),
+            ("en", 0.40),
+        ],
+    )
+    settings = create_settings()
+    processor = create_processor(
+        transcriber=transcriber,
+        settings=settings,
+    )
+
+    first_result = processor.process(
+        create_item(
+            duration=4.0,
+            timestamp=0.0,
+        )
+    )
+
+    second_result = processor.process(
+        create_item(
+            duration=1.0,
+            timestamp=5.0,
+        )
+    )
+
+    assert [language for _, language in transcriber.calls] == [
+        None,
+        None,
+    ]
+
+    assert first_result.result.language == "ro"
+    assert first_result.result.confidence == 0.96
+
+    assert second_result.result.language == "en"
+    assert second_result.result.confidence == 0.40
+
+
+def test_unknown_second_strong_probe_establishes_candidate_language() -> None:
+    transcriber = FakeTranscriber(
+        auto_results=[
+            ("ro", 0.96),
             ("ro", 0.95),
         ],
     )
@@ -191,26 +231,138 @@ def test_high_confidence_probe_establishes_language_for_next_short_segment() -> 
         settings=settings,
     )
 
-    probe_result = processor.process(
+    processor.process(
         create_item(
             duration=4.0,
             timestamp=0.0,
         )
     )
+
+    processor.process(
+        create_item(
+            duration=4.0,
+            timestamp=5.0,
+        )
+    )
+
     short_result = processor.process(
         create_item(
             duration=1.0,
-            timestamp=5.0,
+            timestamp=10.0,
         )
     )
 
     assert [language for _, language in transcriber.calls] == [
         None,
+        None,
         "ro",
     ]
 
-    assert probe_result.result.language == "ro"
-    assert probe_result.result.confidence == 0.95
+    assert short_result.result.language == "ro"
+    assert short_result.result.confidence is None
+
+
+def test_unknown_competing_strong_probe_replaces_bootstrap_candidate() -> None:
+    transcriber = FakeTranscriber(
+        auto_results=[
+            ("ru", 0.90),
+            ("ro", 0.92),
+            ("ro", 0.93),
+        ],
+    )
+    settings = create_settings()
+    processor = create_processor(
+        transcriber=transcriber,
+        settings=settings,
+    )
+
+    processor.process(
+        create_item(
+            duration=8.0,
+            timestamp=0.0,
+        )
+    )
+
+    processor.process(
+        create_item(
+            duration=6.0,
+            timestamp=9.0,
+        )
+    )
+
+    processor.process(
+        create_item(
+            duration=6.0,
+            timestamp=16.0,
+        )
+    )
+
+    short_result = processor.process(
+        create_item(
+            duration=1.0,
+            timestamp=23.0,
+        )
+    )
+
+    assert [language for _, language in transcriber.calls] == [
+        None,
+        None,
+        None,
+        "ro",
+    ]
+
+    assert short_result.result.language == "ro"
+    assert short_result.result.confidence is None
+
+
+def test_unknown_low_confidence_probe_preserves_bootstrap_candidate() -> None:
+    transcriber = FakeTranscriber(
+        auto_results=[
+            ("ro", 0.96),
+            ("en", 0.60),
+            ("ro", 0.95),
+        ],
+    )
+    settings = create_settings()
+    processor = create_processor(
+        transcriber=transcriber,
+        settings=settings,
+    )
+
+    processor.process(
+        create_item(
+            duration=4.0,
+            timestamp=0.0,
+        )
+    )
+
+    processor.process(
+        create_item(
+            duration=4.0,
+            timestamp=5.0,
+        )
+    )
+
+    processor.process(
+        create_item(
+            duration=4.0,
+            timestamp=10.0,
+        )
+    )
+
+    short_result = processor.process(
+        create_item(
+            duration=1.0,
+            timestamp=15.0,
+        )
+    )
+
+    assert [language for _, language in transcriber.calls] == [
+        None,
+        None,
+        None,
+        "ro",
+    ]
 
     assert short_result.result.language == "ro"
     assert short_result.result.confidence is None
@@ -512,18 +664,15 @@ def test_different_competing_language_replaces_existing_candidate() -> None:
     assert second_short_result.result.confidence is None
 
 
-def test_low_confidence_competing_probe_falls_back_to_established_language() -> None:
+def test_low_confidence_competing_probe_accepts_auto_result_without_fallback() -> None:
     transcriber = FakeTranscriber(
         auto_results=[
-            ("bg", 0.55),
+            ("en", 0.84),
         ],
-    )
-    settings = create_settings(
-        initial_language="ro",
     )
     processor = create_processor(
         transcriber=transcriber,
-        settings=settings,
+        settings=create_settings(initial_language="ro"),
     )
 
     result = processor.process(
@@ -533,77 +682,50 @@ def test_low_confidence_competing_probe_falls_back_to_established_language() -> 
         )
     )
 
-    assert [language for _, language in transcriber.calls] == [
-        None,
-        "ro",
-    ]
+    assert [language for _, language in transcriber.calls] == [None]
 
-    assert result.result.language == "ro"
-    assert result.result.confidence is None
+    assert result.result.language == "en"
+    assert result.result.confidence == 0.84
 
 
-def test_low_confidence_competing_probe_clears_existing_candidate() -> None:
+def test_low_confidence_competing_probe_preserves_existing_candidate() -> None:
     transcriber = FakeTranscriber(
         auto_results=[
-            ("en", 0.96),
-            ("bg", 0.55),
-            ("en", 0.95),
+            ("ro", 0.96),
+            ("ro", 0.95),
+            ("en", 0.90),
+            ("en", 0.70),
+            ("en", 0.91),
         ],
-    )
-    settings = create_settings(
-        initial_language="ro",
     )
     processor = create_processor(
         transcriber=transcriber,
-        settings=settings,
+        settings=create_settings(),
     )
 
-    # First strong English probe creates candidate=en/1.
-    processor.process(
-        create_item(
-            duration=4.0,
-            timestamp=0.0,
-        )
-    )
+    processor.process(create_item(duration=4.0, timestamp=0.0))
+    processor.process(create_item(duration=4.0, timestamp=5.0))
 
-    # Weak Bulgarian probe must clear the English candidate and
-    # fall back to explicit Romanian transcription.
-    weak_probe_result = processor.process(
-        create_item(
-            duration=4.0,
-            timestamp=5.0,
-        )
-    )
+    processor.process(create_item(duration=4.0, timestamp=10.0))
+    weak_result = processor.process(create_item(duration=4.0, timestamp=15.0))
+    processor.process(create_item(duration=4.0, timestamp=20.0))
 
-    # This strong English probe must start again at candidate=en/1,
-    # not complete an old en/2 sequence.
-    processor.process(
-        create_item(
-            duration=4.0,
-            timestamp=10.0,
-        )
-    )
+    short_result = processor.process(create_item(duration=1.0, timestamp=25.0))
 
-    short_result = processor.process(
-        create_item(
-            duration=1.0,
-            timestamp=15.0,
-        )
-    )
+    assert weak_result.result.language == "en"
+    assert weak_result.result.confidence == 0.70
+
+    assert short_result.result.language == "en"
+    assert short_result.result.confidence is None
 
     assert [language for _, language in transcriber.calls] == [
         None,
         None,
-        "ro",
         None,
-        "ro",
+        None,
+        None,
+        "en",
     ]
-
-    assert weak_probe_result.result.language == "ro"
-    assert weak_probe_result.result.confidence is None
-
-    assert short_result.result.language == "ro"
-    assert short_result.result.confidence is None
 
 
 def test_language_state_is_independent_per_source() -> None:
@@ -611,6 +733,8 @@ def test_language_state_is_independent_per_source() -> None:
         auto_results=[
             ("ro", 0.96),
             ("en", 0.97),
+            ("ro", 0.95),
+            ("en", 0.96),
         ],
     )
     settings = create_settings()
@@ -634,35 +758,50 @@ def test_language_state_is_independent_per_source() -> None:
         )
     )
 
+    processor.process(
+        create_item(
+            duration=4.0,
+            timestamp=5.0,
+            source=AudioSource.MICROPHONE,
+        )
+    )
+    processor.process(
+        create_item(
+            duration=4.0,
+            timestamp=5.0,
+            source=AudioSource.SYSTEM_AUDIO,
+        )
+    )
+
     microphone_result = processor.process(
         create_item(
             duration=1.0,
-            timestamp=5.0,
+            timestamp=10.0,
             source=AudioSource.MICROPHONE,
         )
     )
     system_audio_result = processor.process(
         create_item(
             duration=1.0,
-            timestamp=5.0,
+            timestamp=10.0,
             source=AudioSource.SYSTEM_AUDIO,
         )
     )
 
+    assert microphone_result.result.language == "ro"
+    assert microphone_result.result.confidence is None
+
+    assert system_audio_result.result.language == "en"
+    assert system_audio_result.result.confidence is None
+
     assert [language for _, language in transcriber.calls] == [
+        None,
+        None,
         None,
         None,
         "ro",
         "en",
     ]
-
-    assert microphone_result.source == AudioSource.MICROPHONE
-    assert microphone_result.result.language == "ro"
-    assert microphone_result.result.confidence is None
-
-    assert system_audio_result.source == AudioSource.SYSTEM_AUDIO
-    assert system_audio_result.result.language == "en"
-    assert system_audio_result.result.confidence is None
 
 
 def test_language_state_is_shared_across_processor_instances() -> None:
@@ -675,6 +814,7 @@ def test_language_state_is_shared_across_processor_instances() -> None:
     first_transcriber = FakeTranscriber(
         auto_results=[
             ("ro", 0.96),
+            ("ro", 0.95),
         ],
     )
     second_transcriber = FakeTranscriber(
@@ -699,34 +839,42 @@ def test_language_state_is_shared_across_processor_instances() -> None:
             source=AudioSource.MICROPHONE,
         )
     )
-
-    result = second_processor.process(
+    first_processor.process(
         create_item(
-            duration=1.0,
+            duration=4.0,
             timestamp=5.0,
             source=AudioSource.MICROPHONE,
         )
     )
 
+    result = second_processor.process(
+        create_item(
+            duration=1.0,
+            timestamp=10.0,
+            source=AudioSource.MICROPHONE,
+        )
+    )
+
+    assert result.result.language == "ro"
+    assert result.result.confidence is None
+
     assert [language for _, language in first_transcriber.calls] == [
+        None,
         None,
     ]
     assert [language for _, language in second_transcriber.calls] == [
         "ro",
     ]
 
-    assert result.source == AudioSource.MICROPHONE
-    assert result.result.language == "ro"
-    assert result.result.confidence is None
 
-
-def test_logs_language_establishment(
+def test_logs_bootstrap_candidate_and_language_establishment(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     settings = create_settings()
     transcriber = FakeTranscriber(
         auto_results=[
             ("ro", 0.96),
+            ("ro", 0.95),
         ],
     )
     processor = create_processor(
@@ -741,17 +889,26 @@ def test_logs_language_establishment(
         processor.process(
             create_item(
                 duration=4.0,
+                timestamp=0.0,
             )
         )
+        processor.process(
+            create_item(
+                duration=4.0,
+                timestamp=5.0,
+            )
+        )
+
+    assert "decision=candidate_created" in caplog.text
+    assert "candidate_after=ro" in caplog.text
+    assert "candidate_confirmations=1" in caplog.text
 
     assert "decision=language_established" in caplog.text
     assert "established_before=none" in caplog.text
     assert "established_after=ro" in caplog.text
-    assert "detected_language=ro" in caplog.text
-    assert "detected_probability=0.960" in caplog.text
 
 
-def test_logs_low_confidence_fallback(
+def test_logs_low_confidence_probe(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     settings = create_settings(
@@ -777,12 +934,12 @@ def test_logs_low_confidence_fallback(
             )
         )
 
-    assert "decision=low_confidence_fallback" in caplog.text
+    assert "decision=low_confidence_probe" in caplog.text
+    assert "selected_language=auto" in caplog.text
     assert "established_before=ro" in caplog.text
     assert "established_after=ro" in caplog.text
-    assert "selected_language=ro" in caplog.text
-    assert "detected_language=en" in caplog.text
-    assert "detected_probability=0.840" in caplog.text
+    assert "candidate_before=none" in caplog.text
+    assert "candidate_after=none" in caplog.text
 
 
 def test_logs_confirmed_language_switch(
@@ -825,3 +982,156 @@ def test_logs_confirmed_language_switch(
     assert "decision=language_switched" in caplog.text
     assert "established_before=ro" in caplog.text
     assert "established_after=en" in caplog.text
+
+
+def test_low_confidence_conflicting_probe_accepts_auto_result_without_fallback() -> None:
+    transcriber = FakeTranscriber(
+        auto_results=[
+            ("ro", 0.96),
+            ("ro", 0.95),
+            ("en", 0.72),
+        ],
+    )
+    processor = create_processor(
+        transcriber=transcriber,
+        settings=create_settings(),
+    )
+
+    processor.process(create_item(duration=4.0, timestamp=0.0))
+    processor.process(create_item(duration=4.0, timestamp=5.0))
+
+    result = processor.process(create_item(duration=5.0, timestamp=10.0))
+
+    assert result.result.language == "en"
+    assert result.result.confidence == 0.72
+
+    assert [language for _, language in transcriber.calls] == [
+        None,
+        None,
+        None,
+    ]
+
+
+def test_low_confidence_probe_preserves_existing_candidate() -> None:
+    transcriber = FakeTranscriber(
+        auto_results=[
+            ("ro", 0.96),
+            ("ro", 0.95),
+            ("en", 0.87),
+            ("en", 0.64),
+            ("en", 0.90),
+        ],
+    )
+    processor = create_processor(
+        transcriber=transcriber,
+        settings=create_settings(),
+    )
+
+    processor.process(create_item(duration=4.0, timestamp=0.0))
+    processor.process(create_item(duration=4.0, timestamp=5.0))
+
+    processor.process(create_item(duration=4.0, timestamp=10.0))
+    processor.process(create_item(duration=4.0, timestamp=15.0))
+    processor.process(create_item(duration=4.0, timestamp=20.0))
+
+    short_result = processor.process(create_item(duration=1.0, timestamp=25.0))
+
+    assert short_result.result.language == "en"
+    assert short_result.result.confidence is None
+
+    assert [language for _, language in transcriber.calls] == [
+        None,
+        None,
+        None,
+        None,
+        None,
+        "en",
+    ]
+
+
+def test_low_confidence_third_language_does_not_replace_candidate() -> None:
+    transcriber = FakeTranscriber(
+        auto_results=[
+            ("ro", 0.96),
+            ("ro", 0.95),
+            ("en", 0.90),
+            ("pt", 0.70),
+            ("en", 0.91),
+        ],
+    )
+    processor = create_processor(
+        transcriber=transcriber,
+        settings=create_settings(),
+    )
+
+    processor.process(create_item(duration=4.0, timestamp=0.0))
+    processor.process(create_item(duration=4.0, timestamp=5.0))
+
+    processor.process(create_item(duration=4.0, timestamp=10.0))
+    processor.process(create_item(duration=4.0, timestamp=15.0))
+    processor.process(create_item(duration=4.0, timestamp=20.0))
+
+    short_result = processor.process(create_item(duration=1.0, timestamp=25.0))
+
+    assert short_result.result.language == "en"
+    assert short_result.result.confidence is None
+
+
+def test_strong_established_language_probe_clears_existing_candidate() -> None:
+    transcriber = FakeTranscriber(
+        auto_results=[
+            ("ro", 0.96),
+            ("ro", 0.95),
+            ("en", 0.90),
+            ("ro", 0.93),
+            ("en", 0.91),
+            ("en", 0.92),
+        ],
+    )
+    processor = create_processor(
+        transcriber=transcriber,
+        settings=create_settings(),
+    )
+
+    processor.process(create_item(duration=4.0, timestamp=0.0))
+    processor.process(create_item(duration=4.0, timestamp=5.0))
+
+    processor.process(create_item(duration=4.0, timestamp=10.0))
+
+    processor.process(create_item(duration=4.0, timestamp=15.0))
+
+    processor.process(create_item(duration=4.0, timestamp=20.0))
+    processor.process(create_item(duration=4.0, timestamp=25.0))
+
+    short_result = processor.process(create_item(duration=1.0, timestamp=30.0))
+
+    assert short_result.result.language == "en"
+    assert short_result.result.confidence is None
+
+
+def test_strong_competing_language_replaces_existing_candidate() -> None:
+    transcriber = FakeTranscriber(
+        auto_results=[
+            ("ro", 0.96),
+            ("ro", 0.95),
+            ("en", 0.90),
+            ("de", 0.91),
+            ("de", 0.92),
+        ],
+    )
+    processor = create_processor(
+        transcriber=transcriber,
+        settings=create_settings(),
+    )
+
+    processor.process(create_item(duration=4.0, timestamp=0.0))
+    processor.process(create_item(duration=4.0, timestamp=5.0))
+
+    processor.process(create_item(duration=4.0, timestamp=10.0))
+    processor.process(create_item(duration=4.0, timestamp=15.0))
+    processor.process(create_item(duration=4.0, timestamp=20.0))
+
+    short_result = processor.process(create_item(duration=1.0, timestamp=25.0))
+
+    assert short_result.result.language == "de"
+    assert short_result.result.confidence is None

@@ -52,13 +52,16 @@ with its invariants.
 @property
 def stats(self) -> TranscriptionSegmentAggregatorStats: ...
 
+
 def process(
     segment: SpeechSegment,
 ) -> tuple[SpeechSegment, ...]: ...
 
+
 def advance(
     timestamp: float,
 ) -> tuple[SpeechSegment, ...]: ...
+
 
 def flush() -> tuple[SpeechSegment, ...]: ...
 ```
