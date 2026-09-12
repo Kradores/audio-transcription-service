@@ -11,6 +11,7 @@ class AdaptiveLanguageState:
     established_language: str | None
     candidate_language: str | None = None
     candidate_confirmations: int = 0
+    candidate_last_strong_evidence_end: float | None = None
 
 
 class AdaptiveLanguageStateStore:

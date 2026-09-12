@@ -482,6 +482,7 @@ def test_transcription_language_adaptive_mode_accepts_valid_configuration() -> N
         "min_probe_duration_seconds": 3.0,
         "switch_probability_threshold": 0.85,
         "switch_confirmations": 2,
+        "candidate_max_gap_seconds": 30.0,
     }
 
     settings = Settings.model_validate(document)
@@ -503,6 +504,7 @@ def test_transcription_language_adaptive_mode_normalizes_initial_language() -> N
         "min_probe_duration_seconds": 3.0,
         "switch_probability_threshold": 0.85,
         "switch_confirmations": 2,
+        "candidate_max_gap_seconds": 30.0,
     }
 
     settings = Settings.model_validate(document)
@@ -520,6 +522,8 @@ def test_transcription_language_adaptive_mode_normalizes_initial_language() -> N
         ("switch_probability_threshold", 0.0),
         ("switch_probability_threshold", 1.01),
         ("switch_confirmations", 0),
+        ("candidate_max_gap_seconds", 0.0),
+        ("candidate_max_gap_seconds", -0.1),
     ],
 )
 def test_transcription_language_adaptive_mode_rejects_invalid_values(
@@ -533,7 +537,9 @@ def test_transcription_language_adaptive_mode_rejects_invalid_values(
         "min_probe_duration_seconds": 3.0,
         "switch_probability_threshold": 0.85,
         "switch_confirmations": 2,
+        "candidate_max_gap_seconds": 30.0,
     }
+
     document["transcription"]["language"][field] = value
 
     with pytest.raises(ValidationError):
@@ -572,3 +578,20 @@ def test_transcription_microphone_gain_rejects_invalid_values(
 ) -> None:
     with pytest.raises(ValidationError):
         (SettingsBuilder().with_transcription_microphone_gain_db(microphone_gain_db).build())
+
+
+def test_transcription_language_adaptive_mode_defaults_candidate_max_gap_seconds() -> None:
+    document = valid_configuration_document()
+    document["transcription"]["language"] = {
+        "mode": "adaptive",
+        "initial_language": None,
+        "min_probe_duration_seconds": 3.0,
+        "switch_probability_threshold": 0.85,
+        "switch_confirmations": 2,
+    }
+
+    settings = Settings.model_validate(document)
+    language = settings.transcription.language
+
+    assert isinstance(language, AdaptiveTranscriptionLanguageSettings)
+    assert language.candidate_max_gap_seconds == 30.0

@@ -142,6 +142,7 @@ class AdaptiveTranscriptionLanguageSettings(BaseConfigurationModel):
     min_probe_duration_seconds: Annotated[float, Field(gt=0.0)]
     switch_probability_threshold: Annotated[float, Field(gt=0.0, le=1.0)]
     switch_confirmations: Annotated[int, Field(ge=1)]
+    candidate_max_gap_seconds: Annotated[float, Field(gt=0.0)] = 30.0
 
 
 type TranscriptionLanguageSettings = Annotated[

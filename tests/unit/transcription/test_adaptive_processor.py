@@ -57,6 +57,7 @@ class FakeTranscriber:
 def create_settings(
     *,
     initial_language: str | None = None,
+    candidate_max_gap_seconds: float = 30.0,
 ) -> AdaptiveTranscriptionLanguageSettings:
     return AdaptiveTranscriptionLanguageSettings(
         mode=TranscriptionLanguageMode.ADAPTIVE,
@@ -64,6 +65,7 @@ def create_settings(
         min_probe_duration_seconds=3.0,
         switch_probability_threshold=0.85,
         switch_confirmations=2,
+        candidate_max_gap_seconds=candidate_max_gap_seconds,
     )
 
 
@@ -1134,4 +1136,157 @@ def test_strong_competing_language_replaces_existing_candidate() -> None:
     short_result = processor.process(create_item(duration=1.0, timestamp=25.0))
 
     assert short_result.result.language == "de"
+    assert short_result.result.confidence is None
+
+
+def test_same_candidate_within_max_gap_confirms_language_switch() -> None:
+    transcriber = FakeTranscriber(
+        auto_results=[
+            ("ro", 0.96),
+            ("ro", 0.95),
+            ("en", 0.90),
+            ("en", 0.91),
+        ],
+    )
+    processor = create_processor(
+        transcriber=transcriber,
+        settings=create_settings(
+            candidate_max_gap_seconds=30.0,
+        ),
+    )
+
+    processor.process(create_item(duration=4.0, timestamp=0.0))
+    processor.process(create_item(duration=4.0, timestamp=5.0))
+
+    processor.process(create_item(duration=4.0, timestamp=10.0))
+    processor.process(create_item(duration=4.0, timestamp=20.0))
+
+    result = processor.process(create_item(duration=1.0, timestamp=25.0))
+
+    assert result.result.language == "en"
+
+
+def test_same_candidate_after_max_gap_restarts_confirmation() -> None:
+    transcriber = FakeTranscriber(
+        auto_results=[
+            ("ro", 0.96),
+            ("ro", 0.95),
+            ("en", 0.90),
+            ("en", 0.91),
+        ],
+    )
+    processor = create_processor(
+        transcriber=transcriber,
+        settings=create_settings(candidate_max_gap_seconds=30.0),
+    )
+
+    processor.process(create_item(duration=4.0, timestamp=0.0))
+    processor.process(create_item(duration=4.0, timestamp=5.0))
+
+    # First strong English evidence ends at 14.0.
+    processor.process(create_item(duration=4.0, timestamp=10.0))
+
+    # 50.0 - 14.0 = 36 seconds, so the English candidate is stale.
+    processor.process(create_item(duration=4.0, timestamp=50.0))
+
+    short_result = processor.process(
+        create_item(duration=1.0, timestamp=55.0)
+    )
+
+    # English must not have switched after the stale confirmation.
+    assert short_result.result.language == "ro"
+
+
+def test_same_candidate_within_max_gap_confirms_switch() -> None:
+    transcriber = FakeTranscriber(
+        auto_results=[
+            ("ro", 0.96),
+            ("ro", 0.95),
+            ("en", 0.90),
+            ("en", 0.91),
+        ],
+    )
+    processor = create_processor(
+        transcriber=transcriber,
+        settings=create_settings(candidate_max_gap_seconds=30.0),
+    )
+
+    processor.process(create_item(duration=4.0, timestamp=0.0))
+    processor.process(create_item(duration=4.0, timestamp=5.0))
+
+    # English evidence ends at 14.0.
+    processor.process(create_item(duration=4.0, timestamp=10.0))
+
+    # 20.0 - 14.0 = 6 seconds, so it confirms.
+    processor.process(create_item(duration=4.0, timestamp=20.0))
+
+    short_result = processor.process(
+        create_item(duration=1.0, timestamp=25.0)
+    )
+
+    assert short_result.result.language == "en"
+
+
+def test_low_confidence_probe_does_not_refresh_candidate_lifetime() -> None:
+    transcriber = FakeTranscriber(
+        auto_results=[
+            ("ro", 0.96),
+            ("ro", 0.95),
+            ("en", 0.90),
+            ("en", 0.60),
+            ("en", 0.91),
+        ],
+    )
+    processor = create_processor(
+        transcriber=transcriber,
+        settings=create_settings(candidate_max_gap_seconds=30.0),
+    )
+
+    processor.process(create_item(duration=4.0, timestamp=0.0))
+    processor.process(create_item(duration=4.0, timestamp=5.0))
+
+    # Strong English evidence ends at 14.0.
+    processor.process(create_item(duration=4.0, timestamp=10.0))
+
+    # Weak English evidence must not refresh candidate age.
+    processor.process(create_item(duration=4.0, timestamp=30.0))
+
+    # Gap is still measured from 14.0:
+    # 50.0 - 14.0 = 36 seconds.
+    processor.process(create_item(duration=4.0, timestamp=50.0))
+
+    short_result = processor.process(
+        create_item(duration=1.0, timestamp=55.0)
+    )
+
+    assert short_result.result.language == "ro"
+
+
+def test_unknown_language_candidate_expires_before_confirmation() -> None:
+    transcriber = FakeTranscriber(
+        auto_results=[
+            ("ro", 0.96),
+            ("ro", 0.95),
+            ("ro", 0.94),
+        ],
+    )
+    processor = create_processor(
+        transcriber=transcriber,
+        settings=create_settings(candidate_max_gap_seconds=30.0),
+    )
+
+    # First candidate ends at 4.0.
+    processor.process(create_item(duration=4.0, timestamp=0.0))
+
+    # Too far away: restart candidate instead of establishing.
+    processor.process(create_item(duration=4.0, timestamp=40.0))
+
+    # Now close enough to the restarted candidate.
+    processor.process(create_item(duration=4.0, timestamp=50.0))
+
+    short_result = processor.process(
+        create_item(duration=1.0, timestamp=55.0)
+    )
+
+    assert short_result.result.language == "ro"
     assert short_result.result.confidence is None

@@ -201,7 +201,8 @@ class SettingsBuilder:
         return self
 
     def with_adaptive_transcription_language(
-        self, adaptive_language: dict[str, Any] | None = None
+        self,
+        adaptive_language: dict[str, Any] | None = None,
     ) -> SettingsBuilder:
         if adaptive_language is None:
             adaptive_language = {
@@ -210,7 +211,9 @@ class SettingsBuilder:
                 "min_probe_duration_seconds": 3.0,
                 "switch_probability_threshold": 0.85,
                 "switch_confirmations": 2,
+                "candidate_max_gap_seconds": 30.0,
             }
+
         self._document["transcription"]["language"] = adaptive_language
         return self
 

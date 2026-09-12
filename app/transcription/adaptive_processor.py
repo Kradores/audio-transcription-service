@@ -27,6 +27,7 @@ class _AdaptiveLanguageDecision(StrEnum):
     CANDIDATE_CREATED = "candidate_created"
     CANDIDATE_CONFIRMED = "candidate_confirmed"
     CANDIDATE_REPLACED = "candidate_replaced"
+    CANDIDATE_RESTARTED = "candidate_restarted"
     LANGUAGE_SWITCHED = "language_switched"
     LOW_CONFIDENCE_PROBE = "low_confidence_probe"
 
@@ -84,6 +85,105 @@ class AdaptiveTranscriptionProcessor:
         self._settings = settings
         self._state_store = state_store
 
+    @staticmethod
+    def _clear_candidate(state: AdaptiveLanguageState) -> None:
+        state.candidate_language = None
+        state.candidate_confirmations = 0
+        state.candidate_last_strong_evidence_end = None
+
+    @staticmethod
+    def _start_candidate(
+        state: AdaptiveLanguageState,
+        *,
+        language: str,
+        evidence_end: float,
+    ) -> None:
+        state.candidate_language = language
+        state.candidate_confirmations = 1
+        state.candidate_last_strong_evidence_end = evidence_end
+
+    @staticmethod
+    def _confirm_candidate(
+        state: AdaptiveLanguageState,
+        *,
+        evidence_end: float,
+    ) -> None:
+        state.candidate_confirmations += 1
+        state.candidate_last_strong_evidence_end = evidence_end
+
+    def _candidate_is_expired(
+        self,
+        *,
+        state: AdaptiveLanguageState,
+        item: TranscriptionWorkItem,
+    ) -> bool:
+        if state.candidate_language is None:
+            return False
+
+        previous_evidence_end = state.candidate_last_strong_evidence_end
+
+        # A candidate without an evidence timestamp is incomplete state.
+        # Treat it conservatively as stale instead of allowing it to be
+        # confirmed indefinitely.
+        if previous_evidence_end is None:
+            return True
+
+        gap = max(
+            0.0,
+            item.segment.timestamp - previous_evidence_end,
+        )
+
+        return gap > self._settings.candidate_max_gap_seconds
+
+    def _apply_strong_candidate_evidence(
+        self,
+        *,
+        state: AdaptiveLanguageState,
+        item: TranscriptionWorkItem,
+        language: str,
+    ) -> _AdaptiveLanguageDecision:
+        evidence_end = item.segment.timestamp + item.segment.duration
+
+        if self._candidate_is_expired(
+            state=state,
+            item=item,
+        ):
+            expired_language = state.candidate_language
+
+            self._clear_candidate(state)
+            self._start_candidate(
+                state,
+                language=language,
+                evidence_end=evidence_end,
+            )
+
+            if expired_language == language:
+                return _AdaptiveLanguageDecision.CANDIDATE_RESTARTED
+
+            return _AdaptiveLanguageDecision.CANDIDATE_CREATED
+
+        if state.candidate_language == language:
+            self._confirm_candidate(
+                state,
+                evidence_end=evidence_end,
+            )
+            return _AdaptiveLanguageDecision.CANDIDATE_CONFIRMED
+
+        if state.candidate_language is not None:
+            self._start_candidate(
+                state,
+                language=language,
+                evidence_end=evidence_end,
+            )
+            return _AdaptiveLanguageDecision.CANDIDATE_REPLACED
+
+        self._start_candidate(
+            state,
+            language=language,
+            evidence_end=evidence_end,
+        )
+        return _AdaptiveLanguageDecision.CANDIDATE_CREATED
+
     def process(
         self,
         item: TranscriptionWorkItem,
@@ -133,6 +233,9 @@ class AdaptiveTranscriptionProcessor:
         )
 
         if not has_strong_evidence:
+            # ADR-047:
+            # Low-confidence automatic evidence is accepted as the transcript
+            # result but does not mutate persistent language state.
             _log_decision(
                 item=item,
                 decision=_AdaptiveLanguageDecision.LOW_CONFIDENCE_PROBE,
@@ -148,8 +251,9 @@ class AdaptiveTranscriptionProcessor:
             )
 
         elif result.language == state.established_language:
-            state.candidate_language = None
-            state.candidate_confirmations = 0
+            # Strong evidence for the currently established language cancels
+            # any competing candidate, including its evidence timestamp.
+            self._clear_candidate(state)
 
             decision = (
                 _AdaptiveLanguageDecision.CANDIDATE_CLEARED
@@ -172,23 +276,15 @@ class AdaptiveTranscriptionProcessor:
             )
 
         else:
-            if state.candidate_language == result.language:
-                state.candidate_confirmations += 1
-                decision = _AdaptiveLanguageDecision.CANDIDATE_CONFIRMED
-            else:
-                decision = (
-                    _AdaptiveLanguageDecision.CANDIDATE_REPLACED
-                    if state.candidate_language is not None
-                    else _AdaptiveLanguageDecision.CANDIDATE_CREATED
-                )
-
-                state.candidate_language = result.language
-                state.candidate_confirmations = 1
+            decision = self._apply_strong_candidate_evidence(
+                state=state,
+                item=item,
+                language=result.language,
+            )
 
             if state.candidate_confirmations >= self._settings.switch_confirmations:
                 state.established_language = result.language
-                state.candidate_language = None
-                state.candidate_confirmations = 0
+                self._clear_candidate(state)
                 decision = _AdaptiveLanguageDecision.LANGUAGE_SWITCHED
 
             _log_decision(
@@ -243,29 +339,26 @@ class AdaptiveTranscriptionProcessor:
                 result=result,
             )
 
-        if (
+        has_strong_evidence = (
             result.confidence is not None
             and result.confidence >= self._settings.switch_probability_threshold
-        ):
-            if state.candidate_language == result.language:
-                state.candidate_confirmations += 1
-                decision = _AdaptiveLanguageDecision.CANDIDATE_CONFIRMED
-            else:
-                decision = (
-                    _AdaptiveLanguageDecision.CANDIDATE_REPLACED
-                    if state.candidate_language is not None
-                    else _AdaptiveLanguageDecision.CANDIDATE_CREATED
-                )
+        )
 
-                state.candidate_language = result.language
-                state.candidate_confirmations = 1
+        if has_strong_evidence:
+            decision = self._apply_strong_candidate_evidence(
+                state=state,
+                item=item,
+                language=result.language,
+            )
 
             if state.candidate_confirmations >= self._settings.switch_confirmations:
                 state.established_language = result.language
-                state.candidate_language = None
-                state.candidate_confirmations = 0
+                self._clear_candidate(state)
                 decision = _AdaptiveLanguageDecision.LANGUAGE_ESTABLISHED
+
         else:
+            # Weak evidence neither establishes a language nor mutates or
+            # refreshes an existing bootstrap candidate.
             decision = _AdaptiveLanguageDecision.UNKNOWN_PROBE_INSUFFICIENT_CONFIDENCE
 
         _log_decision(
