@@ -39,3 +39,27 @@ def test_load_returns_settings_for_valid_configuration(
 
     # Assert
     assert settings.application.name == "Audio Transcription Service"
+
+
+def test_load_resolves_slow_inference_directory_relative_to_config_file(
+    tmp_path: Path,
+) -> None:
+    document = valid_configuration_document()
+
+    document["whisper"]["slow_inference_capture"] = {
+        "enabled": True,
+        "threshold_seconds": 5.0,
+        "directory": "diagnostics/slow-inference",
+    }
+
+    config_path = write_configuration(
+        tmp_path,
+        document,
+    )
+
+    settings = ConfigurationLoader(config_path).load()
+
+    assert (
+        settings.whisper.slow_inference_capture.directory
+        == (tmp_path / "diagnostics" / "slow-inference").resolve()
+    )

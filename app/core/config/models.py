@@ -96,6 +96,14 @@ class VadSettings(BaseConfigurationModel):
     min_silence_duration_ms: Annotated[int, Field(ge=0)]
 
 
+class SlowInferenceCaptureSettings(BaseConfigurationModel):
+    """Configuration for preserving unusually slow Whisper inputs."""
+
+    enabled: bool = False
+    threshold_seconds: Annotated[float, Field(gt=0.0)] = 5.0
+    directory: Path = Path("slow-inference")
+
+
 class WhisperSettings(BaseConfigurationModel):
     """Configuration options for the OpenAI Whisper speech-to-text model."""
 
@@ -103,6 +111,9 @@ class WhisperSettings(BaseConfigurationModel):
     runtime: WhisperRuntime
     device: WhisperDevice
     compute_type: WhisperComputeType
+    slow_inference_capture: SlowInferenceCaptureSettings = Field(
+        default_factory=SlowInferenceCaptureSettings,
+    )
 
 
 class DatabaseSettings(BaseConfigurationModel):
@@ -203,6 +214,7 @@ __all__ = [
     "LoggingSettings",
     "Settings",
     "VadSettings",
+    "SlowInferenceCaptureSettings",
     "WhisperSettings",
     "AdaptiveTranscriptionLanguageSettings",
     "AutoTranscriptionLanguageSettings",

@@ -21,6 +21,7 @@ from app.core.config.models import (
     AutoTranscriptionLanguageSettings,
     FixedTranscriptionLanguageSettings,
     Settings,
+    SlowInferenceCaptureSettings,
 )
 
 from .builders import SettingsBuilder, valid_configuration_document
@@ -595,3 +596,41 @@ def test_transcription_language_adaptive_mode_defaults_candidate_max_gap_seconds
 
     assert isinstance(language, AdaptiveTranscriptionLanguageSettings)
     assert language.candidate_max_gap_seconds == 30.0
+
+
+def test_whisper_slow_inference_capture_uses_safe_defaults() -> None:
+    settings = SettingsBuilder().build()
+
+    capture = settings.whisper.slow_inference_capture
+
+    assert capture.enabled is False
+    assert capture.threshold_seconds == 5.0
+    assert capture.directory == Path("slow-inference")
+
+
+def test_slow_inference_capture_settings_accept_valid_values() -> None:
+    settings = SlowInferenceCaptureSettings(
+        enabled=True,
+        threshold_seconds=2.5,
+        directory=Path("logs/slow"),
+    )
+
+    assert settings.enabled is True
+    assert settings.threshold_seconds == 2.5
+    assert settings.directory == Path("logs/slow")
+
+
+@pytest.mark.parametrize(
+    "threshold_seconds",
+    [
+        0.0,
+        -0.001,
+    ],
+)
+def test_slow_inference_capture_settings_reject_non_positive_threshold(
+    threshold_seconds: float,
+) -> None:
+    with pytest.raises(ValidationError):
+        SlowInferenceCaptureSettings(
+            threshold_seconds=threshold_seconds,
+        )

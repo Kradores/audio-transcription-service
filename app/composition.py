@@ -62,6 +62,7 @@ from app.transcription.protocols import (
     TranscriptionSegmentAggregator,
     WhisperModelProtocol,
 )
+from app.transcription.slow_inference_capture import SlowInferenceCapture
 from app.vad.assembler import SpeechSegmentAssemblerImpl
 from app.vad.protocols import AudioVad, SpeechSegmentAssembler
 from app.vad.silero import SileroVADAdapter
@@ -373,9 +374,16 @@ def create_transcription_executor(
 
     model = create_whisper_model(settings)
 
+    slow_inference_capture = SlowInferenceCapture(
+        settings.whisper.slow_inference_capture,
+    )
+
     processors = tuple(
         create_transcription_processor(
-            transcriber=FasterWhisperTranscriber(model),
+            transcriber=FasterWhisperTranscriber(
+                model,
+                slow_inference_capture=slow_inference_capture,
+            ),
             language_settings=settings.transcription.language,
             adaptive_state_store=adaptive_state_store,
         )

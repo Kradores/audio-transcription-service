@@ -2,7 +2,7 @@ import logging
 import sqlite3
 from pathlib import Path
 from typing import cast
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import ANY, MagicMock, call, patch
 
 import numpy as np
 import pytest
@@ -416,9 +416,11 @@ def test_create_whisper_model_passes_configuration_to_factory(
 @patch("app.composition.TranscriptionExecutorImpl")
 @patch("app.composition.create_transcription_processor")
 @patch("app.composition.FasterWhisperTranscriber")
+@patch("app.composition.SlowInferenceCapture")
 @patch("app.composition.create_whisper_model")
 def test_create_transcription_executor_creates_one_processor_per_worker(
     create_whisper_model: MagicMock,
+    slow_inference_capture_type: MagicMock,
     faster_whisper_transcriber: MagicMock,
     create_transcription_processor: MagicMock,
     transcription_executor_impl: MagicMock,
@@ -429,6 +431,9 @@ def test_create_transcription_executor_creates_one_processor_per_worker(
 
     model = MagicMock()
     create_whisper_model.return_value = model
+
+    slow_inference_capture = MagicMock()
+    slow_inference_capture_type.return_value = slow_inference_capture
 
     transcribers = [
         MagicMock(),
@@ -451,47 +456,50 @@ def test_create_transcription_executor_creates_one_processor_per_worker(
 
     create_whisper_model.assert_called_once_with(settings)
 
-    assert faster_whisper_transcriber.call_count == 3
+    slow_inference_capture_type.assert_called_once_with(
+        settings.whisper.slow_inference_capture,
+    )
+
     assert faster_whisper_transcriber.call_args_list == [
-        ((model,), {}),
-        ((model,), {}),
-        ((model,), {}),
+        call(
+            model,
+            slow_inference_capture=slow_inference_capture,
+        ),
+        call(
+            model,
+            slow_inference_capture=slow_inference_capture,
+        ),
+        call(
+            model,
+            slow_inference_capture=slow_inference_capture,
+        ),
     ]
 
     assert create_transcription_processor.call_count == 3
     assert create_transcription_processor.call_args_list == [
-        (
-            (),
-            {
-                "transcriber": transcribers[0],
-                "language_settings": settings.transcription.language,
-                "adaptive_state_store": None,
-            },
+        call(
+            transcriber=transcribers[0],
+            language_settings=settings.transcription.language,
+            adaptive_state_store=None,
         ),
-        (
-            (),
-            {
-                "transcriber": transcribers[1],
-                "language_settings": settings.transcription.language,
-                "adaptive_state_store": None,
-            },
+        call(
+            transcriber=transcribers[1],
+            language_settings=settings.transcription.language,
+            adaptive_state_store=None,
         ),
-        (
-            (),
-            {
-                "transcriber": transcribers[2],
-                "language_settings": settings.transcription.language,
-                "adaptive_state_store": None,
-            },
+        call(
+            transcriber=transcribers[2],
+            language_settings=settings.transcription.language,
+            adaptive_state_store=None,
         ),
     ]
 
     transcription_executor_impl.assert_called_once()
 
-    call = transcription_executor_impl.call_args
+    call_kwargs = transcription_executor_impl.call_args.kwargs
 
-    assert call.kwargs["processors"] == tuple(processors)
-    assert call.kwargs["queue_capacity"] == settings.transcription.queue_capacity
+    assert call_kwargs["processors"] == tuple(processors)
+    assert call_kwargs["queue_capacity"] == settings.transcription.queue_capacity
 
 
 @patch("app.composition.TranscriptionExecutorImpl")

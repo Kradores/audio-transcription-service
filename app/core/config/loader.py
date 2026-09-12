@@ -75,18 +75,35 @@ class ConfigurationLoader:
         """Resolve relative filesystem paths."""
 
         database_path = settings.database.path
+        capture_directory = settings.whisper.slow_inference_capture.directory
 
-        if database_path.is_absolute():
-            return settings
+        if not database_path.is_absolute():
+            database_path = (self._config_path.parent / database_path).resolve()
+
+        if not capture_directory.is_absolute():
+            capture_directory = (self._config_path.parent / capture_directory).resolve()
 
         resolved_database = settings.database.model_copy(
             update={
-                "path": (self._config_path.parent / database_path).resolve(),
+                "path": database_path,
+            }
+        )
+
+        resolved_slow_capture = settings.whisper.slow_inference_capture.model_copy(
+            update={
+                "directory": capture_directory,
+            }
+        )
+
+        resolved_whisper = settings.whisper.model_copy(
+            update={
+                "slow_inference_capture": resolved_slow_capture,
             }
         )
 
         return settings.model_copy(
             update={
                 "database": resolved_database,
+                "whisper": resolved_whisper,
             }
         )

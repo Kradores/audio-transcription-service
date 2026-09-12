@@ -92,5 +92,10 @@ whisper:
   device: cpu
   compute_type: int8
 
+  slow_inference_capture:
+    enabled: false
+    threshold_seconds: 5.0
+    directory: ../logs/slow-inference
+
 database:
   path: transcripts.db

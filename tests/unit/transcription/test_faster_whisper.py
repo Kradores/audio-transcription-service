@@ -1,10 +1,13 @@
+import logging
 from collections.abc import Iterable
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
 from app.audio.contracts import AudioFormat, SpeechSegment
 from app.transcription.faster_whisper import FasterWhisperTranscriber
+from app.transcription.slow_inference_capture import SlowInferenceCapture
 
 
 class FakeWhisperSegment:
@@ -216,3 +219,82 @@ def test_transcribe_logs_explicit_language_without_detection_confidence(
         "confidence=none" in message and "language_source=explicit" in message
         for message in messages
     )
+
+
+def test_transcribe_logs_inference_phase_diagnostics(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    model = FakeWhisperModel(
+        segments=[
+            FakeWhisperSegment("Hello"),
+            FakeWhisperSegment("world"),
+        ],
+        language="en",
+    )
+    transcriber = FasterWhisperTranscriber(model)
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="app.transcription.faster_whisper",
+    ):
+        transcriber.transcribe(create_segment())
+
+    message = caplog.records[-1].getMessage()
+
+    assert "inference_duration=" in message
+    assert "model_setup_duration=" in message
+    assert "decoding_duration=" in message
+    assert "realtime_factor=" in message
+    assert "output_segments=2" in message
+    assert "output_characters=11" in message
+
+
+def test_transcribe_reports_timing_and_result_to_slow_inference_capture() -> None:
+    model = FakeWhisperModel(
+        segments=[
+            FakeWhisperSegment("Hello"),
+            FakeWhisperSegment("world"),
+        ],
+        language="en",
+        language_probability=0.93,
+    )
+
+    slow_inference_capture = MagicMock(
+        spec=SlowInferenceCapture,
+    )
+
+    transcriber = FasterWhisperTranscriber(
+        model,
+        slow_inference_capture=slow_inference_capture,
+    )
+
+    segment = create_segment()
+
+    with patch(
+        "app.transcription.faster_whisper.time.perf_counter",
+        side_effect=[
+            10.0,
+            10.1,
+            12.5,
+        ],
+    ):
+        transcriber.transcribe(segment)
+
+    slow_inference_capture.capture_if_slow.assert_called_once()
+
+    call_kwargs = slow_inference_capture.capture_if_slow.call_args.kwargs
+
+    assert call_kwargs["segment"] is segment
+
+    diagnostics = call_kwargs["diagnostics"]
+
+    assert diagnostics.inference_duration_seconds == pytest.approx(2.5)
+    assert diagnostics.model_setup_duration_seconds == pytest.approx(0.1)
+    assert diagnostics.decoding_duration_seconds == pytest.approx(2.4)
+
+    assert diagnostics.selected_language is None
+    assert diagnostics.result_language == "en"
+    assert diagnostics.result_confidence == pytest.approx(0.93)
+
+    assert diagnostics.output_segments == 2
+    assert diagnostics.output_characters == 11

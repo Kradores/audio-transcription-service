@@ -1189,9 +1189,7 @@ def test_same_candidate_after_max_gap_restarts_confirmation() -> None:
     # 50.0 - 14.0 = 36 seconds, so the English candidate is stale.
     processor.process(create_item(duration=4.0, timestamp=50.0))
 
-    short_result = processor.process(
-        create_item(duration=1.0, timestamp=55.0)
-    )
+    short_result = processor.process(create_item(duration=1.0, timestamp=55.0))
 
     # English must not have switched after the stale confirmation.
     assert short_result.result.language == "ro"
@@ -1220,9 +1218,7 @@ def test_same_candidate_within_max_gap_confirms_switch() -> None:
     # 20.0 - 14.0 = 6 seconds, so it confirms.
     processor.process(create_item(duration=4.0, timestamp=20.0))
 
-    short_result = processor.process(
-        create_item(duration=1.0, timestamp=25.0)
-    )
+    short_result = processor.process(create_item(duration=1.0, timestamp=25.0))
 
     assert short_result.result.language == "en"
 
@@ -1255,9 +1251,7 @@ def test_low_confidence_probe_does_not_refresh_candidate_lifetime() -> None:
     # 50.0 - 14.0 = 36 seconds.
     processor.process(create_item(duration=4.0, timestamp=50.0))
 
-    short_result = processor.process(
-        create_item(duration=1.0, timestamp=55.0)
-    )
+    short_result = processor.process(create_item(duration=1.0, timestamp=55.0))
 
     assert short_result.result.language == "ro"
 
@@ -1284,9 +1278,7 @@ def test_unknown_language_candidate_expires_before_confirmation() -> None:
     # Now close enough to the restarted candidate.
     processor.process(create_item(duration=4.0, timestamp=50.0))
 
-    short_result = processor.process(
-        create_item(duration=1.0, timestamp=55.0)
-    )
+    short_result = processor.process(create_item(duration=1.0, timestamp=55.0))
 
     assert short_result.result.language == "ro"
     assert short_result.result.confidence is None
