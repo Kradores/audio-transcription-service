@@ -10,7 +10,6 @@ from app.composition import create_application
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 
 logger = logging.getLogger(__name__)
-logging.getLogger("faster_whisper").setLevel(logging.DEBUG)
 
 
 async def run_application(

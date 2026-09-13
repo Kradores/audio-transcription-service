@@ -221,3 +221,4 @@ __marimo__/
 repomix-output.xml
 transcripts.db
 /config/config.yaml
+/logs/*

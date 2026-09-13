@@ -1290,3 +1290,220 @@ avg_queue_wait=0.191
 
 The AMD and CPU worker-count observations are hardware/runtime-specific
 operating points rather than universal performance guarantees.
+
+
+## Slow Faster-Whisper inference diagnostics
+
+Faster-Whisper inference timing is split into:
+
+- `model_setup_duration` — preparation before the segment iterator is consumed, including automatic language detection when applicable;
+- `decoding_duration` — time spent consuming Faster-Whisper's generated segments;
+- `inference_duration` — total transcription time;
+- `realtime_factor` — inference duration divided by input-audio duration;
+- output segment and character counts.
+
+This separation is useful when diagnosing unusually slow transcription. During the September 2026 investigation, observed outliers spent almost all of their time in decoding rather than model setup.
+
+### Optional slow-inference capture
+
+Slow model inputs can be preserved for deterministic replay:
+
+```yaml
+whisper:
+  slow_inference_capture:
+    enabled: false
+    threshold_seconds: 5.0
+    directory: ../logs/slow-inference
+```
+
+The feature is disabled by default.
+
+When enabled, an inference meeting or exceeding the configured threshold stores:
+
+- `audio.npy` — the authoritative contiguous `float32` audio passed to Faster-Whisper;
+- `audio.wav` — a PCM convenience copy for human listening;
+- `metadata.json` — input format, timestamps, selected/result language, inference-phase timing, output statistics, and an SHA-256 checksum of the exact float32 input.
+
+Failure to write diagnostic files must not fail or interrupt transcription.
+
+### Investigation conclusion
+
+A September 2026 investigation reproduced rare long Faster-Whisper inference calls from the exact captured audio outside the live pipeline.
+
+The observed mechanism was pathological decoding on difficult, ambiguous, short, elongated, or incorrectly language-classified input. Faster-Whisper could generate highly repetitive candidates which failed its compression-ratio or log-probability checks and caused repeated temperature-fallback decoding attempts.
+
+The behavior was reproducible from the audio itself and was therefore not consistent with a random application queue stall or an unexplained AMD/CTranslate2 GPU hang.
+
+No production decoding override is currently applied.
+
+The application deliberately keeps Faster-Whisper's upstream defaults for settings such as:
+
+- temperature fallback;
+- `max_new_tokens`;
+- compression-ratio threshold;
+- log-probability threshold;
+- no-speech threshold;
+- repetition controls.
+
+Experiments showed that generation limits can substantially reduce pathological latency, but overly aggressive limits can silently truncate valid dense speech. Since the observed inference outliers are rare and have not caused segment loss, executor rejection, or other meaningful operational harm, adding and maintaining a custom decoder policy is not currently justified.
+
+The investigation should be reopened if there is evidence of practical impact such as:
+
+- transcription work being rejected or lost;
+- sustained queue growth during realistic calls;
+- user-visible unacceptable transcript delay;
+- pathological inference becoming frequent rather than exceptional;
+- a new workload requiring substantially lower latency;
+- or a Faster-Whisper, CTranslate2, model, or runtime upgrade materially changing the behavior.
+
+The slow-inference capture and replay tooling should be used to investigate the behavior of the versions actually deployed at that time rather than assuming the September 2026 measurements remain valid indefinitely.
+
+
+## Slow inference replay and decoder experiments
+
+Rare Faster-Whisper latency outliers are investigated using captured transcription-boundary audio rather than synthetic approximations.
+
+The authoritative replay input is `audio.npy`, which preserves the exact `float32` samples supplied to Faster-Whisper. The accompanying WAV file is intended only for listening.
+
+### Single-sample replay
+
+`scripts/replay_slow_inference.py` loads a capture and runs it through the same configured Whisper model/runtime used by the application.
+
+Replay supports:
+
+- the original language-selection mode;
+- automatic or explicitly selected languages;
+- repeated execution;
+- Faster-Whisper DEBUG logging;
+- transcript output;
+- experimental `temperature` and `max_new_tokens` overrides.
+
+Decoder overrides are diagnostic only. Omitting them must preserve Faster-Whisper's own defaults.
+
+### Corpus comparison
+
+`scripts/compare_replay_corpus.py` compares upstream Faster-Whisper defaults against an experimental `max_new_tokens` bound over a captured corpus.
+
+The comparison records:
+
+- input duration and language selection;
+- baseline and candidate inference duration;
+- output token counts;
+- detected language;
+- transcript text;
+- text similarity;
+- potentially suspicious shortening or token-limit behavior.
+
+Suspicious rows are a manual review queue, not automatic correctness failures. Stochastic fallback decoding can legitimately produce different wording.
+
+### September 2026 investigation corpus
+
+The investigation used 149 captured segments:
+
+- 8 previously observed pathological slow-inference samples;
+- 141 representative samples from a realistic multilingual session.
+
+The experiments established:
+
+- `max_new_tokens=64` substantially reduced pathological latency but caused clear truncation of normal dense speech;
+- `max_new_tokens=96` reduced that risk but still produced a real truncation in the representative corpus;
+- `max_new_tokens=128` produced no observed cap-induced truncation in the tested normal corpus, but this does not prove that the bound is universally safe;
+- forcing `temperature=0` reduced retry latency but could deterministically preserve highly repetitive failed first-pass output.
+
+No experimental decoder configuration was accepted for production.
+
+The regression corpus and scripts are retained so that decoder-policy experiments can be repeated against future Faster-Whisper/CTranslate2/model versions if operational evidence makes optimization necessary.
+
+When reopening this investigation, evaluate both sides of the tradeoff:
+
+1. pathological samples must show materially bounded latency;
+2. representative normal speech must show no cap-induced truncation or meaningful quality regression.
+
+Do not tune decoding solely against pathological samples.
+
+
+## Investigating slow Faster-Whisper inference
+
+Rare unusually slow Faster-Whisper calls can be investigated without changing production decoder behavior.
+
+### Capture slow inputs
+
+Temporarily enable capture:
+
+```yaml
+whisper:
+  slow_inference_capture:
+    enabled: true
+    threshold_seconds: 5.0
+    directory: ../logs/slow-inference
+```
+
+Run the application normally. Each qualifying inference produces a directory containing:
+
+```text
+audio.npy
+audio.wav
+metadata.json
+```
+
+Return `enabled` to `false` after evidence collection.
+
+### Replay one captured input
+
+Run repository-aware scripts as modules from the repository root:
+
+```powershell
+.venv-therock\Scripts\python.exe `
+    -m scripts.replay_slow_inference `
+    "logs\slow-inference\<capture-directory>" `
+    --iterations 5 `
+    --debug-faster-whisper `
+    --print-text
+```
+
+The original captured language-selection mode is used by default.
+
+Alternative experiments can explicitly request a language or diagnostic decoder overrides, for example:
+
+```powershell
+.venv-therock\Scripts\python.exe `
+    -m scripts.replay_slow_inference `
+    "logs\slow-inference\<capture-directory>" `
+    --iterations 5 `
+    --max-new-tokens 128 `
+    --print-text
+```
+
+Decoder overrides are experiments only and must not be copied into production configuration without separate evidence and review.
+
+### Compare a corpus
+
+A directory range can be compared against a candidate generation bound:
+
+```powershell
+.venv-therock\Scripts\python.exe `
+    -m scripts.compare_replay_corpus `
+    "logs\slow-inference" `
+    --from-name "<first-capture-directory>" `
+    --to-name "<last-capture-directory>" `
+    --max-new-tokens 128 `
+    --output "logs\replay-comparison.csv"
+```
+
+Review suspicious rows manually, particularly:
+
+- candidate output becoming much shorter;
+- text ending mid-word or mid-sentence;
+- candidate output approaching its generation limit;
+- empty candidate output where baseline contains useful speech;
+- major language or transcript changes.
+
+Faster-Whisper DEBUG logging is useful for a small number of targeted replays but should not remain globally enabled in normal application operation.
+
+### Current conclusion
+
+As of September 2026, no custom decoder bound is used in production.
+
+Rare long decoding calls are tolerated because they have not caused meaningful operational harm. The diagnostic tools exist so this conclusion can be revisited efficiently if queue pressure, segment loss, unacceptable latency, or future dependency behavior makes it necessary.
+
+

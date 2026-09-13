@@ -5,8 +5,10 @@ import hashlib
 import logging
 import statistics
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol, cast
 
 import numpy as np
 from pydantic import BaseModel
@@ -25,11 +27,94 @@ class CaptureMetadata(BaseModel):
     inference_duration_seconds: float
 
 
+class ReplaySegment(Protocol):
+    text: str
+    tokens: list[int]
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayResult:
+    total_seconds: float
+    setup_seconds: float
+    decoding_seconds: float
+    language: str
+    confidence: float
+    output_segments: int
+    output_tokens: int
+    text: str
+
+
+class ReplayInfo(Protocol):
+    language: str
+    language_probability: float
+
+
+class ReplayWhisperModel(Protocol):
+    def transcribe(
+        self,
+        audio: np.ndarray,
+        *,
+        language: str | None = None,
+        temperature: float | list[float] | tuple[float, ...] = ...,
+        max_new_tokens: int | None = ...,
+    ) -> tuple[Iterable[ReplaySegment], ReplayInfo]:
+        """Transcribe audio using optional diagnostic decoding overrides."""
+
+
 @dataclass(frozen=True, slots=True)
 class ReplayTiming:
     total_seconds: float
     setup_seconds: float
     decoding_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayDecodingOverrides:
+    temperature: float | None = None
+    max_new_tokens: int | None = None
+
+    def validate(self) -> None:
+        if self.temperature is not None and self.temperature < 0.0:
+            raise ValueError("--temperature must not be negative")
+
+        if self.max_new_tokens is not None and self.max_new_tokens < 1:
+            raise ValueError("--max-new-tokens must be at least 1")
+
+
+def run_replay_once(
+    *,
+    model: ReplayWhisperModel,
+    audio: np.ndarray,
+    language: str | None,
+    overrides: ReplayDecodingOverrides,
+) -> ReplayResult:
+    started_at = time.perf_counter()
+
+    whisper_segments, info = transcribe_with_overrides(
+        model=model,
+        audio=audio,
+        language=language,
+        overrides=overrides,
+    )
+
+    setup_completed_at = time.perf_counter()
+
+    segments = list(whisper_segments)
+
+    completed_at = time.perf_counter()
+
+    text = " ".join(segment.text.strip() for segment in segments if segment.text.strip())
+
+    return ReplayResult(
+        total_seconds=completed_at - started_at,
+        setup_seconds=setup_completed_at - started_at,
+        decoding_seconds=completed_at - setup_completed_at,
+        language=info.language,
+        confidence=info.language_probability,
+        output_segments=len(segments),
+        output_tokens=sum(len(segment.tokens) for segment in segments),
+        text=text,
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,6 +143,26 @@ def parse_args() -> argparse.Namespace:
         "--language",
         default="original",
         help="original, auto, or an explicit language code such as ro/en/ru",
+    )
+
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help=(
+            "Override Faster-Whisper temperature with one value. "
+            "Omit to preserve Faster-Whisper's default temperature fallback sequence."
+        ),
+    )
+
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=None,
+        help=(
+            "Maximum newly generated tokens per Whisper decoding window. "
+            "Omit to preserve Faster-Whisper's default model limit."
+        ),
     )
 
     parser.add_argument(
@@ -128,11 +233,66 @@ def resolve_language(
     return value
 
 
+def transcribe_with_overrides(
+    *,
+    model: ReplayWhisperModel,
+    audio: np.ndarray,
+    language: str | None,
+    overrides: ReplayDecodingOverrides,
+) -> tuple[Iterable[ReplaySegment], ReplayInfo]:
+    if overrides.temperature is None and overrides.max_new_tokens is None:
+        return model.transcribe(
+            audio,
+            language=language,
+        )
+
+    if overrides.temperature is None:
+        return model.transcribe(
+            audio,
+            language=language,
+            max_new_tokens=overrides.max_new_tokens,
+        )
+
+    if overrides.max_new_tokens is None:
+        return model.transcribe(
+            audio,
+            language=language,
+            temperature=overrides.temperature,
+        )
+
+    return model.transcribe(
+        audio,
+        language=language,
+        temperature=overrides.temperature,
+        max_new_tokens=overrides.max_new_tokens,
+    )
+
+
+def describe_overrides(
+    overrides: ReplayDecodingOverrides,
+) -> str:
+    temperature = (
+        "default-fallback" if overrides.temperature is None else f"{overrides.temperature:.2f}"
+    )
+
+    max_new_tokens = (
+        "model-default" if overrides.max_new_tokens is None else str(overrides.max_new_tokens)
+    )
+
+    return f"temperature={temperature} max_new_tokens={max_new_tokens}"
+
+
 def main() -> None:
     args = parse_args()
 
     if args.iterations < 1:
         raise ValueError("--iterations must be at least 1")
+
+    overrides = ReplayDecodingOverrides(
+        temperature=args.temperature,
+        max_new_tokens=args.max_new_tokens,
+    )
+    overrides.validate()
 
     logging.basicConfig(
         level=logging.INFO,
@@ -162,54 +322,47 @@ def main() -> None:
         f"duration={audio.shape[0] / metadata.sample_rate:.3f}s "
         f"original_language={metadata.selected_language or 'auto'} "
         f"replay_language={language or 'auto'} "
-        f"original_inference={metadata.inference_duration_seconds:.3f}s"
+        f"original_inference={metadata.inference_duration_seconds:.3f}s "
+        f"{describe_overrides(overrides)}"
     )
 
-    model = create_whisper_model(settings)
+    model = cast(
+        ReplayWhisperModel,
+        create_whisper_model(settings),
+    )
 
     timings: list[ReplayTiming] = []
 
     for iteration in range(1, args.iterations + 1):
-        started_at = time.perf_counter()
-
-        whisper_segments, info = model.transcribe(
-            audio,
+        result = run_replay_once(
+            model=model,
+            audio=audio,
             language=language,
+            overrides=overrides,
         )
-
-        setup_completed_at = time.perf_counter()
-
-        segments = list(whisper_segments)
-
-        completed_at = time.perf_counter()
-
-        text = " ".join(segment.text.strip() for segment in segments if segment.text.strip())
-
-        setup_seconds = setup_completed_at - started_at
-        decoding_seconds = completed_at - setup_completed_at
-        total_seconds = completed_at - started_at
 
         timings.append(
             ReplayTiming(
-                total_seconds=total_seconds,
-                setup_seconds=setup_seconds,
-                decoding_seconds=decoding_seconds,
+                total_seconds=result.total_seconds,
+                setup_seconds=result.setup_seconds,
+                decoding_seconds=result.decoding_seconds,
             )
         )
 
         print(
             f"iteration={iteration} "
-            f"total={total_seconds:.3f}s "
-            f"setup={setup_seconds:.3f}s "
-            f"decoding={decoding_seconds:.3f}s "
-            f"language={info.language} "
-            f"confidence={info.language_probability:.3f} "
-            f"segments={len(segments)} "
-            f"characters={len(text)}"
+            f"total={result.total_seconds:.3f}s "
+            f"setup={result.setup_seconds:.3f}s "
+            f"decoding={result.decoding_seconds:.3f}s "
+            f"language={result.language} "
+            f"confidence={result.confidence:.3f} "
+            f"segments={result.output_segments} "
+            f"tokens={result.output_tokens} "
+            f"characters={len(result.text)}"
         )
 
         if args.print_text:
-            print(f"text={text!r}")
+            print(f"text={result.text!r}")
 
     totals = [timing.total_seconds for timing in timings]
     decoding = [timing.decoding_seconds for timing in timings]
@@ -218,6 +371,7 @@ def main() -> None:
     print(
         "summary "
         f"iterations={len(timings)} "
+        f"{describe_overrides(overrides)} "
         f"total_mean={statistics.mean(totals):.3f}s "
         f"total_median={statistics.median(totals):.3f}s "
         f"total_max={max(totals):.3f}s "
