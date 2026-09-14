@@ -123,3 +123,74 @@ def test_shutdown_signal_sets_shutdown_event() -> None:
     )
 
     assert shutdown_event.is_set()
+
+
+@pytest.mark.anyio
+async def test_run_application_notifies_after_successful_start(
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+
+    application = MagicMock()
+
+    async def start_application() -> None:
+        events.append("application-started")
+
+    application.start = AsyncMock(
+        side_effect=start_application,
+    )
+    application.stop = AsyncMock()
+
+    shutdown_event = asyncio.Event()
+    shutdown_event.set()
+
+    application.wait = AsyncMock()
+
+    def on_started() -> None:
+        events.append("startup-notified")
+
+    with patch(
+        "app.main.create_application",
+        return_value=application,
+    ):
+        await run_application(
+            create_development_runtime_paths(tmp_path),
+            shutdown_event=shutdown_event,
+            on_started=on_started,
+        )
+
+    assert events == [
+        "application-started",
+        "startup-notified",
+    ]
+
+
+@pytest.mark.anyio
+async def test_run_application_does_not_notify_when_start_fails(
+    tmp_path: Path,
+) -> None:
+    application = MagicMock()
+    application.start = AsyncMock(
+        side_effect=RuntimeError("startup failed"),
+    )
+    application.stop = AsyncMock()
+
+    on_started = MagicMock()
+
+    with (
+        patch(
+            "app.main.create_application",
+            return_value=application,
+        ),
+        pytest.raises(
+            RuntimeError,
+            match="startup failed",
+        ),
+    ):
+        await run_application(
+            create_development_runtime_paths(tmp_path),
+            on_started=on_started,
+        )
+
+    on_started.assert_not_called()
+    application.stop.assert_awaited_once()

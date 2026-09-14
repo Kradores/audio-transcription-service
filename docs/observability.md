@@ -1507,3 +1507,45 @@ As of September 2026, no custom decoder bound is used in production.
 Rare long decoding calls are tolerated because they have not caused meaningful operational harm. The diagnostic tools exist so this conclusion can be revisited efficiently if queue pressure, segment loss, unacceptable latency, or future dependency behavior makes it necessary.
 
 
+## Windows support bundle
+
+The interactive Windows controller can create a diagnostic ZIP under:
+
+```text
+support/support-<timestamp>.zip
+```
+
+The default bundle contains:
+
+- application configuration, when available;
+- current application log and rotated application logs;
+- slow-inference `metadata.json` files;
+- `system-info.json`;
+- `manifest.json`.
+
+Raw slow-inference audio (`audio.wav` and `audio.npy`) is excluded.
+
+The transcript SQLite database is excluded by default because it contains
+conversation content.
+
+The controller exposes an explicit:
+
+```text
+Include transcript database (contains conversation text)
+```
+
+checkbox.
+
+When selected, the database is included as a consistent SQLite backup under:
+
+```text
+data/transcripts.db
+```
+
+The checkbox returns to the unchecked state after successful bundle creation.
+
+A support bundle should remain creatable when normal application startup has
+failed. Configuration errors are therefore recorded in the bundle when
+possible rather than preventing creation, except when transcript-database
+inclusion was explicitly requested and its configured location cannot be
+resolved.

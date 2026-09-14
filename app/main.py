@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+from collections.abc import Callable
 from pathlib import Path
 from types import FrameType
 
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 async def run_application(
     runtime_paths: RuntimePaths,
     shutdown_event: asyncio.Event | None = None,
+    on_started: Callable[[], None] | None = None,
 ) -> None:
     """Create, run, and gracefully stop the application."""
 
@@ -31,6 +33,9 @@ async def run_application(
             "Application started successfully: %s",
             application.settings.application.name,
         )
+
+        if on_started is not None:
+            on_started()
 
         application_wait = asyncio.create_task(
             application.wait(),
