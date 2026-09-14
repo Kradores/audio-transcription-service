@@ -32,6 +32,7 @@ from app.composition import (
     create_whisper_model,
 )
 from app.core.config.enums import WhisperRuntime
+from app.core.runtime_paths import create_development_runtime_paths
 from app.services.transcription_executor import TranscriptionExecutor
 from app.transcription.adaptive_language_state import AdaptiveLanguageStateStore
 from app.transcription.audio_preprocessor import (
@@ -63,7 +64,12 @@ def test_create_application_loads_configuration(
     create_vad.return_value = vad
 
     # Act
-    application = create_application(config_path)
+    application = create_application(
+        create_development_runtime_paths(
+            tmp_path,
+            config_path=config_path,
+        )
+    )
 
     # Assert
     assert isinstance(application, Application)
@@ -84,7 +90,12 @@ def test_create_application_passes_loaded_settings_to_application(
     create_vad.return_value = vad
 
     # Act
-    application = create_application(config_path)
+    application = create_application(
+        create_development_runtime_paths(
+            tmp_path,
+            config_path=config_path,
+        )
+    )
 
     # Assert
     assert application.settings.database.path == (tmp_path / "data" / "transcripts.db").resolve()
@@ -343,7 +354,12 @@ def test_create_application_builds_one_conversation_pipeline(
         patch("app.composition.Application") as application_type,
     ):
         # Act
-        create_application(config_path)
+        create_application(
+            create_development_runtime_paths(
+                tmp_path,
+                config_path=config_path,
+            )
+        )
 
     # Assert
     conversation_pipeline.assert_called_once()
@@ -376,7 +392,12 @@ def test_create_application_builds_two_source_pipelines_with_shared_executor(
         ),
         patch("app.composition.create_source_pipeline") as create_source,
     ):
-        create_application(config_path)
+        create_application(
+            create_development_runtime_paths(
+                tmp_path,
+                config_path=config_path,
+            )
+        )
 
     calls = create_source.call_args_list
 
@@ -601,7 +622,12 @@ def test_create_application_wires_shared_portaudio_refresh_coordinator(
     create_microphone_capture.return_value = microphone_capture
 
     # Act
-    application = create_application(config_path)
+    application = create_application(
+        create_development_runtime_paths(
+            tmp_path,
+            config_path=config_path,
+        )
+    )
 
     # Assert
     create_system_audio_capture.assert_called_once_with(

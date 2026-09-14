@@ -222,3 +222,6 @@ repomix-output.xml
 transcripts.db
 /config/config.yaml
 /logs/*
+/data/*
+/diagnostics/*
+/support/*

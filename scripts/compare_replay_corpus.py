@@ -13,6 +13,7 @@ import numpy as np
 from app.composition import create_whisper_model
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
+from app.core.runtime_paths import create_development_runtime_paths
 from scripts.replay_slow_inference import (
     ReplayDecodingOverrides,
     ReplayResult,
@@ -219,7 +220,9 @@ def main() -> None:
         )
 
     settings = ConfigurationLoader(
-        args.config,
+        create_development_runtime_paths(
+            config_path=args.config,
+        )
     ).load()
 
     model = cast(

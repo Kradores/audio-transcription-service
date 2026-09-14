@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from app.composition import create_whisper_model
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
+from app.core.runtime_paths import create_development_runtime_paths
 
 
 class CaptureMetadata(BaseModel):
@@ -307,7 +308,9 @@ def main() -> None:
     )
 
     settings = ConfigurationLoader(
-        args.config,
+        create_development_runtime_paths(
+            config_path=args.config,
+        )
     ).load()
 
     language = resolve_language(

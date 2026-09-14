@@ -11,6 +11,7 @@ from app.audio.timeline import MonotonicAudioTimeline
 from app.composition import create_system_audio_capture
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
+from app.core.runtime_paths import create_development_runtime_paths
 
 CAPTURE_DURATION_SECONDS = 2.0
 
@@ -20,7 +21,11 @@ CAPTURE_DURATION_SECONDS = 2.0
 @pytest.mark.anyio
 async def test_real_pyaudio_capture_receives_wasapi_loopback_frames() -> None:
     # Arrange
-    settings = ConfigurationLoader(DEFAULT_CONFIGURATION_PATH).load()
+    settings = ConfigurationLoader(
+        create_development_runtime_paths(
+            config_path=DEFAULT_CONFIGURATION_PATH,
+        )
+    ).load()
     coordinator = PortAudioRefreshCoordinator()
     timeline = MonotonicAudioTimeline()
 

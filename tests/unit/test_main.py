@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.core.runtime_paths import create_development_runtime_paths
 from app.main import _handle_shutdown_signal, run_application
 
 
@@ -32,7 +33,7 @@ async def test_run_application_stops_gracefully_when_shutdown_is_requested(
     ):
         # Act
         await run_application(
-            tmp_path / "config.yaml",
+            create_development_runtime_paths(tmp_path),
             shutdown_event=shutdown_event,
         )
 
@@ -63,7 +64,7 @@ async def test_run_application_stops_application_when_cancelled(
     ):
         task = asyncio.create_task(
             run_application(
-                tmp_path / "config.yaml",
+                create_development_runtime_paths(tmp_path),
                 shutdown_event=shutdown_event,
             )
         )
@@ -105,7 +106,7 @@ async def test_run_application_propagates_runtime_failure_and_stops_application(
         ),
     ):
         await run_application(
-            tmp_path / "config.yaml",
+            create_development_runtime_paths(tmp_path),
             shutdown_event=shutdown_event,
         )
 

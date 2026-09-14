@@ -18,6 +18,7 @@ from app.composition import (
     create_vad,
 )
 from app.core.config.loader import ConfigurationLoader
+from app.core.runtime_paths import create_development_runtime_paths
 from app.services.speech_pipeline import SpeechPipeline
 from app.transcription.aggregation import TranscriptionSegmentAggregatorImpl
 from app.transcription.contracts import AudioSource
@@ -78,7 +79,11 @@ def _read_wav(path: Path) -> AudioFrame:
 @pytest.mark.anyio
 async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None:
     # Arrange
-    settings = ConfigurationLoader(INTEGRATION_CONFIGURATION_PATH).load()
+    settings = ConfigurationLoader(
+        create_development_runtime_paths(
+            config_path=INTEGRATION_CONFIGURATION_PATH,
+        )
+    ).load()
 
     frame = _read_wav(FIXTURE_PATH)
     capture = FixtureAudioCapture(frame)

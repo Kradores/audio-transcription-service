@@ -17,6 +17,7 @@ from app.audio.resampler import SoXRResamplerFactory
 from app.composition import create_whisper_model
 from app.core.config.loader import ConfigurationLoader
 from app.core.config.models import AudioProcessingSettings
+from app.core.runtime_paths import create_development_runtime_paths
 from app.transcription.protocols import WhisperModelProtocol
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -650,7 +651,10 @@ def main() -> None:
     arguments = parse_arguments()
 
     settings = ConfigurationLoader(
-        arguments.config,
+        create_development_runtime_paths(
+            PROJECT_ROOT,
+            config_path=arguments.config,
+        )
     ).load()
 
     individual_fixtures = discover_fixtures(

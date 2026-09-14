@@ -7,18 +7,18 @@ from pathlib import Path
 from types import FrameType
 
 from app.composition import create_application
-from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
+from app.core.runtime_paths import RuntimePaths, create_development_runtime_paths
 
 logger = logging.getLogger(__name__)
 
 
 async def run_application(
-    config_path: Path = DEFAULT_CONFIGURATION_PATH,
+    runtime_paths: RuntimePaths,
     shutdown_event: asyncio.Event | None = None,
 ) -> None:
     """Create, run, and gracefully stop the application."""
 
-    application = create_application(config_path)
+    application = create_application(runtime_paths)
     event = shutdown_event or asyncio.Event()
 
     application_wait: asyncio.Task[None] | None = None
@@ -78,7 +78,7 @@ def _handle_shutdown_signal(
 
 
 async def _run_cli_application(
-    config_path: Path,
+    runtime_paths: RuntimePaths,
 ) -> None:
     shutdown_event = asyncio.Event()
 
@@ -101,7 +101,7 @@ async def _run_cli_application(
 
     try:
         await run_application(
-            config_path,
+            runtime_paths,
             shutdown_event=shutdown_event,
         )
     finally:
@@ -112,10 +112,14 @@ async def _run_cli_application(
 
 
 def main(
-    config_path: Path = DEFAULT_CONFIGURATION_PATH,
+    config_path: Path | None = None,
 ) -> None:
     """Start the application."""
 
+    runtime_paths = create_development_runtime_paths(
+        config_path=config_path,
+    )
+
     asyncio.run(
-        _run_cli_application(config_path),
+        _run_cli_application(runtime_paths),
     )

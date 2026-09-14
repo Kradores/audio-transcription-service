@@ -110,8 +110,19 @@ class AudioSettings(BaseConfigurationModel):
 ## Fields order inside class
 Logical grouping instead of alphabetical order
 
-## Path, future reference
-If multiple filesystem paths are added, extract a dedicated `PathResolver` component instead of expanding `ConfigurationLoader`.
+## Runtime filesystem paths
+
+Runtime filesystem locations are represented by the strongly typed `RuntimePaths` boundary.
+
+Development execution uses the repository root as the runtime root. Installed Windows execution uses:
+
+```text
+%LOCALAPPDATA%\AudioTranscriptionService
+```
+
+Configured relative filesystem paths are resolved against the runtime root, not the process current working directory and not the directory containing `config.yaml`.
+
+The configuration loader receives `RuntimePaths` explicitly and does not discover the runtime root itself.
 
 ## Implementation-driven development
 Instead of asking "How should we design this?", we'll ask:
@@ -259,10 +270,18 @@ The database path is configured through:
 
 ```yaml
 database:
-  path: transcripts.db
+  path: data/transcripts.db
 ```
 
-Relative database paths are resolved relative to the configuration file.
+Relative database paths are resolved against the runtime root.
+
+During development this produces:
+
+```text
+<repository>\data\transcripts.db
+```
+
+The application does not depend on the process current working directory to locate the database.
 
 The application creates the parent directory for the configured database
 path when necessary.

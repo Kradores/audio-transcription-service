@@ -1,3 +1,27 @@
+## Windows runtime filesystem layout
+
+Runtime paths are deterministic and independent of the process current working directory.
+
+Development execution uses the repository root as the runtime root.
+
+Installed per-user Windows execution uses:
+
+```text
+%LOCALAPPDATA%\AudioTranscriptionService\
+    config\
+        config.yaml
+    data\
+        transcripts.db
+    logs\
+        audio-transcription-service.log
+    diagnostics\
+    support\
+```
+
+Configured relative filesystem paths resolve against this runtime root. Absolute configured paths remain absolute.
+
+The installed application runtime under `%LOCALAPPDATA%\Programs\AudioTranscriptionService` remains separate from mutable user data.
+
 ## runtime concerns:
 Windows required
 WASAPI available

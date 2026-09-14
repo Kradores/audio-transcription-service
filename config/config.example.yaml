@@ -95,7 +95,7 @@ whisper:
   slow_inference_capture:
     enabled: false
     threshold_seconds: 5.0
-    directory: ../logs/slow-inference
+    directory: diagnostics/slow-inference
 
 database:
-  path: transcripts.db
+  path: data/transcripts.db

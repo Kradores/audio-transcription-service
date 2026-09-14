@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from pathlib import Path
 from typing import assert_never
 
 from silero_vad import VADIterator, load_silero_vad
@@ -21,7 +20,6 @@ from app.audio.protocols import AudioCapture, AudioNormalizer
 from app.audio.resampler import SoXRResamplerFactory
 from app.audio.timeline import AudioTimeline, MonotonicAudioTimeline
 from app.audio.windows_device_monitor import WindowsAudioDeviceMonitor
-from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.enums import WhisperRuntime
 from app.core.config.loader import ConfigurationLoader
 from app.core.config.models import (
@@ -34,6 +32,7 @@ from app.core.config.models import (
     TranscriptionLanguageSettings,
 )
 from app.core.logging import configure_logging
+from app.core.runtime_paths import RuntimePaths
 from app.services.conversation_pipeline import ConversationPipeline
 from app.services.speech_pipeline import SpeechPipeline
 from app.services.transcription_executor import TranscriptionExecutor, TranscriptionExecutorImpl
@@ -71,11 +70,11 @@ logger = logging.getLogger(__name__)
 
 
 def create_application(
-    config_path: Path = DEFAULT_CONFIGURATION_PATH,
+    runtime_paths: RuntimePaths,
 ) -> Application:
     """Create and configure the application."""
 
-    settings = ConfigurationLoader(config_path).load()
+    settings = ConfigurationLoader(runtime_paths).load()
     configure_logging(settings.logging)
 
     timeline = MonotonicAudioTimeline()

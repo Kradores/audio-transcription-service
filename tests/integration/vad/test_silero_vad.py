@@ -10,6 +10,7 @@ from app.audio.resampler import SoXRResamplerFactory
 from app.composition import create_vad
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
+from app.core.runtime_paths import create_development_runtime_paths
 
 FIXTURE_PATH = Path(__file__).parents[2] / "fixtures" / "audio" / "english_speech.wav"
 
@@ -42,7 +43,11 @@ def _read_wav(path: Path) -> AudioFrame:
 @pytest.mark.timeout(120)
 def test_real_silero_detects_speech_in_audio_fixture() -> None:
     # Arrange
-    settings = ConfigurationLoader(DEFAULT_CONFIGURATION_PATH).load()
+    settings = ConfigurationLoader(
+        create_development_runtime_paths(
+            config_path=DEFAULT_CONFIGURATION_PATH,
+        )
+    ).load()
 
     vad = create_vad(settings)
     assert vad is not None

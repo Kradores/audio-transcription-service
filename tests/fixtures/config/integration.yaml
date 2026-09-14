@@ -56,4 +56,4 @@ whisper:
   compute_type: int8
 
 database:
-  path: transcripts.db
+  path: data/transcripts.db

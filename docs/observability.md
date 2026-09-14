@@ -1313,7 +1313,7 @@ whisper:
   slow_inference_capture:
     enabled: false
     threshold_seconds: 5.0
-    directory: ../logs/slow-inference
+    directory: diagnostics/slow-inference
 ```
 
 The feature is disabled by default.
@@ -1435,7 +1435,7 @@ whisper:
   slow_inference_capture:
     enabled: true
     threshold_seconds: 5.0
-    directory: ../logs/slow-inference
+    directory: diagnostics/slow-inference
 ```
 
 Run the application normally. Each qualifying inference produces a directory containing:

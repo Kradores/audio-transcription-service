@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import yaml
 from pydantic import ValidationError
 
@@ -12,16 +10,18 @@ from app.core.config.exceptions import (
 )
 from app.core.config.models import Settings
 from app.core.config.types import ConfigurationDocument
+from app.core.runtime_paths import RuntimePaths
 
 
 class ConfigurationLoader:
     """Loads and validates the application configuration."""
 
-    def __init__(self, config_path: Path) -> None:
-        if not config_path.suffix:
+    def __init__(self, runtime_paths: RuntimePaths) -> None:
+        if not runtime_paths.config_path.suffix:
             raise ValueError("Configuration path must point to a file.")
 
-        self._config_path = config_path.resolve()
+        self._runtime_paths = runtime_paths
+        self._config_path = runtime_paths.config_path
 
     def load(self) -> Settings:
         """Load, validate and normalize the application configuration."""
@@ -72,20 +72,32 @@ class ConfigurationLoader:
             ) from ex
 
     def _resolve_relative_paths(self, settings: Settings) -> Settings:
-        """Resolve relative filesystem paths."""
+        """Resolve configured filesystem paths against the runtime root."""
 
-        database_path = settings.database.path
-        capture_directory = settings.whisper.slow_inference_capture.directory
-
-        if not database_path.is_absolute():
-            database_path = (self._config_path.parent / database_path).resolve()
-
-        if not capture_directory.is_absolute():
-            capture_directory = (self._config_path.parent / capture_directory).resolve()
+        database_path = self._runtime_paths.resolve(
+            settings.database.path,
+        )
+        logging_path = self._runtime_paths.resolve(
+            settings.logging.file.path,
+        )
+        capture_directory = self._runtime_paths.resolve(
+            settings.whisper.slow_inference_capture.directory,
+        )
 
         resolved_database = settings.database.model_copy(
             update={
                 "path": database_path,
+            }
+        )
+
+        resolved_log_file = settings.logging.file.model_copy(
+            update={
+                "path": logging_path,
+            }
+        )
+        resolved_logging = settings.logging.model_copy(
+            update={
+                "file": resolved_log_file,
             }
         )
 
@@ -94,7 +106,6 @@ class ConfigurationLoader:
                 "directory": capture_directory,
             }
         )
-
         resolved_whisper = settings.whisper.model_copy(
             update={
                 "slow_inference_capture": resolved_slow_capture,
@@ -104,6 +115,7 @@ class ConfigurationLoader:
         return settings.model_copy(
             update={
                 "database": resolved_database,
+                "logging": resolved_logging,
                 "whisper": resolved_whisper,
             }
         )
