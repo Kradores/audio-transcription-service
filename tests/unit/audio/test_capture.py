@@ -1853,3 +1853,45 @@ async def test_conversation_timeline_survives_stream_recovery() -> None:
     recovered_frame = transport.submit.call_args_list[1].args[0]
 
     assert recovered_frame.timestamp == pytest.approx(19.99)
+
+
+def test_dispose_audio_session_keeps_format_available_until_stream_stops() -> None:
+    # Arrange
+    capture = _create_capture(
+        transport=QueuedAudioCapture(
+            max_queue_size=4,
+        ),
+        sleep=_yielding_sleep,
+    )
+
+    audio = MagicMock()
+    stream = MagicMock()
+
+    audio_format = AudioFormat(
+        sample_rate=48_000,
+        channels=2,
+        sample_type="int16",
+    )
+
+    capture._audio = audio
+    capture._format = audio_format
+    capture._stream = stream
+
+    def stop_stream() -> None:
+        # A PortAudio callback may still be active while
+        # stop_stream() is completing.
+        assert capture._format is audio_format
+
+    stream.stop_stream.side_effect = stop_stream
+
+    # Act
+    capture._dispose_audio_session()
+
+    # Assert
+    stream.stop_stream.assert_called_once_with()
+    stream.close.assert_called_once_with()
+    audio.terminate.assert_called_once_with()
+
+    assert capture._stream is None
+    assert capture._audio is None
+    assert capture._format is None

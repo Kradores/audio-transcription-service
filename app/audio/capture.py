@@ -511,13 +511,13 @@ class PyAudioCapture(AudioCapture):
     def _dispose_audio_session(self) -> None:
         audio = self._audio
 
-        self._audio = None
-        self._device_provider = None
-        self._format = None
-
         try:
             self._close_stream()
         finally:
+            self._audio = None
+            self._device_provider = None
+            self._format = None
+
             if audio is not None:
                 audio.terminate()
 
