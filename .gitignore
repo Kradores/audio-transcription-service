@@ -225,3 +225,7 @@ transcripts.db
 /data/*
 /diagnostics/*
 /support/*
+
+
+# Reproducible Windows application packaging configuration
+!packaging/windows/AudioTranscriptionService.spec

@@ -403,3 +403,105 @@ The custom CTranslate2 wheel is part of the validated AMD native runtime and
 must not be replaced accidentally by dependency resolution.
 
 The CPU `.venv` and isolated AMD runtime intentionally remain independent.
+
+
+## Build the Windows packaged application
+
+The current Windows distribution is built with PyInstaller in `onedir` mode.
+
+The build configuration is version-controlled at:
+
+```text
+packaging/windows/AudioTranscriptionService.spec
+```
+
+Build from the repository root with:
+
+```powershell
+.\scripts\windows\build.ps1
+```
+
+The output is:
+
+```text
+dist/
+└── AudioTranscriptionService/
+    ├── AudioTranscriptionService.exe
+    └── _internal/
+```
+
+The Windows distribution is built as a windowed application. It does not
+open a console window during normal use.
+
+Runtime diagnostics are written to the application log and exposed through
+the controller's operational actions and support-bundle feature.
+
+The PyInstaller configuration explicitly includes:
+
+- `faster_whisper`, because the application loads it dynamically;
+- Silero VAD package data, because its model resources are loaded through
+  `importlib.resources`.
+
+Do not run the generated executable without the complete `onedir` directory.
+
+
+## Build the Windows installer
+
+The Windows installer is built with Inno Setup.
+
+Install the compiler once on the development machine:
+
+```powershell
+winget install `
+    --id JRSoftware.InnoSetup `
+    --exact `
+    --scope user
+```
+
+Build the complete Windows distribution from the repository root:
+
+```powershell
+.\scripts\windows\build-installer.ps1
+```
+
+The script:
+
+1. rebuilds the PyInstaller `onedir` application;
+2. reads the application version from `pyproject.toml`;
+3. locates `ISCC.exe`;
+4. compiles the Inno Setup installer;
+5. prints the resulting installer path, size, and SHA-256 hash.
+
+The resulting installer is written to:
+
+```text
+dist/
+└── installer/
+    └── AudioTranscriptionService-Setup-<version>.exe
+```
+
+The current installer is deliberately minimal.
+
+It installs the immutable application runtime under:
+
+```text
+%LOCALAPPDATA%\Programs\AudioTranscriptionService\
+```
+
+and creates a Start Menu shortcut.
+
+Initial configuration seeding and mutable runtime-data lifecycle behavior are
+validated in the next installer-development step.
+
+On first installation, the installer seeds:
+
+```text
+%LOCALAPPDATA%\AudioTranscriptionService\config\config.yaml
+```
+
+from `config/config.example.yaml`.
+
+The installer never overwrites an existing `config.yaml`.
+
+The configuration file is mutable user data and is preserved across
+reinstallations, upgrades, and uninstall.

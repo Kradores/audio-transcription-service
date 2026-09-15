@@ -174,7 +174,8 @@ def _run_runtime_process(
             status_queue,
             exc,
         )
-        raise
+
+        raise SystemExit(1) from exc
 
 
 async def _run_runtime_process_async(

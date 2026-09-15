@@ -41,6 +41,7 @@ dev = [
     "ruff",
     "types-pyyaml>=6.0.12.20260724",
     "pytest-timeout>=2.3.1",
+    "pyinstaller>=6.22.3,<7",
 ]
 
 [tool.ruff]
@@ -70,6 +71,7 @@ check_untyped_defs = true
 explicit_package_bases = true
 exclude = [
     "^scripts/debug_.*\\.py$",
+    "^dist/",
 ]
 
 
