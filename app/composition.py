@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from pathlib import Path
 from typing import assert_never
 
 from silero_vad import VADIterator, load_silero_vad
@@ -51,6 +52,7 @@ from app.transcription.faster_whisper_factory import FasterWhisperModelFactory
 from app.transcription.faster_whisper_runtime import (
     DefaultFasterWhisperRuntimeInitializer,
     FasterWhisperRuntimeInitializer,
+    NvidiaFasterWhisperRuntimeInitializer,
     TheRockFasterWhisperRuntimeInitializer,
 )
 from app.transcription.processor import TranscriptionProcessorImpl
@@ -71,6 +73,8 @@ logger = logging.getLogger(__name__)
 
 def create_application(
     runtime_paths: RuntimePaths,
+    *,
+    nvidia_runtime_directory: Path | None = None,
 ) -> Application:
     """Create and configure the application."""
 
@@ -86,6 +90,7 @@ def create_application(
     transcription_executor = create_transcription_executor(
         database=database,
         settings=settings,
+        nvidia_runtime_directory=(nvidia_runtime_directory),
     )
 
     portaudio_refresh = PortAudioRefreshCoordinator()
@@ -264,6 +269,8 @@ def create_normalizer(settings: AudioProcessingSettings) -> AudioNormalizer:
 
 def create_faster_whisper_runtime_initializer(
     runtime: WhisperRuntime,
+    *,
+    nvidia_runtime_directory: Path | None = None,
 ) -> FasterWhisperRuntimeInitializer:
     """Create the configured Faster-Whisper runtime initializer."""
 
@@ -271,17 +278,30 @@ def create_faster_whisper_runtime_initializer(
         case WhisperRuntime.DEFAULT:
             return DefaultFasterWhisperRuntimeInitializer()
 
+        case WhisperRuntime.NVIDIA:
+            if nvidia_runtime_directory is None:
+                raise ValueError("NVIDIA runtime requires nvidia_runtime_directory")
+
+            return NvidiaFasterWhisperRuntimeInitializer(
+                runtime_directory=nvidia_runtime_directory,
+            )
+
         case WhisperRuntime.THEROCK:
             return TheRockFasterWhisperRuntimeInitializer()
 
     assert_never(runtime)
 
 
-def create_whisper_model(settings: Settings) -> WhisperModelProtocol:
+def create_whisper_model(
+    settings: Settings,
+    *,
+    nvidia_runtime_directory: Path | None = None,
+) -> WhisperModelProtocol:
     """Create the configured Faster-Whisper model."""
 
     runtime_initializer = create_faster_whisper_runtime_initializer(
         settings.whisper.runtime,
+        nvidia_runtime_directory=nvidia_runtime_directory,
     )
 
     factory = FasterWhisperModelFactory(
@@ -358,6 +378,7 @@ def create_transcription_executor(
     *,
     database: sqlite3.Connection,
     settings: Settings,
+    nvidia_runtime_directory: Path | None = None,
 ) -> TranscriptionExecutor:
     language_settings = settings.transcription.language
 
@@ -371,7 +392,10 @@ def create_transcription_executor(
             initial_language=language_settings.initial_language,
         )
 
-    model = create_whisper_model(settings)
+    model = create_whisper_model(
+        settings,
+        nvidia_runtime_directory=(nvidia_runtime_directory),
+    )
 
     slow_inference_capture = SlowInferenceCapture(
         settings.whisper.slow_inference_capture,

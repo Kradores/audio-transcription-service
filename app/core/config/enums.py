@@ -25,6 +25,7 @@ class TranscriptionLanguageMode(StrEnum):
 
 class WhisperRuntime(StrEnum):
     DEFAULT = "default"
+    NVIDIA = "nvidia"
     THEROCK = "therock"
 
 

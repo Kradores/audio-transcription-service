@@ -17,10 +17,15 @@ async def run_application(
     runtime_paths: RuntimePaths,
     shutdown_event: asyncio.Event | None = None,
     on_started: Callable[[], None] | None = None,
+    *,
+    nvidia_runtime_directory: Path | None = None,
 ) -> None:
     """Create, run, and gracefully stop the application."""
 
-    application = create_application(runtime_paths)
+    application = create_application(
+        runtime_paths,
+        nvidia_runtime_directory=(nvidia_runtime_directory),
+    )
     event = shutdown_event or asyncio.Event()
 
     application_wait: asyncio.Task[None] | None = None

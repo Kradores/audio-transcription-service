@@ -1,0 +1,99 @@
+application:
+  name: audio-transcription-service
+  environment: development
+
+api:
+  host: 127.0.0.1
+  port: 8000
+
+logging:
+  level: INFO
+
+  file:
+    enabled: true
+    path: logs/audio-transcription-service.log
+    max_bytes: 10485760
+    backup_count: 5
+
+audio:
+  capture:
+    queue_capacity: 100
+
+  processing:
+    sample_rate: 16000
+    channels: 1
+
+  segmentation:
+    pre_roll_ms: 80
+    post_roll_ms: 80
+    target_duration_seconds: 3
+    max_duration_seconds: 10
+
+transcription:
+  queue_capacity: 10
+  worker_count: 1
+
+  # Optional gain applied only to microphone audio immediately before
+  # transcription. This does not affect capture, VAD, segmentation, or aggregation.
+  #
+  # 0.0 = no gain.
+  # Positive values amplify quiet microphone input.
+  # Negative values attenuate loud microphone input.
+  #
+  # Different microphones behave differently.
+  # Tune this only if transcription quality or language detection benefits.
+  microphone_gain_db: 0.0
+
+  language:
+    # There are 3 language-selection modes:
+    #
+    # 1. adaptive:
+    #    Maintains language state independently per audio source.
+    #    Probe-eligible segments use automatic detection.
+    #    Strong evidence can establish or switch the source language after
+    #    [switch_confirmations] confirmations. Candidate confirmations must
+    #    occur within [candidate_max_gap_seconds] of the previous strong
+    #    candidate evidence.
+    #
+    # 2. fixed:
+    #    Always transcribes using the configured language.
+    #
+    # 3. auto:
+    #    Detects language independently for every transcription work item.
+    mode: auto
+
+    # mandatory for mode: fixed
+    # language: en
+
+    # adaptive settings
+    # initial_language: null
+    # min_probe_duration_seconds: 3.0
+    # switch_probability_threshold: 0.85
+    # switch_confirmations: 2
+    # candidate_max_gap_seconds: 30.0
+
+  aggregation:
+    enabled: true
+    target_duration_seconds: 5.0
+    max_duration_seconds: 10.0
+    max_gap_seconds: 1.5
+    max_wait_seconds: 2.0
+
+vad:
+  enabled: true
+  speech_threshold: 0.5
+  min_silence_duration_ms: 300
+
+whisper:
+  model: small
+  runtime: nvidia
+  device: cuda
+  compute_type: float16
+
+  slow_inference_capture:
+    enabled: false
+    threshold_seconds: 5.0
+    directory: diagnostics/slow-inference
+
+database:
+  path: data/transcripts.db

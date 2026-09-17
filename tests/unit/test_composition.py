@@ -43,6 +43,7 @@ from app.transcription.contracts import AudioSource
 from app.transcription.faster_whisper_runtime import (
     DefaultFasterWhisperRuntimeInitializer,
     FasterWhisperRuntimeInitializer,
+    NvidiaFasterWhisperRuntimeInitializer,
     TheRockFasterWhisperRuntimeInitializer,
 )
 from app.vad.protocols import AudioVad
@@ -475,7 +476,10 @@ def test_create_transcription_executor_creates_one_processor_per_worker(
         settings=settings,
     )
 
-    create_whisper_model.assert_called_once_with(settings)
+    create_whisper_model.assert_called_once_with(
+        settings,
+        nvidia_runtime_directory=None,
+    )
 
     slow_inference_capture_type.assert_called_once_with(
         settings.whisper.slow_inference_capture,
@@ -521,6 +525,41 @@ def test_create_transcription_executor_creates_one_processor_per_worker(
 
     assert call_kwargs["processors"] == tuple(processors)
     assert call_kwargs["queue_capacity"] == settings.transcription.queue_capacity
+
+
+@patch("app.composition.TranscriptionExecutorImpl")
+@patch("app.composition.create_transcription_processor")
+@patch("app.composition.FasterWhisperTranscriber")
+@patch("app.composition.SlowInferenceCapture")
+@patch("app.composition.create_whisper_model")
+def test_create_transcription_executor_passes_nvidia_runtime_directory(
+    create_whisper_model: MagicMock,
+    slow_inference_capture_type: MagicMock,
+    faster_whisper_transcriber: MagicMock,
+    create_transcription_processor: MagicMock,
+    transcription_executor_impl: MagicMock,
+    tmp_path: Path,
+) -> None:
+    settings = SettingsBuilder().build()
+    database = sqlite3.connect(":memory:")
+
+    create_whisper_model.return_value = MagicMock()
+    slow_inference_capture_type.return_value = MagicMock()
+    faster_whisper_transcriber.return_value = MagicMock()
+    create_transcription_processor.return_value = MagicMock()
+
+    nvidia_runtime_directory = tmp_path / "nvidia-runtime"
+
+    create_transcription_executor(
+        database=database,
+        settings=settings,
+        nvidia_runtime_directory=(nvidia_runtime_directory),
+    )
+
+    create_whisper_model.assert_called_once_with(
+        settings,
+        nvidia_runtime_directory=(nvidia_runtime_directory),
+    )
 
 
 @patch("app.composition.TranscriptionExecutorImpl")
@@ -746,3 +785,27 @@ def test_microphone_gain_configuration_is_observable(
         )
 
     assert "microphone transcription gain configured gain_db=12.0 enabled=True" in caplog.text
+
+
+def test_create_nvidia_runtime_initializer_uses_runtime_directory(
+    tmp_path: Path,
+) -> None:
+    initializer = create_faster_whisper_runtime_initializer(
+        WhisperRuntime.NVIDIA,
+        nvidia_runtime_directory=tmp_path,
+    )
+
+    assert isinstance(
+        initializer,
+        NvidiaFasterWhisperRuntimeInitializer,
+    )
+
+
+def test_create_nvidia_runtime_initializer_requires_runtime_directory() -> None:
+    with pytest.raises(
+        ValueError,
+        match="requires nvidia_runtime_directory",
+    ):
+        create_faster_whisper_runtime_initializer(
+            WhisperRuntime.NVIDIA,
+        )

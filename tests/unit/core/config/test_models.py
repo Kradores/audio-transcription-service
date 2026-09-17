@@ -414,6 +414,7 @@ def test_transcription_worker_count_rejects_invalid_values(
     [
         ("default", WhisperRuntime.DEFAULT),
         ("therock", WhisperRuntime.THEROCK),
+        ("nvidia", WhisperRuntime.NVIDIA),
     ],
 )
 def test_whisper_settings_accepts_supported_runtimes(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import multiprocessing
 import tkinter as tk
+from pathlib import Path
 
 from app.controller.multiprocessing_runtime import (
     MultiprocessingRuntimeProcessSessionFactory,
@@ -22,12 +23,18 @@ from app.core.runtime_paths import (
 
 def run_controller(
     runtime_paths: RuntimePaths,
+    *,
+    nvidia_runtime_directory: Path | None = None,
 ) -> None:
     root = tk.Tk()
 
     runtime_host = RuntimeProcessHost(
         runtime_paths=runtime_paths,
-        session_factory=(MultiprocessingRuntimeProcessSessionFactory()),
+        session_factory=(
+            MultiprocessingRuntimeProcessSessionFactory(
+                nvidia_runtime_directory=(nvidia_runtime_directory),
+            )
+        ),
     )
 
     shell_opener = WindowsShellOpener()

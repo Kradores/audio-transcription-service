@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import multiprocessing
+from pathlib import Path
 from queue import Empty
 from typing import Protocol
 
@@ -128,6 +129,13 @@ class MultiprocessingRuntimeProcessSession:
 class MultiprocessingRuntimeProcessSessionFactory:
     """Create fresh spawned runtime processes."""
 
+    def __init__(
+        self,
+        *,
+        nvidia_runtime_directory: Path | None = None,
+    ) -> None:
+        self._nvidia_runtime_directory = nvidia_runtime_directory
+
     def create(
         self,
         runtime_paths: RuntimePaths,
@@ -141,6 +149,7 @@ class MultiprocessingRuntimeProcessSessionFactory:
             target=_run_runtime_process,
             args=(
                 runtime_paths,
+                self._nvidia_runtime_directory,
                 shutdown_signal,
                 status_queue,
             ),
@@ -157,6 +166,7 @@ class MultiprocessingRuntimeProcessSessionFactory:
 
 def _run_runtime_process(
     runtime_paths: RuntimePaths,
+    nvidia_runtime_directory: Path | None,
     shutdown_signal: _ShutdownSignal,
     status_queue: _StatusQueue,
 ) -> None:
@@ -164,6 +174,7 @@ def _run_runtime_process(
         asyncio.run(
             _run_runtime_process_async(
                 runtime_paths=runtime_paths,
+                nvidia_runtime_directory=(nvidia_runtime_directory),
                 shutdown_signal=shutdown_signal,
                 status_queue=status_queue,
             )
@@ -181,6 +192,7 @@ def _run_runtime_process(
 async def _run_runtime_process_async(
     *,
     runtime_paths: RuntimePaths,
+    nvidia_runtime_directory: Path | None,
     shutdown_signal: _ShutdownSignal,
     status_queue: _StatusQueue,
 ) -> None:
@@ -207,6 +219,7 @@ async def _run_runtime_process_async(
             runtime_paths,
             shutdown_event=shutdown_event,
             on_started=notify_started,
+            nvidia_runtime_directory=(nvidia_runtime_directory),
         )
 
     finally:

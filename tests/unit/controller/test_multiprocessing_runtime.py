@@ -24,6 +24,7 @@ def test_runtime_process_publishes_failure_and_exits_cleanly(
     with pytest.raises(SystemExit) as exc_info:
         _run_runtime_process(
             runtime_paths,
+            None,
             shutdown_signal,
             status_queue,
         )
