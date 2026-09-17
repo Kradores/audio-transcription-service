@@ -107,3 +107,115 @@ Native AMD build preparation is performed ahead of runtime through
 
 The application must not compile CTranslate2 opportunistically during normal
 startup.
+
+## Windows Distribution Profiles
+
+The Windows application is built as separate runtime-specific distributions.
+
+### CPU
+
+```yaml
+whisper:
+  model: small
+  runtime: default
+  device: cpu
+  compute_type: int8
+```
+
+The CPU distribution does not package NVIDIA or AMD GPU runtimes.
+
+### NVIDIA
+
+```yaml
+whisper:
+  model: small
+  runtime: nvidia
+  device: cuda
+  compute_type: float16
+
+transcription:
+  worker_count: 1
+```
+
+The NVIDIA distribution packages its CUDA runtime privately with the application.
+
+Validated runtime versions:
+
+```text
+CTranslate2           4.8.1
+Faster-Whisper        1.2.1
+nvidia-cublas-cu12    12.4.5.8
+nvidia-cudnn-cu12     9.1.0.70
+nvidia-cuda-nvrtc-cu12 12.4.127
+```
+
+The target machine requires a compatible NVIDIA graphics driver.
+
+A full CUDA Toolkit installation is not required.
+
+The NVIDIA runtime must not modify machine-wide `PATH`, CUDA configuration, or other global system state.
+
+### AMD
+
+AMD/TheRock remains a separate runtime and distribution path according to ADR-044.
+
+## Switching Runtime Variants
+
+CPU, NVIDIA, and AMD builds are mutually exclusive installed variants.
+
+Before switching variants:
+
+```text
+stop application
+    ↓
+uninstall current variant
+    ↓
+install new variant
+```
+
+Mutable application data is preserved:
+
+```text
+%LOCALAPPDATA%\AudioTranscriptionService\
+    config\
+    data\
+    logs\
+    diagnostics\
+    support\
+```
+
+There is one shared user configuration:
+
+```text
+config\config.yaml
+```
+
+Installers seed a build-appropriate configuration only when `config.yaml` does not already exist.
+
+Existing configuration is never automatically overwritten.
+
+When changing runtime variant, the runtime-specific Whisper configuration must be updated manually when necessary.
+
+## NVIDIA External Acceptance
+
+The NVIDIA installer was externally validated on 2026-09-17 using an NVIDIA GeForce RTX 2080.
+
+Validation covered:
+
+```text
+installation without development tooling
+private NVIDIA runtime initialization
+system-audio capture
+microphone capture
+CUDA Faster-Whisper transcription
+SQLite persistence
+zero capture-frame drops
+zero transcription rejection
+zero transcription failures
+graceful shutdown
+support-bundle generation
+```
+
+The accepted NVIDIA installer was approximately 1.08 GB compressed, with the unpacked application approximately 2.8 GB.
+
+Runtime-size optimization is intentionally deferred until after correctness and portability validation.

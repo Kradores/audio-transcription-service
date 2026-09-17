@@ -570,3 +570,57 @@ successfully.
 
 Backend failure is a startup error and does not silently switch the
 transcription backend to CPU.
+
+## Faster-Whisper Runtime Backends
+
+Faster-Whisper runtime initialization is separated from model creation.
+
+```text
+Application composition
+        ↓
+FasterWhisperModelFactory
+        ↓
+FasterWhisperRuntimeInitializer
+        ├── DefaultFasterWhisperRuntimeInitializer
+        ├── NvidiaFasterWhisperRuntimeInitializer
+        └── TheRockFasterWhisperRuntimeInitializer
+        ↓
+dynamic import of Faster-Whisper / CTranslate2
+```
+
+Runtime initialization always occurs before CTranslate2 is imported.
+
+This ordering is important because GPU runtimes must prepare their process-local native-library environment before CTranslate2 resolves its backend dependencies.
+
+### NVIDIA runtime
+
+The NVIDIA Windows distribution injects the packaged NVIDIA runtime directory from the Windows packaging boundary:
+
+```text
+windows_nvidia_main
+        ↓
+controller
+        ↓
+spawned runtime process
+        ↓
+application composition
+        ↓
+NvidiaFasterWhisperRuntimeInitializer
+        ↓
+private NVIDIA runtime
+        ↓
+CTranslate2
+        ↓
+Faster-Whisper
+```
+
+The NVIDIA runtime initializer does not discover PyInstaller paths or installation locations itself.
+
+Its contract is:
+
+> Given an NVIDIA runtime directory, validate and initialize it before CTranslate2 is imported.
+
+The physical runtime location is supplied through dependency injection from the distribution/composition boundary.
+
+Windows CPU, NVIDIA, and AMD variants are separate distribution artifacts. They share application contracts and mutable user data but package independent accelerator runtimes.
+

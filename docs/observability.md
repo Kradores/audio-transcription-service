@@ -1549,3 +1549,71 @@ failed. Configuration errors are therefore recorded in the bundle when
 possible rather than preventing creation, except when transcript-database
 inclusion was explicitly requested and its configured location cannot be
 resolved.
+
+## NVIDIA Runtime Observability
+
+Successful NVIDIA runtime initialization emits an application log entry containing:
+
+```text
+NVIDIA Faster-Whisper runtime initialized
+runtime_directory=<private packaged runtime>
+libraries=12
+```
+
+Failure to initialize the configured NVIDIA runtime is treated as an explicit startup failure.
+
+The application does not silently fall back from configured NVIDIA CUDA execution to CPU execution.
+
+Existing transcription observability continues to apply unchanged:
+
+```text
+submitted
+completed
+rejected
+failed
+queue high-water mark
+average queue wait
+maximum queue wait
+average transcription duration
+maximum transcription duration
+```
+
+Capture health remains observable independently for both sources through counters such as:
+
+```text
+captured_frames
+processing_frames
+segments_emitted
+segments_rejected
+frames_dropped
+```
+
+### Known support-bundle metadata gap
+
+The current support bundle is sufficient to diagnose application logs, configuration, lifecycle, capture health, and transcription execution.
+
+However, packaged dependency discovery currently does not reliably report installed versions for libraries such as:
+
+```text
+faster-whisper
+ctranslate2
+torch
+silero-vad
+```
+
+and GPU/driver/runtime metadata is not yet included comprehensively in `system-info.json`.
+
+Future observability work should add explicit packaged-runtime metadata including:
+
+```text
+distribution profile
+GPU name
+GPU driver version
+Faster-Whisper version
+CTranslate2 version
+NVIDIA cuBLAS version
+NVIDIA cuDNN version
+NVIDIA NVRTC version
+```
+
+This is an observability improvement and is not required for NVIDIA runtime correctness.

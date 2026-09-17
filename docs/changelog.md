@@ -185,3 +185,44 @@ We have successfully completed:
   - `480 passed`;
   - mypy clean across `117` source files;
   - Ruff formatting and linting clean.
+
+
+## As of 2026-09-17
+
+**Implemented**
+
+- Windows NVIDIA Faster-Whisper distribution;
+- ADR-051 — Windows NVIDIA Faster-Whisper Runtime Distribution;
+- separate CPU, NVIDIA, and AMD Windows build profiles;
+- `WhisperRuntime.NVIDIA`;
+- `NvidiaFasterWhisperRuntimeInitializer`;
+- application-private NVIDIA CUDA runtime initialization before CTranslate2 import;
+- explicit NVIDIA runtime directory injection from the Windows packaging boundary through the spawned transcription runtime process;
+- pinned NVIDIA runtime:
+  - `nvidia-cublas-cu12==12.4.5.8`;
+  - `nvidia-cudnn-cu12==9.1.0.70`;
+  - `nvidia-cuda-nvrtc-cu12==12.4.127`;
+- reproducible NVIDIA runtime staging from official NVIDIA packages;
+- dedicated NVIDIA PyInstaller `onedir` distribution;
+- dedicated NVIDIA Inno Setup installer;
+- NVIDIA-specific default configuration template while preserving the single shared user `config.yaml`;
+- standalone NVIDIA CUDA/Faster-Whisper smoke-test artifact;
+- NVIDIA RTX 2080 smoke validation with CTranslate2 4.8.1 and Faster-Whisper 1.2.1 using CUDA `float16`;
+- full external NVIDIA application acceptance on RTX 2080;
+- simultaneous microphone and system-audio transcription through the production NVIDIA installer;
+- 99 transcription jobs submitted and completed with zero rejection and zero failures;
+- zero capture-frame drops on both microphone and system audio;
+- graceful NVIDIA runtime shutdown and successful support-bundle generation;
+- substantial reduction in transcription latency and executor queue pressure compared with the previous CPU acceptance run;
+- Windows CPU installation/runtime behavior kept unchanged;
+- full quality gate green:
+  - 572 tests passed;
+  - Ruff format clean;
+  - Ruff check clean;
+  - mypy clean across 157 source files.
+
+**Known follow-up**
+
+- improve support-bundle packaged dependency detection;
+- include GPU, driver, and packaged accelerator-runtime versions in support diagnostics;
+- defer NVIDIA installer/runtime-size optimization until there is evidence that the current size is operationally problematic.

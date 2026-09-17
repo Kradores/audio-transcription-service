@@ -505,3 +505,82 @@ The installer never overwrites an existing `config.yaml`.
 
 The configuration file is mutable user data and is preserved across
 reinstallations, upgrades, and uninstall.
+
+## Building the Windows NVIDIA Distribution
+
+The NVIDIA runtime is prepared from pinned official NVIDIA Python packages.
+
+Runtime contract:
+
+```text
+scripts/nvidia/toolchain.json
+```
+
+Prepare/build the NVIDIA application with:
+
+```powershell
+.\scripts\windows\build-nvidia.ps1
+```
+
+This:
+
+```text
+prepares the pinned NVIDIA runtime
+    ↓
+stages the required native DLLs
+    ↓
+builds the NVIDIA PyInstaller onedir distribution
+    ↓
+verifies the packaged NVIDIA DLL contract
+```
+
+The application output is:
+
+```text
+dist\nvidia\AudioTranscriptionService\
+```
+
+The private NVIDIA runtime is packaged under:
+
+```text
+_internal\nvidia-runtime\
+```
+
+It contains the pinned cuBLAS, cuDNN, and NVRTC DLLs plus `manifest.json`.
+
+### Building the NVIDIA installer
+
+Run:
+
+```powershell
+.\scripts\windows\build-nvidia-installer.ps1
+```
+
+The script first builds the NVIDIA application and then invokes Inno Setup.
+
+The installer output is:
+
+```text
+dist\installer\nvidia\
+    AudioTranscriptionService-Nvidia-Setup-<version>.exe
+```
+
+The NVIDIA installer seeds:
+
+```text
+config/config.nvidia.example.yaml
+```
+
+only when the installed user's `config.yaml` does not already exist.
+
+An existing config is preserved.
+
+### NVIDIA smoke-test artifact
+
+The standalone NVIDIA runtime smoke-test remains available for isolated CUDA/CTranslate2 diagnosis:
+
+```powershell
+.\scripts\nvidia\build-smoke-test.ps1
+```
+
+It is diagnostic tooling and is not the production application distribution.

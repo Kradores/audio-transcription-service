@@ -125,3 +125,102 @@ Silent CPU fallback was rejected because it hides NVIDIA deployment failures.
 ## Validation
 
 ADR-051 is considered implemented only after the real NVIDIA application build, not just the smoke test, passes on the external RTX 2080 machine with both microphone and system audio, real Faster-Whisper transcription, graceful shutdown, no rejected work under a representative run, and a complete support bundle.
+
+## Validation Result
+
+ADR-051 was externally validated on 2026-09-17 on a Windows 11 machine with an NVIDIA GeForce RTX 2080.
+
+The production NVIDIA distribution used:
+
+```text
+Faster-Whisper        1.2.1
+CTranslate2           4.8.1
+cuBLAS                12.4.5.8
+cuDNN                  9.1.0.70
+NVRTC                  12.4.127
+Whisper model          small
+device                 cuda
+compute_type           float16
+worker_count           1
+```
+
+The runtime was packaged application-private and required only the normally installed NVIDIA driver on the target machine. No CUDA Toolkit, Python, uv, repository checkout, or manual CUDA dependency installation was required.
+
+The production application successfully:
+
+```text
+initialized all 12 private NVIDIA runtime DLLs
+started the controller-hosted runtime process
+captured system audio
+captured microphone audio
+performed real Faster-Whisper CUDA transcription
+persisted transcripts to SQLite
+completed all accepted transcription work
+stopped gracefully
+generated a support bundle
+```
+
+External acceptance metrics:
+
+```text
+transcription submitted     99
+transcription completed     99
+transcription rejected       0
+transcription failed         0
+
+system_audio frames dropped  0
+microphone frames dropped    0
+
+queue high-water mark        2
+average queue wait           0.244 s
+maximum queue wait           3.667 s
+average inference duration   0.672 s
+maximum inference duration   5.023 s
+```
+
+The NVIDIA run also demonstrated a substantial reduction in transcription latency and queue pressure compared with the previous CPU acceptance run on the same machine.
+
+ADR-051 is therefore implemented and externally validated for the NVIDIA Windows distribution.
+
+### Distribution Variants
+
+Windows runtime variants are shipped as separate distribution artifacts:
+
+```text
+CPU
+NVIDIA
+AMD
+```
+
+They share the same application architecture and mutable runtime data, but package different transcription runtimes.
+
+Only one distribution variant should be installed at a time.
+
+The mutable runtime root remains shared:
+
+```text
+%LOCALAPPDATA%\AudioTranscriptionService\
+```
+
+including the single user-editable:
+
+```text
+config\config.yaml
+```
+
+Installers do not overwrite an existing configuration.
+
+When switching between CPU, NVIDIA, and AMD distributions, the user is responsible for ensuring the runtime-specific Whisper configuration matches the installed variant.
+
+For NVIDIA:
+
+```yaml
+whisper:
+  model: small
+  runtime: nvidia
+  device: cuda
+  compute_type: float16
+
+transcription:
+  worker_count: 1
+```
