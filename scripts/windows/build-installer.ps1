@@ -185,6 +185,12 @@ if (-not (Test-Path -LiteralPath $defaultConfigSource)) {
 }
 
 
+$installerBaseFilename = (
+    "AudioTranscriptionService-Setup-" +
+    $appVersion
+)
+
+
 $innoSetupCompiler = Find-InnoSetupCompiler
 
 
@@ -208,6 +214,7 @@ Write-Host "Inno Setup compiler: $innoSetupCompiler"
     "-dAppSourceDir=$applicationDist" `
     "-dDefaultConfigSource=$defaultConfigSource" `
     "-dInstallerOutputDir=$installerOutputDirectory" `
+    "-dInstallerBaseFilename=$installerBaseFilename" `
     $installerScript
 
 if ($LASTEXITCODE -ne 0) {
@@ -220,7 +227,7 @@ if ($LASTEXITCODE -ne 0) {
 
 $installerPath = Join-Path `
     $installerOutputDirectory `
-    "AudioTranscriptionService-Setup-$appVersion.exe"
+    "$installerBaseFilename.exe"
 
 if (-not (Test-Path -LiteralPath $installerPath)) {
     throw (

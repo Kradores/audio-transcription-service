@@ -337,8 +337,6 @@ Write-Success "existing MSVC environment ready for Python extension build"
 
 Write-Step "Build CTranslate2 Python wheel"
 
-# File: scripts/amd/build_wheel.ps1
-
 $previousCTranslate2Root = $env:CTRANSLATE2_ROOT
 $previousDistutilsUseSdk = $env:DISTUTILS_USE_SDK
 $previousMsSdk = $env:MSSdk

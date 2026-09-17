@@ -44,8 +44,6 @@ transcription:
   # Tune this only if transcription quality or language detection benefits.
   microphone_gain_db: 0.0
 
-  # File: config/config.example.yaml
-
   language:
     # There are 3 language-selection modes:
     #

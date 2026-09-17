@@ -17,7 +17,7 @@ DisableDirPage=yes
 DisableProgramGroupPage=yes
 
 OutputDir="{#InstallerOutputDir}"
-OutputBaseFilename=AudioTranscriptionService-Setup-{#AppVersion}
+OutputBaseFilename={#InstallerBaseFilename}
 
 Compression=lzma2
 SolidCompression=yes
