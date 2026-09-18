@@ -4,6 +4,10 @@ import multiprocessing
 import tkinter as tk
 from pathlib import Path
 
+from app.controller.distribution_metadata import (
+    DevelopmentDistributionMetadataProvider,
+    DistributionMetadataProvider,
+)
 from app.controller.multiprocessing_runtime import (
     MultiprocessingRuntimeProcessSessionFactory,
 )
@@ -24,6 +28,7 @@ from app.core.runtime_paths import (
 def run_controller(
     runtime_paths: RuntimePaths,
     *,
+    distribution_metadata_provider: DistributionMetadataProvider | None = None,
     nvidia_runtime_directory: Path | None = None,
 ) -> None:
     root = tk.Tk()
@@ -41,8 +46,13 @@ def run_controller(
 
     support_bundle_creator = SupportBundleBuilder(
         runtime_paths=runtime_paths,
-        path_resolver=(ConfigurationSupportArtifactPathResolver(runtime_paths)),
-        info_collector=DefaultSupportInfoCollector(runtime_paths),
+        path_resolver=ConfigurationSupportArtifactPathResolver(
+            runtime_paths,
+        ),
+        info_collector=DefaultSupportInfoCollector(
+            runtime_paths,
+            distribution_metadata_provider=(distribution_metadata_provider),
+        ),
     )
 
     ControllerWindow(
@@ -61,6 +71,7 @@ def main() -> None:
 
     run_controller(
         create_development_runtime_paths(),
+        distribution_metadata_provider=(DevelopmentDistributionMetadataProvider()),
     )
 
 

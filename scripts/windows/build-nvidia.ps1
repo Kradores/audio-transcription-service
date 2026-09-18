@@ -38,6 +38,14 @@ $executablePath = Join-Path `
     $outputPath `
     "AudioTranscriptionService.exe"
 
+$runtimeManifestPath = Join-Path `
+    $runtimeDirectory `
+    "manifest.json"
+
+$distributionMetadataPath = Join-Path `
+    $repositoryRoot `
+    "build\distribution-metadata\nvidia\distribution-metadata.json"
+
 
 Write-Host ""
 Write-Host "=== Prepare NVIDIA runtime ===" `
@@ -45,6 +53,50 @@ Write-Host "=== Prepare NVIDIA runtime ===" `
 
 & $prepareRuntimeScript `
     -OutputDirectory $runtimeDirectory
+
+
+Write-Host ""
+Write-Host "=== Generate NVIDIA distribution metadata ===" `
+    -ForegroundColor Cyan
+
+Push-Location $repositoryRoot
+
+try {
+    uv run python -m scripts.generate_distribution_metadata `
+        --profile nvidia `
+        --project-root $repositoryRoot `
+        --output $distributionMetadataPath `
+        --nvidia-runtime-manifest $runtimeManifestPath
+
+    if ($LASTEXITCODE -ne 0) {
+        throw (
+            "NVIDIA distribution metadata generation failed " +
+            "with exit code $LASTEXITCODE"
+        )
+    }
+
+
+    Write-Host ""
+    Write-Host "=== Build NVIDIA Windows application ===" `
+        -ForegroundColor Cyan
+
+    uv run pyinstaller `
+        --noconfirm `
+        --clean `
+        --distpath $distDirectory `
+        --workpath $workDirectory `
+        $specPath
+
+    if ($LASTEXITCODE -ne 0) {
+        throw (
+            "NVIDIA PyInstaller build failed with exit code " +
+            $LASTEXITCODE
+        )
+    }
+}
+finally {
+    Pop-Location
+}
 
 
 Write-Host ""
@@ -88,6 +140,42 @@ if (-not (
 $packagedRuntime = Join-Path `
     $outputPath `
     "_internal\nvidia-runtime"
+
+$packagedDistributionMetadataPath = Join-Path `
+    $outputPath `
+    "_internal\distribution-metadata.json"
+
+if (-not (
+    Test-Path `
+        -LiteralPath $packagedDistributionMetadataPath `
+        -PathType Leaf
+)) {
+    throw (
+        "Packaged NVIDIA distribution metadata was not found: " +
+        $packagedDistributionMetadataPath
+    )
+}
+
+
+$sourceMetadataHash = (
+    Get-FileHash `
+        -LiteralPath $distributionMetadataPath `
+        -Algorithm SHA256
+).Hash
+
+$packagedMetadataHash = (
+    Get-FileHash `
+        -LiteralPath $packagedDistributionMetadataPath `
+        -Algorithm SHA256
+).Hash
+
+if ($sourceMetadataHash -ne $packagedMetadataHash) {
+    throw (
+        "Packaged NVIDIA distribution metadata does not match " +
+        "the generated build metadata"
+    )
+}
+
 
 $toolchain = (
     Get-Content `

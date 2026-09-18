@@ -5,19 +5,30 @@ from PyInstaller.utils.hooks import collect_data_files
 
 repository_root = Path(SPECPATH).resolve().parents[1]
 
-entry_point = (
-    repository_root
-    / "app"
-    / "controller"
-    / "windows_main.py"
+entry_point = repository_root / "app" / "controller" / "windows_main.py"
+
+
+distribution_metadata_path = (
+    repository_root / "build" / "distribution-metadata" / "cpu" / "distribution-metadata.json"
 )
+
+if not distribution_metadata_path.is_file():
+    raise RuntimeError(f"CPU distribution metadata does not exist: {distribution_metadata_path}")
 
 
 analysis = Analysis(
     [str(entry_point)],
     pathex=[str(repository_root)],
     binaries=[],
-    datas=collect_data_files("silero_vad"),
+    datas=(
+        collect_data_files("silero_vad")
+        + [
+            (
+                str(distribution_metadata_path),
+                ".",
+            )
+        ]
+    ),
     hiddenimports=[
         "faster_whisper",
     ],

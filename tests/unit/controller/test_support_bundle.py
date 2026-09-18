@@ -8,7 +8,15 @@ from zipfile import ZipFile
 
 import pytest
 
+from app.controller.distribution_metadata import (
+    DistributionMetadata,
+    DistributionMetadataError,
+    DistributionProfile,
+    DistributionRuntimeKind,
+    DistributionRuntimeMetadata,
+)
 from app.controller.support_bundle import (
+    DefaultSupportInfoCollector,
     SupportArtifactPaths,
     SupportBundleBuilder,
     SupportBundleError,
@@ -39,6 +47,22 @@ class FakeInfoCollector:
         return {
             "test": True,
         }
+
+
+class StaticDistributionMetadataProvider:
+    def __init__(
+        self,
+        value: DistributionMetadata,
+    ) -> None:
+        self._value = value
+
+    def load(self) -> DistributionMetadata:
+        return self._value
+
+
+class FailingDistributionMetadataProvider:
+    def load(self) -> DistributionMetadata:
+        raise DistributionMetadataError("distribution metadata is invalid")
 
 
 def create_builder(
@@ -252,3 +276,100 @@ def test_manifest_records_privacy_choices(
 
     assert manifest["privacy"]["transcript_database_included"] is False
     assert manifest["privacy"]["diagnostic_audio_included"] is False
+
+
+def test_support_info_includes_distribution_metadata(
+    tmp_path: Path,
+) -> None:
+    runtime_paths = create_development_runtime_paths(
+        tmp_path,
+    )
+
+    distribution_metadata = DistributionMetadata(
+        schema_version=1,
+        profile=DistributionProfile.NVIDIA,
+        application_version="0.1.0",
+        packages=(
+            ("ctranslate2", "4.8.1"),
+            ("faster-whisper", "1.2.1"),
+        ),
+        runtime=DistributionRuntimeMetadata(
+            kind=DistributionRuntimeKind.NVIDIA,
+            components=(
+                ("cublas", "12.4.5.8"),
+                ("cudnn", "9.1.0.70"),
+                ("nvrtc", "12.4.127"),
+            ),
+        ),
+    )
+
+    collector = DefaultSupportInfoCollector(
+        runtime_paths,
+        distribution_metadata_provider=(
+            StaticDistributionMetadataProvider(
+                distribution_metadata,
+            )
+        ),
+    )
+
+    result = collector.collect()
+
+    assert result["distribution"] == {
+        "available": True,
+        "schema_version": 1,
+        "profile": "nvidia",
+        "application_version": "0.1.0",
+        "packages": {
+            "ctranslate2": "4.8.1",
+            "faster-whisper": "1.2.1",
+        },
+        "runtime": {
+            "kind": "nvidia",
+            "components": {
+                "cublas": "12.4.5.8",
+                "cudnn": "9.1.0.70",
+                "nvrtc": "12.4.127",
+            },
+        },
+    }
+
+
+def test_support_info_reports_distribution_metadata_failure(
+    tmp_path: Path,
+) -> None:
+    runtime_paths = create_development_runtime_paths(
+        tmp_path,
+    )
+
+    collector = DefaultSupportInfoCollector(
+        runtime_paths,
+        distribution_metadata_provider=(FailingDistributionMetadataProvider()),
+    )
+
+    result = collector.collect()
+
+    assert result["distribution"] == {
+        "available": False,
+        "error_type": "DistributionMetadataError",
+        "error": "distribution metadata is invalid",
+    }
+
+
+def test_support_info_reports_unconfigured_distribution_metadata(
+    tmp_path: Path,
+) -> None:
+    runtime_paths = create_development_runtime_paths(
+        tmp_path,
+    )
+
+    collector = DefaultSupportInfoCollector(
+        runtime_paths,
+    )
+
+    result = collector.collect()
+
+    assert result["distribution"] == {
+        "available": False,
+        "error_type": "DistributionMetadataUnavailable",
+        "error": "No distribution metadata provider was configured.",
+    }

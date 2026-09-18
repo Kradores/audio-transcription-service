@@ -5,25 +5,20 @@ from PyInstaller.utils.hooks import collect_data_files
 
 repository_root = Path(SPECPATH).resolve().parents[1]
 
-entry_point = (
-    repository_root
-    / "app"
-    / "controller"
-    / "windows_nvidia_main.py"
+entry_point = repository_root / "app" / "controller" / "windows_nvidia_main.py"
+
+runtime_directory = repository_root / "build" / "nvidia-runtime"
+
+distribution_metadata_path = (
+    repository_root / "build" / "distribution-metadata" / "nvidia" / "distribution-metadata.json"
 )
 
-runtime_directory = (
-    repository_root
-    / "build"
-    / "nvidia-runtime"
-)
+if not distribution_metadata_path.is_file():
+    raise RuntimeError(f"NVIDIA distribution metadata does not exist: {distribution_metadata_path}")
 
 
 if not runtime_directory.is_dir():
-    raise RuntimeError(
-        "NVIDIA runtime staging directory does not exist: "
-        f"{runtime_directory}"
-    )
+    raise RuntimeError(f"NVIDIA runtime staging directory does not exist: {runtime_directory}")
 
 
 runtime_binaries = [
@@ -31,9 +26,7 @@ runtime_binaries = [
         str(path),
         "nvidia-runtime",
     )
-    for path in sorted(
-        runtime_directory.glob("*.dll")
-    )
+    for path in sorted(runtime_directory.glob("*.dll"))
 ]
 
 
@@ -45,12 +38,13 @@ analysis = Analysis(
         collect_data_files("silero_vad")
         + [
             (
-                str(
-                    runtime_directory
-                    / "manifest.json"
-                ),
+                str(runtime_directory / "manifest.json"),
                 "nvidia-runtime",
-            )
+            ),
+            (
+                str(distribution_metadata_path),
+                ".",
+            ),
         ]
     ),
     hiddenimports=[

@@ -15,6 +15,10 @@ from tempfile import TemporaryDirectory
 from typing import Protocol
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from app.controller.distribution_metadata import (
+    DistributionMetadataError,
+    DistributionMetadataProvider,
+)
 from app.core.config.exceptions import ConfigurationError
 from app.core.config.loader import ConfigurationLoader
 from app.core.runtime_paths import RuntimePaths
@@ -118,14 +122,20 @@ class ConfigurationSupportArtifactPathResolver:
         )
 
 
+# app/controller/support_bundle.py
+
+
 class DefaultSupportInfoCollector:
     """Collect lightweight environment and runtime information."""
 
     def __init__(
         self,
         runtime_paths: RuntimePaths,
+        *,
+        distribution_metadata_provider: DistributionMetadataProvider | None = None,
     ) -> None:
         self._runtime_paths = runtime_paths
+        self._distribution_metadata_provider = distribution_metadata_provider
 
     def collect(self) -> dict[str, object]:
         return {
@@ -146,6 +156,7 @@ class DefaultSupportInfoCollector:
                 "root_directory": str(self._runtime_paths.root_directory),
                 "config_path": str(self._runtime_paths.config_path),
             },
+            "distribution": self._collect_distribution_metadata(),
             "packages": self._collect_package_versions(),
             "configuration": self._collect_configuration(),
         }
@@ -202,6 +213,32 @@ class DefaultSupportInfoCollector:
             "database": {
                 "path": str(settings.database.path),
             },
+        }
+
+    def _collect_distribution_metadata(
+        self,
+    ) -> dict[str, object]:
+        provider = self._distribution_metadata_provider
+
+        if provider is None:
+            return {
+                "available": False,
+                "error_type": "DistributionMetadataUnavailable",
+                "error": "No distribution metadata provider was configured.",
+            }
+
+        try:
+            distribution_metadata = provider.load()
+        except DistributionMetadataError as exc:
+            return {
+                "available": False,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            }
+
+        return {
+            "available": True,
+            **distribution_metadata.to_dict(),
         }
 
 
