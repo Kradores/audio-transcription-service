@@ -1617,3 +1617,101 @@ NVIDIA NVRTC version
 ```
 
 This is an observability improvement and is not required for NVIDIA runtime correctness.
+
+
+## Distribution metadata in support bundles
+
+`system-info.json` distinguishes deterministic distribution information from
+best-effort environment observation.
+
+The deterministic section is:
+
+```text
+distribution
+```
+
+For example:
+
+```json
+{
+  "distribution": {
+    "available": true,
+    "schema_version": 1,
+    "profile": "nvidia",
+    "application_version": "0.1.0",
+    "packages": {
+      "faster-whisper": "1.2.1",
+      "ctranslate2": "4.8.1",
+      "torch": "2.13.0"
+    },
+    "runtime": {
+      "kind": "nvidia",
+      "components": {
+        "cublas": "12.4.5.8",
+        "cudnn": "9.1.0.70",
+        "nvrtc": "12.4.127"
+      }
+    }
+  }
+}
+```
+
+This section describes what was deliberately built into the application
+artifact.
+
+The existing top-level:
+
+```text
+packages
+```
+
+section has different semantics.
+
+It is a best-effort observation using Python package metadata available to the
+running process.
+
+In PyInstaller distributions it may legitimately contain:
+
+```json
+{
+  "faster-whisper": null,
+  "ctranslate2": null,
+  "torch": null
+}
+```
+
+even when those dependencies are present and operational.
+
+`null` in this best-effort section must therefore not be interpreted as proof
+that a dependency was not packaged.
+
+For packaged-support investigation, use:
+
+```text
+distribution.packages
+```
+
+as the authoritative artifact version information.
+
+The support bundle also retains effective mutable configuration separately.
+
+This makes the following distinction observable:
+
+```text
+distribution
+    → what artifact is installed
+
+configuration
+    → what runtime behavior is configured
+
+packages
+    → what Python package metadata happens to be observable
+```
+
+Distribution metadata collection does not load Faster-Whisper, CTranslate2,
+CUDA, or another transcription runtime.
+
+Support bundles can therefore still be created when runtime startup fails.
+
+Machine-observed GPU and driver information is not yet part of this
+deterministic metadata and will be added separately.

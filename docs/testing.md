@@ -628,3 +628,45 @@ The Python process then returned normally.
 
 This real application test is the final acceptance boundary for the current
 AMD integration.
+
+
+## Windows packaged distribution metadata acceptance
+
+Distribution metadata requires both unit coverage and packaged-artifact
+acceptance.
+
+Unit tests cover:
+
+```text
+metadata parsing and validation
+development metadata creation
+support-info integration
+generation from build inputs
+NVIDIA toolchain/runtime mismatch detection
+Windows entry-point composition
+```
+
+Packaged CPU acceptance verifies:
+
+```text
+CPU metadata is generated
+profile = cpu
+runtime.kind = default
+manifest is bundled unchanged
+real packaged controller creates a support bundle
+system-info.json reports distribution.available = true
+```
+
+Packaged NVIDIA acceptance additionally verifies:
+
+```text
+profile = nvidia
+runtime.kind = nvidia
+cuBLAS/cuDNN/NVRTC versions match pinned build inputs
+existing twelve-DLL runtime contract remains intact
+real packaged controller creates a support bundle without starting transcription
+```
+
+A configuration/distribution mismatch is a valid acceptance case because
+artifact identity and mutable runtime configuration are intentionally
+independent.

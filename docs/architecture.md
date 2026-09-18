@@ -624,3 +624,55 @@ The physical runtime location is supplied through dependency injection from the 
 
 Windows CPU, NVIDIA, and AMD variants are separate distribution artifacts. They share application contracts and mutable user data but package independent accelerator runtimes.
 
+
+## Distribution and runtime diagnostic metadata
+
+Support diagnostics distinguish three independent sources of information:
+
+```text
+Packaged application
+        ↓
+deterministic distribution metadata
+        │
+        ├── distribution profile
+        ├── application version
+        ├── packaged Python dependency versions
+        └── packaged accelerator-runtime versions
+
+Mutable runtime root
+        ↓
+config.yaml
+        │
+        └── effective application configuration
+
+Running machine/runtime
+        ↓
+runtime-observed diagnostics
+        └── hardware/runtime state
+            (expanded separately as observability evolves)
+```
+
+Distribution identity is an immutable property of the built artifact.
+
+It is not inferred from:
+
+```text
+config.yaml
+available GPU hardware
+PATH
+Whisper device configuration
+```
+
+The controller receives distribution metadata through dependency injection and
+passes it to support diagnostics.
+
+Packaged-path discovery remains at the Windows entry-point / packaging
+boundary.
+
+The support-bundle subsystem does not depend on PyInstaller path conventions
+and does not initialize Faster-Whisper, CTranslate2, CUDA, or another native
+transcription runtime merely to identify the installed distribution.
+
+This allows a support bundle to remain useful even when the transcription
+runtime cannot start.
+

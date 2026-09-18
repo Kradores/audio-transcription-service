@@ -159,6 +159,67 @@ The NVIDIA runtime must not modify machine-wide `PATH`, CUDA configuration, or o
 
 AMD/TheRock remains a separate runtime and distribution path according to ADR-044.
 
+## Packaged distribution metadata
+
+Windows packaged distributions contain deterministic metadata at:
+
+```text
+_internal\
+    distribution-metadata.json
+```
+
+The metadata describes the immutable application artifact rather than mutable
+user configuration.
+
+Current packaged profiles are:
+
+```text
+CPU
+  profile: cpu
+  runtime.kind: default
+
+NVIDIA
+  profile: nvidia
+  runtime.kind: nvidia
+```
+
+The NVIDIA metadata additionally records the pinned private runtime components:
+
+```text
+cuBLAS  12.4.5.8
+cuDNN   9.1.0.70
+NVRTC   12.4.127
+```
+
+The manifest also records the exact packaged application/Python dependency
+versions used for remote diagnostics.
+
+The Windows build fails if the generated metadata is missing from the packaged
+artifact or if the packaged copy differs from the generated build copy.
+
+The shared mutable:
+
+```text
+%LOCALAPPDATA%\AudioTranscriptionService\config\config.yaml
+```
+
+does not define distribution identity.
+
+Therefore a valid diagnostic state may contain:
+
+```text
+distribution.profile = nvidia
+configuration.whisper.runtime = default
+```
+
+for example after switching application distributions while retaining an
+existing configuration.
+
+This mismatch is intentionally visible rather than normalized or hidden.
+
+AMD packaged distribution metadata has not yet been integrated into the
+Windows packaging flow.
+
 ## Switching Runtime Variants
 
 CPU, NVIDIA, and AMD builds are mutually exclusive installed variants.

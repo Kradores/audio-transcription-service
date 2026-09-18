@@ -584,3 +584,61 @@ The standalone NVIDIA runtime smoke-test remains available for isolated CUDA/CTr
 ```
 
 It is diagnostic tooling and is not the production application distribution.
+
+
+## Windows distribution metadata generation
+
+Windows application builds generate deterministic distribution metadata before
+running PyInstaller.
+
+CPU:
+
+```powershell
+.\scripts\windows\build.ps1
+```
+
+generates:
+
+```text
+build\distribution-metadata\cpu\distribution-metadata.json
+```
+
+NVIDIA:
+
+```powershell
+.\scripts\windows\build-nvidia.ps1
+```
+
+generates:
+
+```text
+build\distribution-metadata\nvidia\distribution-metadata.json
+```
+
+through:
+
+```text
+scripts.generate_distribution_metadata
+```
+
+The generator obtains:
+
+```text
+application version
+    → pyproject.toml
+
+Python package versions
+    → the exact build environment
+
+NVIDIA runtime versions
+    → prepared NVIDIA runtime manifest + pinned NVIDIA toolchain
+```
+
+Version constants should not be duplicated manually in support-diagnostics
+code.
+
+The NVIDIA build additionally verifies that the installed Faster-Whisper and
+CTranslate2 versions match the pinned NVIDIA toolchain before packaging.
+
+Both Windows build scripts verify that the generated manifest is bundled by
+PyInstaller unchanged.

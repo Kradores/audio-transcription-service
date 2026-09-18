@@ -226,3 +226,45 @@ We have successfully completed:
 - improve support-bundle packaged dependency detection;
 - include GPU, driver, and packaged accelerator-runtime versions in support diagnostics;
 - defer NVIDIA installer/runtime-size optimization until there is evidence that the current size is operationally problematic.
+
+
+## As of 2026-09-18
+
+**Implemented**
+
+- ADR-052 — Deterministic Distribution Metadata for Support Diagnostics;
+- application-owned strongly typed distribution metadata contract;
+- explicit `development`, `cpu`, `nvidia`, and `amd` distribution profiles;
+- deterministic development metadata provider;
+- deterministic packaged metadata manifest for CPU and NVIDIA distributions;
+- build-time package-version capture instead of relying on packaged
+  `importlib.metadata` discovery;
+- NVIDIA distribution metadata sourced from the existing pinned NVIDIA
+  toolchain and prepared runtime manifest;
+- build-time validation of Faster-Whisper/CTranslate2 NVIDIA toolchain
+  compatibility;
+- PyInstaller bundling of `distribution-metadata.json`;
+- packaged-manifest existence and SHA256 equality validation;
+- support-bundle `system-info.json` now reports immutable distribution metadata
+  separately from mutable configuration and best-effort Python package metadata;
+- CPU packaged support-bundle acceptance completed;
+- NVIDIA packaged support-bundle acceptance completed;
+- validated NVIDIA metadata:
+  - Faster-Whisper 1.2.1;
+  - CTranslate2 4.8.1;
+  - cuBLAS 12.4.5.8;
+  - cuDNN 9.1.0.70;
+  - NVRTC 12.4.127;
+- final quality gate:
+  - 593 tests passed;
+  - Ruff format clean;
+  - Ruff check clean;
+  - mypy clean across 162 source files.
+
+**Known follow-up**
+
+- add runtime-observed GPU name and driver metadata;
+- add runtime-observed CUDA/device and supported-compute-type information;
+- integrate deterministic distribution metadata into the future packaged AMD
+  distribution;
+- add relevant AMD/TheRock runtime-observed diagnostics.
