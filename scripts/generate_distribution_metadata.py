@@ -64,6 +64,12 @@ def create_distribution_metadata(
             runtime_manifest_path=nvidia_runtime_manifest_path,
         )
 
+    elif profile is DistributionProfile.AMD:
+        runtime = _create_amd_runtime_metadata(
+            project_root=project_root,
+            package_versions=dict(packages),
+        )
+
     else:
         raise DistributionMetadataGenerationError(
             f"Distribution metadata generation is not implemented for profile={profile.value!r}"
@@ -219,6 +225,87 @@ def _create_nvidia_runtime_metadata(
     )
 
 
+def _create_amd_runtime_metadata(
+    *,
+    project_root: Path,
+    package_versions: dict[str, str],
+) -> DistributionRuntimeMetadata:
+    toolchain = _load_json_object(
+        project_root / "scripts" / "amd" / "toolchain.json",
+    )
+
+    required = _require_object(
+        toolchain.get("required"),
+        field="AMD toolchain required",
+    )
+
+    ctranslate2 = _require_object(
+        required.get("ctranslate2"),
+        field="AMD toolchain CTranslate2",
+    )
+
+    therock = _require_object(
+        required.get("therock"),
+        field="AMD toolchain TheRock",
+    )
+
+    therock_packages = _require_object(
+        therock.get("packages"),
+        field="AMD toolchain TheRock packages",
+    )
+
+    intel_oneapi = _require_object(
+        required.get("intel_oneapi"),
+        field="AMD toolchain Intel oneAPI",
+    )
+
+    expected_ctranslate2 = _require_string(
+        ctranslate2.get("version"),
+        field="AMD toolchain CTranslate2 version",
+    )
+
+    _validate_python_runtime_version(
+        package_versions=package_versions,
+        package_name="ctranslate2",
+        expected=expected_ctranslate2,
+    )
+
+    runtime_component_names = (
+        "rocm",
+        "rocm-sdk-core",
+        "rocm-sdk-libraries",
+        "rocm-sdk-device-gfx1031",
+    )
+
+    components = [
+        (
+            name,
+            _require_string(
+                therock_packages.get(name),
+                field=f"AMD toolchain TheRock package {name}",
+            ),
+        )
+        for name in runtime_component_names
+    ]
+
+    components.append(
+        (
+            "intel-openmp",
+            _require_string(
+                intel_oneapi.get("version"),
+                field="AMD toolchain Intel oneAPI version",
+            ),
+        )
+    )
+
+    return DistributionRuntimeMetadata(
+        kind=DistributionRuntimeKind.THEROCK,
+        components=tuple(
+            sorted(components),
+        ),
+    )
+
+
 def _validate_python_runtime_version(
     *,
     package_versions: dict[str, str],
@@ -314,6 +401,7 @@ def main() -> None:
         choices=(
             DistributionProfile.CPU.value,
             DistributionProfile.NVIDIA.value,
+            DistributionProfile.AMD.value,
         ),
     )
 

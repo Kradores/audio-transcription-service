@@ -231,3 +231,5 @@ transcripts.db
 !packaging/windows/AudioTranscriptionService.spec
 !packaging/windows/NvidiaRuntimeSmokeTest.spec
 !packaging/windows/AudioTranscriptionService-Nvidia.spec
+!packaging/windows/AmdRuntimeSmokeTest.spec
+!packaging/windows/AudioTranscriptionService-Amd.spec

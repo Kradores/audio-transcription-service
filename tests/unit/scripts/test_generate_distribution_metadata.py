@@ -220,3 +220,99 @@ def test_generation_fails_when_required_package_is_missing(
             project_root=tmp_path,
             version_resolver=missing_version_resolver,
         )
+
+
+def test_amd_metadata_uses_pinned_therock_runtime(
+    tmp_path: Path,
+) -> None:
+    write_project(tmp_path)
+
+    toolchain_directory = tmp_path / "scripts" / "amd"
+
+    toolchain_directory.mkdir(
+        parents=True,
+    )
+
+    (toolchain_directory / "toolchain.json").write_text(
+        json.dumps(
+            {
+                "required": {
+                    "ctranslate2": {
+                        "version": "4.8.1",
+                        "hip_architecture": "gfx1031",
+                    },
+                    "therock": {
+                        "packages": {
+                            "rocm": "10.1.0a20260829",
+                            "rocm-sdk-core": "10.1.0a20260829",
+                            "rocm-sdk-devel": "10.1.0a20260829",
+                            "rocm-sdk-device-gfx1031": ("10.1.0a20260829"),
+                            "rocm-sdk-libraries": ("10.1.0a20260829"),
+                        }
+                    },
+                    "intel_oneapi": {
+                        "version": "2026.1",
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = create_distribution_metadata(
+        profile=DistributionProfile.AMD,
+        project_root=tmp_path,
+        version_resolver=version_resolver,
+    )
+
+    assert result.profile is DistributionProfile.AMD
+
+    assert result.runtime is not None
+    assert result.runtime.kind is DistributionRuntimeKind.THEROCK
+
+    assert dict(result.runtime.components) == {
+        "intel-openmp": "2026.1",
+        "rocm": "10.1.0a20260829",
+        "rocm-sdk-core": "10.1.0a20260829",
+        "rocm-sdk-device-gfx1031": ("10.1.0a20260829"),
+        "rocm-sdk-libraries": ("10.1.0a20260829"),
+    }
+
+
+def test_amd_metadata_rejects_ctranslate2_version_mismatch(
+    tmp_path: Path,
+) -> None:
+    write_project(tmp_path)
+
+    toolchain_directory = tmp_path / "scripts" / "amd"
+
+    toolchain_directory.mkdir(
+        parents=True,
+    )
+
+    (toolchain_directory / "toolchain.json").write_text(
+        json.dumps(
+            {
+                "required": {
+                    "ctranslate2": {
+                        "version": "4.9.0",
+                    },
+                    "therock": {"packages": {}},
+                    "intel_oneapi": {
+                        "version": "2026.1",
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        DistributionMetadataGenerationError,
+        match="ctranslate2",
+    ):
+        create_distribution_metadata(
+            profile=DistributionProfile.AMD,
+            project_root=tmp_path,
+            version_resolver=version_resolver,
+        )
