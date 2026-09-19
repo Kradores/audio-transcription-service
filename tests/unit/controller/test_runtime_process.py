@@ -6,13 +6,28 @@ import pytest
 
 from app.controller.runtime_process import (
     RuntimeFailedEvent,
+    RuntimeGraphicsAdaptersObservedEvent,
     RuntimeProcessEvent,
     RuntimeProcessHost,
     RuntimeProcessSession,
     RuntimeProcessState,
     RuntimeStartedEvent,
+    RuntimeTranscriptionObservedEvent,
+)
+from app.core.config.enums import (
+    WhisperComputeType,
+    WhisperDevice,
+    WhisperRuntime,
 )
 from app.core.runtime_paths import RuntimePaths, create_development_runtime_paths
+from app.observability.hardware import (
+    GraphicsAdapterInfo,
+    GraphicsAdaptersObservation,
+)
+from app.observability.transcription_runtime import (
+    CTranslate2CapabilitiesObservation,
+    TranscriptionRuntimeObservation,
+)
 
 
 class FakeRuntimeProcessSession:
@@ -110,6 +125,37 @@ def create_host(
     )
 
     return host, factory
+
+
+def create_graphics_observation() -> GraphicsAdaptersObservation:
+    return GraphicsAdaptersObservation.success(
+        (
+            GraphicsAdapterInfo(
+                name="AMD Radeon RX 6800M",
+                driver_version="32.0.21045.5002",
+                pnp_device_id=("PCI\\VEN_1002&DEV_73DF"),
+            ),
+        )
+    )
+
+
+def create_transcription_runtime_observation() -> TranscriptionRuntimeObservation:
+    return TranscriptionRuntimeObservation(
+        runtime=WhisperRuntime.THEROCK,
+        device=WhisperDevice.CUDA,
+        configured_compute_type=(WhisperComputeType.FLOAT16),
+        initialized=True,
+        ctranslate2=(
+            CTranslate2CapabilitiesObservation.success(
+                cuda_device_count=1,
+                supported_compute_types=(
+                    "float16",
+                    "float32",
+                    "int8",
+                ),
+            )
+        ),
+    )
 
 
 def test_initial_state_is_stopped(
@@ -270,3 +316,211 @@ def test_repeated_stop_is_safe(
     host.stop()
 
     assert factory.sessions[0].stop_calls == 1
+
+
+def test_graphics_observation_is_stored_without_changing_state(
+    tmp_path: Path,
+) -> None:
+    host, factory = create_host(tmp_path)
+
+    host.start()
+
+    session = factory.sessions[0]
+    observation = create_graphics_observation()
+
+    session.publish(
+        RuntimeGraphicsAdaptersObservedEvent(
+            observation=observation,
+        )
+    )
+
+    snapshot = host.refresh()
+
+    assert snapshot.state is RuntimeProcessState.STARTING
+
+    assert host.diagnostics_snapshot.graphics_adapters == observation
+
+
+def test_graphics_observation_remains_after_normal_stop(
+    tmp_path: Path,
+) -> None:
+    host, factory = create_host(tmp_path)
+
+    host.start()
+
+    session = factory.sessions[0]
+    observation = create_graphics_observation()
+
+    session.publish(
+        RuntimeGraphicsAdaptersObservedEvent(
+            observation=observation,
+        )
+    )
+    session.publish(
+        RuntimeStartedEvent(),
+    )
+
+    host.refresh()
+
+    assert host.snapshot.state is RuntimeProcessState.RUNNING
+
+    host.stop()
+
+    session.exit(0)
+
+    snapshot = host.refresh()
+
+    assert snapshot.state is RuntimeProcessState.STOPPED
+
+    assert host.diagnostics_snapshot.graphics_adapters == observation
+
+
+def test_fresh_start_clears_previous_graphics_observation(
+    tmp_path: Path,
+) -> None:
+    host, factory = create_host(tmp_path)
+
+    host.start()
+
+    first_session = factory.sessions[0]
+    observation = create_graphics_observation()
+
+    first_session.publish(
+        RuntimeGraphicsAdaptersObservedEvent(
+            observation=observation,
+        )
+    )
+    first_session.publish(
+        RuntimeStartedEvent(),
+    )
+
+    host.refresh()
+
+    host.stop()
+
+    first_session.exit(0)
+
+    host.refresh()
+
+    assert host.diagnostics_snapshot.graphics_adapters == observation
+
+    host.start()
+
+    assert host.diagnostics_snapshot.graphics_adapters is None
+
+
+def test_graphics_observation_remains_when_startup_fails(
+    tmp_path: Path,
+) -> None:
+    host, factory = create_host(tmp_path)
+
+    host.start()
+
+    session = factory.sessions[0]
+    observation = create_graphics_observation()
+
+    session.publish(
+        RuntimeGraphicsAdaptersObservedEvent(
+            observation=observation,
+        )
+    )
+
+    session.publish(
+        RuntimeFailedEvent(
+            message="runtime initialization failed",
+        )
+    )
+
+    snapshot = host.refresh()
+
+    assert snapshot.state is RuntimeProcessState.FAILED
+    assert snapshot.failure_message == ("runtime initialization failed")
+
+    assert host.diagnostics_snapshot.graphics_adapters == observation
+
+
+def test_transcription_observation_is_stored_without_changing_state(
+    tmp_path: Path,
+) -> None:
+    host, factory = create_host(tmp_path)
+
+    host.start()
+
+    session = factory.sessions[0]
+    observation = create_transcription_runtime_observation()
+
+    session.publish(
+        RuntimeTranscriptionObservedEvent(
+            observation=observation,
+        )
+    )
+
+    snapshot = host.refresh()
+
+    assert snapshot.state is RuntimeProcessState.STARTING
+
+    assert host.diagnostics_snapshot.transcription_runtime == observation
+
+
+def test_transcription_observation_remains_after_stop(
+    tmp_path: Path,
+) -> None:
+    host, factory = create_host(tmp_path)
+
+    host.start()
+
+    session = factory.sessions[0]
+    observation = create_transcription_runtime_observation()
+
+    session.publish(
+        RuntimeStartedEvent(),
+    )
+
+    session.publish(
+        RuntimeTranscriptionObservedEvent(
+            observation=observation,
+        )
+    )
+
+    host.refresh()
+
+    host.stop()
+    session.exit(0)
+
+    snapshot = host.refresh()
+
+    assert snapshot.state is RuntimeProcessState.STOPPED
+
+    assert host.diagnostics_snapshot.transcription_runtime == observation
+
+
+def test_fresh_start_clears_transcription_observation(
+    tmp_path: Path,
+) -> None:
+    host, factory = create_host(tmp_path)
+
+    host.start()
+
+    first_session = factory.sessions[0]
+
+    first_session.publish(
+        RuntimeStartedEvent(),
+    )
+
+    first_session.publish(
+        RuntimeTranscriptionObservedEvent(
+            observation=(create_transcription_runtime_observation()),
+        )
+    )
+
+    host.refresh()
+
+    host.stop()
+    first_session.exit(0)
+    host.refresh()
+
+    assert host.diagnostics_snapshot.transcription_runtime is not None
+
+    host.start()
+
+    assert host.diagnostics_snapshot.transcription_runtime is None

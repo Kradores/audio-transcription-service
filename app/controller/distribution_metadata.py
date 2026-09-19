@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -111,25 +112,31 @@ class DevelopmentDistributionMetadataProvider:
     def __init__(
         self,
         *,
+        project_root: Path,
         package_names: tuple[str, ...] = (DEFAULT_DISTRIBUTION_PACKAGE_NAMES),
-        version_resolver: PackageVersionResolver = metadata.version,
+        version_resolver: PackageVersionResolver = (metadata.version),
     ) -> None:
+        self._project_root = project_root
         self._package_names = package_names
         self._version_resolver = version_resolver
 
     def load(self) -> DistributionMetadata:
-        try:
-            application_version = self._version_resolver(
-                APPLICATION_PACKAGE_NAME,
-            )
-        except metadata.PackageNotFoundError as exc:
-            raise DistributionMetadataError(
-                f"Application package metadata is unavailable for {APPLICATION_PACKAGE_NAME!r}"
-            ) from exc
+        application_version = _load_project_application_version(
+            self._project_root,
+        )
 
         packages: list[tuple[str, str]] = []
 
         for package_name in self._package_names:
+            if package_name == APPLICATION_PACKAGE_NAME:
+                packages.append(
+                    (
+                        package_name,
+                        application_version,
+                    )
+                )
+                continue
+
             try:
                 version = self._version_resolver(
                     package_name,
@@ -140,25 +147,55 @@ class DevelopmentDistributionMetadataProvider:
             packages.append(
                 (
                     package_name,
-                    _require_non_empty_string(
-                        version,
-                        field=(f"package version for {package_name!r}"),
-                    ),
+                    version,
                 )
             )
 
         return DistributionMetadata(
             schema_version=(DISTRIBUTION_METADATA_SCHEMA_VERSION),
             profile=DistributionProfile.DEVELOPMENT,
-            application_version=_require_non_empty_string(
-                application_version,
-                field="application_version",
-            ),
+            application_version=application_version,
             packages=tuple(
                 sorted(packages),
             ),
             runtime=None,
         )
+
+
+def _load_project_application_version(
+    project_root: Path,
+) -> str:
+    path = project_root / "pyproject.toml"
+
+    try:
+        with path.open(
+            "rb",
+        ) as file:
+            document = tomllib.load(file)
+
+    except (
+        OSError,
+        tomllib.TOMLDecodeError,
+    ) as exc:
+        raise DistributionMetadataError(
+            f"Could not load development project metadata from {path}"
+        ) from exc
+
+    project = document.get(
+        "project",
+    )
+
+    if not isinstance(project, dict):
+        raise DistributionMetadataError("pyproject.toml does not contain a project table")
+
+    version = project.get(
+        "version",
+    )
+
+    if not isinstance(version, str) or not version.strip():
+        raise DistributionMetadataError("pyproject.toml project.version is unavailable")
+
+    return version.strip()
 
 
 def _parse_distribution_metadata(

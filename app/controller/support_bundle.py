@@ -19,6 +19,7 @@ from app.controller.distribution_metadata import (
     DistributionMetadataError,
     DistributionMetadataProvider,
 )
+from app.controller.runtime_process import RuntimeProcessDiagnosticsSnapshot
 from app.core.config.exceptions import ConfigurationError
 from app.core.config.loader import ConfigurationLoader
 from app.core.runtime_paths import RuntimePaths
@@ -37,6 +38,12 @@ _PACKAGE_NAMES = (
     "silero-vad",
     "soxr",
 )
+
+
+type RuntimeDiagnosticsProvider = Callable[
+    [],
+    RuntimeProcessDiagnosticsSnapshot,
+]
 
 
 class SupportBundleError(Exception):
@@ -122,9 +129,6 @@ class ConfigurationSupportArtifactPathResolver:
         )
 
 
-# app/controller/support_bundle.py
-
-
 class DefaultSupportInfoCollector:
     """Collect lightweight environment and runtime information."""
 
@@ -132,12 +136,16 @@ class DefaultSupportInfoCollector:
         self,
         runtime_paths: RuntimePaths,
         *,
-        distribution_metadata_provider: DistributionMetadataProvider | None = None,
+        distribution_metadata_provider: (DistributionMetadataProvider | None) = None,
+        runtime_diagnostics_provider: (RuntimeDiagnosticsProvider | None) = None,
     ) -> None:
         self._runtime_paths = runtime_paths
         self._distribution_metadata_provider = distribution_metadata_provider
+        self._runtime_diagnostics_provider = runtime_diagnostics_provider
 
     def collect(self) -> dict[str, object]:
+        runtime_diagnostics = self._get_runtime_diagnostics()
+
         return {
             "python": {
                 "version": sys.version,
@@ -153,10 +161,22 @@ class DefaultSupportInfoCollector:
                 "logical_cpu_count": os.cpu_count(),
             },
             "runtime": {
-                "root_directory": str(self._runtime_paths.root_directory),
-                "config_path": str(self._runtime_paths.config_path),
+                "root_directory": str(
+                    self._runtime_paths.root_directory,
+                ),
+                "config_path": str(
+                    self._runtime_paths.config_path,
+                ),
             },
-            "distribution": self._collect_distribution_metadata(),
+            "distribution": (self._collect_distribution_metadata()),
+            "hardware": self._collect_hardware(
+                runtime_diagnostics,
+            ),
+            "transcription_runtime": (
+                self._collect_transcription_runtime(
+                    runtime_diagnostics,
+                )
+            ),
             "packages": self._collect_package_versions(),
             "configuration": self._collect_configuration(),
         }
@@ -239,6 +259,52 @@ class DefaultSupportInfoCollector:
         return {
             "available": True,
             **distribution_metadata.to_dict(),
+        }
+
+    def _get_runtime_diagnostics(
+        self,
+    ) -> RuntimeProcessDiagnosticsSnapshot | None:
+        provider = self._runtime_diagnostics_provider
+
+        if provider is None:
+            return None
+
+        return provider()
+
+    def _collect_hardware(
+        self,
+        diagnostics: RuntimeProcessDiagnosticsSnapshot | None,
+    ) -> dict[str, object]:
+        if diagnostics is None or diagnostics.graphics_adapters is None:
+            return {
+                "graphics_adapters": {
+                    "available": False,
+                    "adapters": [],
+                    "error_type": "NotObserved",
+                    "error": (
+                        "No graphics adapter observation is available for this controller session."
+                    ),
+                }
+            }
+
+        return {"graphics_adapters": (diagnostics.graphics_adapters.to_dict())}
+
+    def _collect_transcription_runtime(
+        self,
+        diagnostics: RuntimeProcessDiagnosticsSnapshot | None,
+    ) -> dict[str, object]:
+        if diagnostics is None or diagnostics.transcription_runtime is None:
+            return {
+                "available": False,
+                "error_type": "NotObserved",
+                "error": (
+                    "No transcription runtime observation is available for this controller session."
+                ),
+            }
+
+        return {
+            "available": True,
+            **diagnostics.transcription_runtime.to_dict(),
         }
 
 

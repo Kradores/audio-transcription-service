@@ -6,6 +6,10 @@ from enum import StrEnum
 from typing import Protocol
 
 from app.core.runtime_paths import RuntimePaths
+from app.observability.hardware import (
+    GraphicsAdaptersObservation,
+)
+from app.observability.transcription_runtime import TranscriptionRuntimeObservation
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +34,12 @@ class RuntimeFailedEvent:
     message: str
 
 
-type RuntimeProcessEvent = RuntimeStartedEvent | RuntimeFailedEvent
+type RuntimeProcessEvent = (
+    RuntimeStartedEvent
+    | RuntimeFailedEvent
+    | RuntimeGraphicsAdaptersObservedEvent
+    | RuntimeTranscriptionObservedEvent
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +48,26 @@ class RuntimeProcessSnapshot:
     pid: int | None
     exit_code: int | None
     failure_message: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeGraphicsAdaptersObservedEvent:
+    """Windows graphics-adapter observation from the runtime child."""
+
+    observation: GraphicsAdaptersObservation
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeProcessDiagnosticsSnapshot:
+    graphics_adapters: GraphicsAdaptersObservation | None
+    transcription_runtime: TranscriptionRuntimeObservation | None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeTranscriptionObservedEvent:
+    """Transcription runtime observation from the child."""
+
+    observation: TranscriptionRuntimeObservation
 
 
 class RuntimeProcessSession(Protocol):
@@ -100,6 +129,9 @@ class RuntimeProcessHost:
         self._failure_message: str | None = None
         self._stop_requested = False
 
+        self._graphics_adapters: GraphicsAdaptersObservation | None = None
+        self._transcription_runtime: TranscriptionRuntimeObservation | None = None
+
     @property
     def snapshot(self) -> RuntimeProcessSnapshot:
         return RuntimeProcessSnapshot(
@@ -107,6 +139,15 @@ class RuntimeProcessHost:
             pid=self._pid,
             exit_code=self._exit_code,
             failure_message=self._failure_message,
+        )
+
+    @property
+    def diagnostics_snapshot(
+        self,
+    ) -> RuntimeProcessDiagnosticsSnapshot:
+        return RuntimeProcessDiagnosticsSnapshot(
+            graphics_adapters=self._graphics_adapters,
+            transcription_runtime=self._transcription_runtime,
         )
 
     def start(self) -> RuntimeProcessSnapshot:
@@ -124,6 +165,9 @@ class RuntimeProcessHost:
         self._exit_code = None
         self._failure_message = None
         self._stop_requested = False
+
+        self._graphics_adapters = None
+        self._transcription_runtime = None
 
         try:
             session = self._session_factory.create(
@@ -220,6 +264,20 @@ class RuntimeProcessHost:
         self,
         event: RuntimeProcessEvent,
     ) -> None:
+        if isinstance(
+            event,
+            RuntimeGraphicsAdaptersObservedEvent,
+        ):
+            self._graphics_adapters = event.observation
+            return
+
+        if isinstance(
+            event,
+            RuntimeTranscriptionObservedEvent,
+        ):
+            self._transcription_runtime = event.observation
+            return
+
         if isinstance(event, RuntimeStartedEvent):
             if self._state is RuntimeProcessState.STARTING:
                 self._state = RuntimeProcessState.RUNNING

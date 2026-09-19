@@ -9,10 +9,13 @@ from typing import Protocol
 
 from app.controller.runtime_process import (
     RuntimeFailedEvent,
+    RuntimeGraphicsAdaptersObservedEvent,
     RuntimeProcessEvent,
     RuntimeProcessSession,
     RuntimeStartedEvent,
+    RuntimeTranscriptionObservedEvent,
 )
+from app.core.config.models import Settings
 from app.core.runtime_paths import RuntimePaths
 
 _SHUTDOWN_POLL_INTERVAL_SECONDS = 0.1
@@ -110,6 +113,17 @@ class MultiprocessingRuntimeProcessSession:
 
             if isinstance(
                 item,
+                (
+                    RuntimeStartedEvent,
+                    RuntimeFailedEvent,
+                    RuntimeGraphicsAdaptersObservedEvent,
+                    RuntimeTranscriptionObservedEvent,
+                ),
+            ):
+                events.append(item)
+
+            if isinstance(
+                item,
                 (RuntimeStartedEvent, RuntimeFailedEvent),
             ):
                 events.append(item)
@@ -196,6 +210,18 @@ async def _run_runtime_process_async(
     shutdown_signal: _ShutdownSignal,
     status_queue: _StatusQueue,
 ) -> None:
+    from app.observability.windows_video_controller import (
+        WindowsVideoControllerObserver,
+    )
+
+    graphics_adapters = WindowsVideoControllerObserver().observe()
+
+    status_queue.put(
+        RuntimeGraphicsAdaptersObservedEvent(
+            observation=graphics_adapters,
+        )
+    )
+
     # Keep heavy application/native imports inside the runtime child.
     from app.main import run_application
 
@@ -209,9 +235,49 @@ async def _run_runtime_process_async(
         name="runtime-shutdown-forwarder",
     )
 
-    def notify_started() -> None:
+    def notify_started(
+        settings: Settings,
+    ) -> None:
         status_queue.put(
             RuntimeStartedEvent(),
+        )
+
+        try:
+            from app.observability.ctranslate2_runtime import (
+                CTranslate2RuntimeObserver,
+            )
+
+            observation = CTranslate2RuntimeObserver().observe(
+                runtime=settings.whisper.runtime,
+                device=settings.whisper.device,
+                compute_type=(settings.whisper.compute_type),
+            )
+
+        except Exception as exc:
+            from app.observability.transcription_runtime import (
+                CTranslate2CapabilitiesObservation,
+                TranscriptionRuntimeObservation,
+            )
+
+            message = str(exc).strip()
+
+            observation = TranscriptionRuntimeObservation(
+                runtime=settings.whisper.runtime,
+                device=settings.whisper.device,
+                configured_compute_type=(settings.whisper.compute_type),
+                initialized=True,
+                ctranslate2=(
+                    CTranslate2CapabilitiesObservation.failure(
+                        error_type=type(exc).__name__,
+                        error=(message or "Unexpected runtime observation failure."),
+                    )
+                ),
+            )
+
+        status_queue.put(
+            RuntimeTranscriptionObservedEvent(
+                observation=observation,
+            )
         )
 
     try:

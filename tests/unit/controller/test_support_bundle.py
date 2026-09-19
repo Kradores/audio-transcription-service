@@ -15,14 +15,30 @@ from app.controller.distribution_metadata import (
     DistributionRuntimeKind,
     DistributionRuntimeMetadata,
 )
+from app.controller.runtime_process import (
+    RuntimeProcessDiagnosticsSnapshot,
+)
 from app.controller.support_bundle import (
     DefaultSupportInfoCollector,
     SupportArtifactPaths,
     SupportBundleBuilder,
     SupportBundleError,
 )
+from app.core.config.enums import (
+    WhisperComputeType,
+    WhisperDevice,
+    WhisperRuntime,
+)
 from app.core.runtime_paths import (
     create_development_runtime_paths,
+)
+from app.observability.hardware import (
+    GraphicsAdapterInfo,
+    GraphicsAdaptersObservation,
+)
+from app.observability.transcription_runtime import (
+    CTranslate2CapabilitiesObservation,
+    TranscriptionRuntimeObservation,
 )
 
 
@@ -91,6 +107,44 @@ def create_builder(
             0,
             0,
             tzinfo=UTC,
+        ),
+    )
+
+
+def create_runtime_diagnostics() -> RuntimeProcessDiagnosticsSnapshot:
+    return RuntimeProcessDiagnosticsSnapshot(
+        graphics_adapters=(
+            GraphicsAdaptersObservation.success(
+                (
+                    GraphicsAdapterInfo(
+                        name="AMD Radeon RX 6800M",
+                        driver_version=("32.0.21045.5002"),
+                        pnp_device_id=("PCI\\VEN_1002&DEV_73DF"),
+                    ),
+                )
+            )
+        ),
+        transcription_runtime=(
+            TranscriptionRuntimeObservation(
+                runtime=WhisperRuntime.THEROCK,
+                device=WhisperDevice.CUDA,
+                configured_compute_type=(WhisperComputeType.FLOAT16),
+                initialized=True,
+                ctranslate2=(
+                    CTranslate2CapabilitiesObservation.success(
+                        cuda_device_count=1,
+                        supported_compute_types=(
+                            "bfloat16",
+                            "float16",
+                            "float32",
+                            "int8",
+                            "int8_bfloat16",
+                            "int8_float16",
+                            "int8_float32",
+                        ),
+                    )
+                ),
+            )
         ),
     )
 
@@ -372,4 +426,124 @@ def test_support_info_reports_unconfigured_distribution_metadata(
         "available": False,
         "error_type": "DistributionMetadataUnavailable",
         "error": "No distribution metadata provider was configured.",
+    }
+
+
+def test_support_info_includes_runtime_diagnostics(
+    tmp_path: Path,
+) -> None:
+    runtime_paths = create_development_runtime_paths(
+        tmp_path,
+    )
+
+    diagnostics = create_runtime_diagnostics()
+
+    collector = DefaultSupportInfoCollector(
+        runtime_paths,
+        runtime_diagnostics_provider=(lambda: diagnostics),
+    )
+
+    result = collector.collect()
+
+    assert result["hardware"] == {
+        "graphics_adapters": {
+            "available": True,
+            "adapters": [
+                {
+                    "name": "AMD Radeon RX 6800M",
+                    "driver_version": ("32.0.21045.5002"),
+                    "pnp_device_id": ("PCI\\VEN_1002&DEV_73DF"),
+                }
+            ],
+        }
+    }
+
+    assert result["transcription_runtime"] == {
+        "available": True,
+        "runtime": "therock",
+        "device": "cuda",
+        "configured_compute_type": "float16",
+        "initialized": True,
+        "ctranslate2": {
+            "available": True,
+            "cuda_device_count": 1,
+            "supported_compute_types": [
+                "bfloat16",
+                "float16",
+                "float32",
+                "int8",
+                "int8_bfloat16",
+                "int8_float16",
+                "int8_float32",
+            ],
+        },
+    }
+
+
+def test_support_info_reports_runtime_diagnostics_not_observed(
+    tmp_path: Path,
+) -> None:
+    runtime_paths = create_development_runtime_paths(
+        tmp_path,
+    )
+
+    diagnostics = RuntimeProcessDiagnosticsSnapshot(
+        graphics_adapters=None,
+        transcription_runtime=None,
+    )
+
+    collector = DefaultSupportInfoCollector(
+        runtime_paths,
+        runtime_diagnostics_provider=(lambda: diagnostics),
+    )
+
+    result = collector.collect()
+
+    assert result["hardware"] == {
+        "graphics_adapters": {
+            "available": False,
+            "adapters": [],
+            "error_type": "NotObserved",
+            "error": ("No graphics adapter observation is available for this controller session."),
+        }
+    }
+
+    assert result["transcription_runtime"] == {
+        "available": False,
+        "error_type": "NotObserved",
+        "error": ("No transcription runtime observation is available for this controller session."),
+    }
+
+
+def test_support_info_preserves_graphics_observation_failure(
+    tmp_path: Path,
+) -> None:
+    runtime_paths = create_development_runtime_paths(
+        tmp_path,
+    )
+
+    diagnostics = RuntimeProcessDiagnosticsSnapshot(
+        graphics_adapters=(
+            GraphicsAdaptersObservation.failure(
+                error_type="PowerShellCommandError",
+                error="Get-CimInstance failed",
+            )
+        ),
+        transcription_runtime=None,
+    )
+
+    collector = DefaultSupportInfoCollector(
+        runtime_paths,
+        runtime_diagnostics_provider=(lambda: diagnostics),
+    )
+
+    result = collector.collect()
+
+    assert result["hardware"] == {
+        "graphics_adapters": {
+            "available": False,
+            "adapters": [],
+            "error_type": "PowerShellCommandError",
+            "error": "Get-CimInstance failed",
+        }
     }

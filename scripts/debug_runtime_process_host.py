@@ -46,6 +46,34 @@ def wait_for_state(
     raise TimeoutError(f"runtime did not reach {expected.value}")
 
 
+def print_graphics_diagnostics(
+    host: RuntimeProcessHost,
+) -> None:
+    observation = host.diagnostics_snapshot.graphics_adapters
+
+    if observation is None:
+        print("graphics diagnostics: not observed")
+        return
+
+    if not observation.available:
+        print(
+            "graphics diagnostics: unavailable "
+            f"error_type={observation.error_type} "
+            f"error={observation.error}"
+        )
+        return
+
+    print(f"graphics diagnostics: adapters={len(observation.adapters)}")
+
+    for adapter in observation.adapters:
+        print(
+            "  "
+            f"name={adapter.name!r} "
+            f"driver_version={adapter.driver_version!r} "
+            f"pnp_device_id={adapter.pnp_device_id!r}"
+        )
+
+
 def run_once(
     host: RuntimeProcessHost,
 ) -> None:
@@ -53,13 +81,28 @@ def run_once(
 
     print(f"start requested state={snapshot.state.value} pid={snapshot.pid}")
 
-    wait_for_state(
-        host,
-        expected=RuntimeProcessState.RUNNING,
-        timeout_seconds=START_TIMEOUT_SECONDS,
-    )
+    try:
+        wait_for_state(
+            host,
+            expected=RuntimeProcessState.RUNNING,
+            timeout_seconds=START_TIMEOUT_SECONDS,
+        )
+    except RuntimeError:
+        print("graphics diagnostics after startup failure:")
+        print_graphics_diagnostics(host)
+        raise
 
     print("runtime is running")
+
+    print_graphics_diagnostics(host)
+
+    wait_for_transcription_diagnostics(
+        host,
+        timeout_seconds=5.0,
+    )
+
+    print_transcription_diagnostics(host)
+
     input("Press Enter to request graceful stop...")
 
     snapshot = host.stop()
@@ -73,6 +116,63 @@ def run_once(
     )
 
     print("runtime stopped cleanly")
+
+    print("graphics diagnostics after stop:")
+    print_graphics_diagnostics(host)
+
+    print("transcription diagnostics after stop:")
+    print_transcription_diagnostics(host)
+
+
+def wait_for_transcription_diagnostics(
+    host: RuntimeProcessHost,
+    *,
+    timeout_seconds: float,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+
+    while time.monotonic() < deadline:
+        host.refresh()
+
+        if host.diagnostics_snapshot.transcription_runtime is not None:
+            return
+
+        time.sleep(POLL_INTERVAL_SECONDS)
+
+    raise TimeoutError("timed out waiting for transcription runtime diagnostics")
+
+
+def print_transcription_diagnostics(
+    host: RuntimeProcessHost,
+) -> None:
+    observation = host.diagnostics_snapshot.transcription_runtime
+
+    if observation is None:
+        print("transcription diagnostics: not observed")
+        return
+
+    capabilities = observation.ctranslate2
+
+    print(
+        "transcription diagnostics: "
+        f"runtime={observation.runtime.value!r} "
+        f"device={observation.device.value!r} "
+        f"compute_type="
+        f"{observation.configured_compute_type.value!r} "
+        f"initialized={observation.initialized}"
+    )
+
+    if not capabilities.available:
+        print(
+            "  ctranslate2: unavailable "
+            f"error_type={capabilities.error_type!r} "
+            f"error={capabilities.error!r}"
+        )
+        return
+
+    print(f"  ctranslate2: cuda_device_count={capabilities.cuda_device_count!r}")
+
+    print(f"  supported_compute_types={list(capabilities.supported_compute_types)!r}")
 
 
 def main() -> None:

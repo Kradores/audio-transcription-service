@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.controller.distribution_metadata import (
+    APPLICATION_PACKAGE_NAME,
     DISTRIBUTION_METADATA_SCHEMA_VERSION,
     DevelopmentDistributionMetadataProvider,
     DistributionMetadataError,
@@ -263,7 +264,17 @@ def test_file_provider_reports_missing_file(
         ).load()
 
 
-def test_development_provider_creates_development_metadata() -> None:
+def test_development_provider_creates_development_metadata(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+        [project]
+        name = "audio-transcription-service"
+        version = "0.1.0"
+        """.strip(),
+        encoding="utf-8",
+    )
     versions = {
         "audio-transcription-service": "0.1.0",
         "faster-whisper": "1.2.1",
@@ -279,6 +290,7 @@ def test_development_provider_creates_development_metadata() -> None:
             raise metadata.PackageNotFoundError(package_name) from exc
 
     result = DevelopmentDistributionMetadataProvider(
+        project_root=tmp_path,
         package_names=(
             "audio-transcription-service",
             "faster-whisper",
@@ -299,19 +311,58 @@ def test_development_provider_creates_development_metadata() -> None:
     }
 
 
-def test_development_provider_requires_application_metadata() -> None:
+def test_development_provider_does_not_require_application_package_metadata(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[project]
+name = "audio-transcription-service"
+version = "0.1.0"
+""".strip(),
+        encoding="utf-8",
+    )
+
     def resolve_version(
         package_name: str,
     ) -> str:
-        raise metadata.PackageNotFoundError(package_name)
+        raise metadata.PackageNotFoundError(
+            package_name,
+        )
 
     provider = DevelopmentDistributionMetadataProvider(
+        project_root=tmp_path,
         version_resolver=resolve_version,
+    )
+
+    result = provider.load()
+
+    assert result.profile is DistributionProfile.DEVELOPMENT
+    assert result.application_version == "0.1.0"
+
+    assert dict(result.packages) == {
+        "audio-transcription-service": "0.1.0",
+    }
+
+
+def test_development_provider_requires_pyproject_version(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[project]
+name = "audio-transcription-service"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    provider = DevelopmentDistributionMetadataProvider(
+        project_root=tmp_path,
     )
 
     with pytest.raises(
         DistributionMetadataError,
-        match="Application package metadata is unavailable",
+        match="project.version is unavailable",
     ):
         provider.load()
 
@@ -347,3 +398,47 @@ def test_metadata_serializes_to_diagnostic_structure(
             },
         },
     }
+
+
+def test_development_metadata_does_not_require_application_package_install(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+        [project]
+        name = "audio-transcription-service"
+        version = "0.1.0"
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    def resolve_version(
+        package_name: str,
+    ) -> str:
+        if package_name == APPLICATION_PACKAGE_NAME:
+            raise metadata.PackageNotFoundError(
+                package_name,
+            )
+
+        versions = {
+            "faster-whisper": "1.2.1",
+            "ctranslate2": "4.8.1",
+        }
+
+        try:
+            return versions[package_name]
+        except KeyError as exc:
+            raise metadata.PackageNotFoundError(
+                package_name,
+            ) from exc
+
+    result = DevelopmentDistributionMetadataProvider(
+        project_root=tmp_path,
+        version_resolver=resolve_version,
+    ).load()
+
+    assert result.profile is DistributionProfile.DEVELOPMENT
+
+    assert result.application_version == "0.1.0"
+
+    assert dict(result.packages)[APPLICATION_PACKAGE_NAME] == "0.1.0"

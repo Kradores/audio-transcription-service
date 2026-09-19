@@ -23,7 +23,9 @@ def test_main_runs_controller_with_development_distribution_metadata(
 
     freeze_support.assert_called_once_with()
     create_runtime_paths.assert_called_once_with()
-    create_distribution_metadata_provider.assert_called_once_with()
+    create_distribution_metadata_provider.assert_called_once_with(
+        project_root=runtime_paths.root_directory,
+    )
 
     run_controller.assert_called_once_with(
         runtime_paths,

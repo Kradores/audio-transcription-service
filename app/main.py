@@ -8,6 +8,7 @@ from pathlib import Path
 from types import FrameType
 
 from app.composition import create_application
+from app.core.config.models import Settings
 from app.core.runtime_paths import RuntimePaths, create_development_runtime_paths
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 async def run_application(
     runtime_paths: RuntimePaths,
     shutdown_event: asyncio.Event | None = None,
-    on_started: Callable[[], None] | None = None,
+    on_started: Callable[[Settings], None] | None = None,
     *,
     nvidia_runtime_directory: Path | None = None,
 ) -> None:
@@ -40,7 +41,7 @@ async def run_application(
         )
 
         if on_started is not None:
-            on_started()
+            on_started(application.settings)
 
         application_wait = asyncio.create_task(
             application.wait(),

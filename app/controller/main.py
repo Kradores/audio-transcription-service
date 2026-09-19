@@ -52,6 +52,7 @@ def run_controller(
         info_collector=DefaultSupportInfoCollector(
             runtime_paths,
             distribution_metadata_provider=(distribution_metadata_provider),
+            runtime_diagnostics_provider=(lambda: runtime_host.diagnostics_snapshot),
         ),
     )
 
@@ -69,9 +70,15 @@ def run_controller(
 def main() -> None:
     multiprocessing.freeze_support()
 
+    runtime_paths = create_development_runtime_paths()
+
     run_controller(
-        create_development_runtime_paths(),
-        distribution_metadata_provider=(DevelopmentDistributionMetadataProvider()),
+        runtime_paths,
+        distribution_metadata_provider=(
+            DevelopmentDistributionMetadataProvider(
+                project_root=(runtime_paths.root_directory),
+            )
+        ),
     )
 
 

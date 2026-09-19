@@ -5,8 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.core.config.models import Settings
 from app.core.runtime_paths import create_development_runtime_paths
 from app.main import _handle_shutdown_signal, run_application
+from tests.unit.core.config.builders import SettingsBuilder
 
 
 @pytest.mark.anyio
@@ -132,6 +134,8 @@ async def test_run_application_notifies_after_successful_start(
     events: list[str] = []
 
     application = MagicMock()
+    settings = SettingsBuilder().build()
+    application.settings = settings
 
     async def start_application() -> None:
         events.append("application-started")
@@ -146,8 +150,13 @@ async def test_run_application_notifies_after_successful_start(
 
     application.wait = AsyncMock()
 
-    def on_started() -> None:
+    observed_settings: list[Settings] = []
+
+    def on_started(
+        started_settings: Settings,
+    ) -> None:
         events.append("startup-notified")
+        observed_settings.append(started_settings)
 
     with patch(
         "app.main.create_application",
@@ -162,6 +171,10 @@ async def test_run_application_notifies_after_successful_start(
     assert events == [
         "application-started",
         "startup-notified",
+    ]
+
+    assert observed_settings == [
+        settings,
     ]
 
 
