@@ -268,3 +268,53 @@ We have successfully completed:
 - integrate deterministic distribution metadata into the future packaged AMD
   distribution;
 - add relevant AMD/TheRock runtime-observed diagnostics.
+
+
+## As of 2026-09-19
+
+**Implemented**
+
+- ADR-053 — Runtime-Observed Hardware and Transcription Diagnostics Across the Controller Process Boundary;
+- Windows graphics-adapter observation through `Win32_VideoController`;
+- typed machine-observation contract containing adapter name, driver version and PNP device ID;
+- hardware diagnostics collected inside the spawned runtime process and transported to the controller through the existing lifecycle IPC channel;
+- typed CTranslate2 runtime-capability observation after successful application startup;
+- runtime diagnostics now report:
+  - configured transcription runtime;
+  - configured device;
+  - configured compute type;
+  - initialization state;
+  - CTranslate2 accelerator-device count;
+  - supported compute types;
+- diagnostics remain vendor-neutral and do not interpret CTranslate2 `cuda` as physical NVIDIA hardware;
+- `RuntimeProcessHost` retains the latest runtime diagnostics after normal Stop and clears stale diagnostics on a fresh Start;
+- support-bundle `system-info.json` now separates:
+  - deterministic `distribution`;
+  - mutable `configuration`;
+  - OS-observed `hardware`;
+  - initialized `transcription_runtime`;
+  - best-effort `packages`;
+- explicit `NotObserved` semantics for runtime diagnostics that have not yet been produced in the current controller session;
+- support diagnostics remain isolated from native ML/GPU initialization in the controller process;
+- diagnostic observation failures do not prevent application startup;
+- ADR-052 development metadata hardened so source-mode application version is read from `pyproject.toml` rather than requiring installed application package metadata;
+- real AMD/TheRock acceptance completed on AMD Radeon RX 6800M;
+- Windows reported both the RX 6800M and integrated Radeon adapter with their installed driver versions;
+- initialized TheRock/CTranslate2 runtime reported one accelerator device and support for `float16`;
+- Start → Stop → Start → Stop acceptance successfully reproduced runtime diagnostics across fresh child processes;
+- real post-Stop support bundle preserved hardware and CTranslate2 runtime observations;
+- development support bundle successfully reported:
+  - `distribution.profile = development`;
+  - `application_version = 0.1.0`;
+- full quality gate green:
+  - 624 tests passed;
+  - Ruff formatting clean;
+  - Ruff checks clean;
+  - mypy clean.
+
+**Known follow-up**
+
+- AMD packaged Windows distribution remains a future milestone;
+- AMD packaged distribution metadata should use the ADR-052 deterministic manifest contract;
+- runtime diagnostic snapshots are currently controller-session scoped and are not persisted across controller restarts;
+- the existing Python 3.14 `torch.jit.load` deprecation warnings remain known and unrelated.

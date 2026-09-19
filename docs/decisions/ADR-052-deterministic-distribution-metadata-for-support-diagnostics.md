@@ -809,6 +809,69 @@ pytest:
 The two existing Python 3.14 `torch.jit.load` deprecation warnings remain
 known and unrelated.
 
+### Development source-mode metadata hardening
+
+Development distribution metadata must not require the application itself to be installed into the active Python environment as package metadata.
+
+Specialized development environments such as the ADR-044 TheRock environment may execute the repository directly:
+
+```text
+python -m app.controller.main
+```
+
+without installing:
+
+```text
+audio-transcription-service
+```
+
+as a Python distribution.
+
+For the `development` profile:
+
+```text
+application version
+    → [project].version from repository pyproject.toml
+```
+
+Other dependency versions remain best-effort environment observations through Python package metadata.
+
+This preserves the distinction:
+
+```text
+development distribution identity
+    deterministic from project source metadata
+
+environment package discovery
+    best effort
+```
+
+Packaged CPU/NVIDIA/AMD distributions remain unchanged and continue to use their generated deterministic `distribution-metadata.json`.
+
+Real TheRock development support-bundle acceptance confirmed:
+
+```text
+distribution.available = true
+distribution.profile = development
+distribution.application_version = 0.1.0
+```
+
+even though the legacy best-effort package section may still report:
+
+```text
+packages.audio-transcription-service = null
+```
+
+This is expected and does not affect deterministic distribution identity.
+
+Replace ADR-052's previous runtime-observation `Remaining scope` list with:
+
+### Follow-up scope
+
+Runtime-observed GPU, driver, and initialized CTranslate2 capability diagnostics are defined separately by ADR-053.
+
+AMD packaged distribution metadata remains part of the future AMD Windows distribution milestone and must use the same deterministic manifest contract established here.
+
 ### Remaining scope
 
 The following parts of the broader support-diagnostics milestone remain

@@ -1619,99 +1619,174 @@ NVIDIA NVRTC version
 This is an observability improvement and is not required for NVIDIA runtime correctness.
 
 
-## Distribution metadata in support bundles
+## Distribution, Hardware and Transcription-Runtime Diagnostics
 
-`system-info.json` distinguishes deterministic distribution information from
-best-effort environment observation.
-
-The deterministic section is:
+Support bundles distinguish four important diagnostic questions:
 
 ```text
 distribution
+    What application artifact/source profile is this?
+
+configuration
+    What runtime did the user request?
+
+hardware
+    What graphics hardware does Windows currently report?
+
+transcription_runtime
+    What capabilities does the initialized transcription runtime report?
 ```
 
-For example:
+These sections are deliberately independent.
+
+### Distribution metadata
+
+`distribution` contains deterministic application identity established by ADR-052.
+
+Packaged builds read the generated:
+
+```text
+distribution-metadata.json
+```
+
+Development/source mode reads the application version from:
+
+```text
+pyproject.toml [project].version
+```
+
+and does not require the application itself to be installed into the active virtual environment.
+
+The legacy top-level `packages` section remains best-effort and may contain `null` values in source or PyInstaller environments.
+
+It must not be used as authoritative distribution identity.
+
+### Windows graphics hardware
+
+The spawned runtime process queries:
+
+```text
+Win32_VideoController
+```
+
+and records all returned adapters.
+
+Initial fields are:
+
+```text
+name
+driver_version
+pnp_device_id
+```
+
+Example:
 
 ```json
 {
-  "distribution": {
-    "available": true,
-    "schema_version": 1,
-    "profile": "nvidia",
-    "application_version": "0.1.0",
-    "packages": {
-      "faster-whisper": "1.2.1",
-      "ctranslate2": "4.8.1",
-      "torch": "2.13.0"
-    },
-    "runtime": {
-      "kind": "nvidia",
-      "components": {
-        "cublas": "12.4.5.8",
-        "cudnn": "9.1.0.70",
-        "nvrtc": "12.4.127"
-      }
+  "hardware": {
+    "graphics_adapters": {
+      "available": true,
+      "adapters": [
+        {
+          "name": "AMD Radeon RX 6800M",
+          "driver_version": "32.0.21045.5002",
+          "pnp_device_id": "..."
+        }
+      ]
     }
   }
 }
 ```
 
-This section describes what was deliberately built into the application
-artifact.
+Hardware observation failure is diagnostic only and does not prevent runtime startup.
 
-The existing top-level:
+### Initialized transcription runtime
 
-```text
-packages
-```
+After successful application startup, the runtime child records the configured runtime and CTranslate2 capabilities.
 
-section has different semantics.
-
-It is a best-effort observation using Python package metadata available to the
-running process.
-
-In PyInstaller distributions it may legitimately contain:
+Example:
 
 ```json
 {
-  "faster-whisper": null,
-  "ctranslate2": null,
-  "torch": null
+  "transcription_runtime": {
+    "available": true,
+    "runtime": "therock",
+    "device": "cuda",
+    "configured_compute_type": "float16",
+    "initialized": true,
+    "ctranslate2": {
+      "available": true,
+      "cuda_device_count": 1,
+      "supported_compute_types": [
+        "bfloat16",
+        "float16",
+        "float32",
+        "int8",
+        "int8_bfloat16",
+        "int8_float16",
+        "int8_float32"
+      ]
+    }
+  }
 }
 ```
 
-even when those dependencies are present and operational.
+CTranslate2's `cuda` device name describes its API/backend contract and must not be used to infer physical GPU vendor.
 
-`null` in this best-effort section must therefore not be interpreted as proof
-that a dependency was not packaged.
+Physical adapter identity comes from the separate Windows hardware section.
 
-For packaged-support investigation, use:
+This is especially important for the ADR-044 AMD/TheRock runtime.
 
-```text
-distribution.packages
-```
+### Observation availability
 
-as the authoritative artifact version information.
-
-The support bundle also retains effective mutable configuration separately.
-
-This makes the following distinction observable:
+No observation in the current controller session is represented as:
 
 ```text
-distribution
-    → what artifact is installed
-
-configuration
-    → what runtime behavior is configured
-
-packages
-    → what Python package metadata happens to be observable
+available = false
+error_type = NotObserved
 ```
 
-Distribution metadata collection does not load Faster-Whisper, CTranslate2,
-CUDA, or another transcription runtime.
+A real failed observation instead preserves its actual failure type and message.
 
-Support bundles can therefore still be created when runtime startup fails.
+This lets support diagnostics distinguish:
 
-Machine-observed GPU and driver information is not yet part of this
-deterministic metadata and will be added separately.
+```text
+runtime was never started
+```
+
+from:
+
+```text
+observation was attempted and failed
+```
+
+### Lifetime
+
+A fresh runtime Start clears stale diagnostic snapshots.
+
+Normal Stop preserves the latest hardware and transcription-runtime snapshots.
+
+This permits support-bundle creation after the runtime has stopped.
+
+Runtime diagnostic snapshots are currently session-scoped and are not persisted across controller restarts.
+
+### Failure isolation
+
+The controller must never import or initialize Faster-Whisper, CTranslate2, CUDA, or TheRock solely to create diagnostics.
+
+Diagnostic failures must not prevent application startup or turn a successfully started runtime into a failed lifecycle state.
+
+### Privacy
+
+Hardware/runtime diagnostic snapshots contain no:
+
+```text
+audio
+transcript text
+model input
+model output
+conversation content
+database rows
+```
+
+Transcript database inclusion remains explicit and optional.

@@ -670,3 +670,183 @@ real packaged controller creates a support bundle without starting transcription
 A configuration/distribution mismatch is a valid acceptance case because
 artifact identity and mutable runtime configuration are intentionally
 independent.
+
+
+## Runtime Hardware and Transcription Diagnostics
+
+ADR-053 diagnostics are tested at multiple boundaries.
+
+### Hardware observer tests
+
+Tests cover:
+
+```text
+zero adapters
+single adapter
+multiple adapters
+deterministic adapter ordering
+driver and PNP identifiers
+PowerShell/CIM command failure
+timeout
+malformed JSON
+diagnostic-only failure behavior
+```
+
+The Windows graphics observer must never make application startup depend on successful hardware diagnostics.
+
+### CTranslate2 observer tests
+
+Tests cover:
+
+```text
+CPU capability observation
+accelerator capability observation
+CUDA device count
+supported compute types
+deterministic compute-type ordering
+import/query failure degradation
+explicit handling of device=auto without guessing
+serialization
+```
+
+The observer is tested behind an injected CTranslate2 API boundary so unit tests do not require real GPU initialization.
+
+### Controller/runtime IPC tests
+
+Tests verify that:
+
+```text
+hardware diagnostic events
+```
+
+and:
+
+```text
+transcription-runtime diagnostic events
+```
+
+cross the existing spawned-process status queue.
+
+Diagnostic events update diagnostic state only and do not independently change runtime lifecycle state.
+
+A fresh Start clears the previous runtime's observations.
+
+Normal Stop retains the latest observations so they remain available for post-run support-bundle creation.
+
+### Support-bundle tests
+
+Tests verify serialization of:
+
+```text
+distribution
+configuration
+hardware
+transcription_runtime
+packages
+```
+
+and preserve the distinction between:
+
+```text
+NotObserved
+```
+
+and:
+
+```text
+actual observation failure
+```
+
+The support collector receives runtime diagnostics through dependency injection rather than depending directly on `RuntimeProcessHost`.
+
+### Real AMD/TheRock acceptance
+
+Windows runtime acceptance was completed using:
+
+```text
+AMD Radeon RX 6800M
+driver 32.0.21045.5002
+
+AMD Radeon(TM) Graphics
+driver 31.0.21925.1001
+```
+
+with:
+
+```text
+runtime = therock
+device = cuda
+compute_type = float16
+```
+
+CTranslate2 reported:
+
+```text
+cuda_device_count = 1
+```
+
+with:
+
+```text
+bfloat16
+float16
+float32
+int8
+int8_bfloat16
+int8_float16
+int8_float32
+```
+
+supported.
+
+The acceptance sequence:
+
+```text
+Start
+    ↓
+Running
+    ↓
+Stop
+    ↓
+Stopped
+    ↓
+Start
+    ↓
+Running
+    ↓
+Stop
+    ↓
+Stopped
+```
+
+successfully reproduced both hardware and transcription-runtime diagnostics across two fresh spawned runtime processes.
+
+A real support bundle created after Stop preserved both observations in `system-info.json`.
+
+The development metadata hardening from ADR-052 was validated in the same TheRock environment:
+
+```text
+distribution.available = true
+distribution.profile = development
+application_version = 0.1.0
+```
+
+without requiring `audio-transcription-service` to be installed as Python package metadata.
+
+### Quality gate at milestone close
+
+```text
+pytest:
+624 passed
+
+mypy:
+clean
+
+ruff format:
+clean
+
+ruff check:
+clean
+```
+
+The two existing Python 3.14 `torch.jit.load` deprecation warnings remain known and unrelated.

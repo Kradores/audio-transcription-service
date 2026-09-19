@@ -676,3 +676,94 @@ transcription runtime merely to identify the installed distribution.
 This allows a support bundle to remain useful even when the transcription
 runtime cannot start.
 
+
+## Support Diagnostics Across the Controller/Runtime Boundary
+
+Support diagnostics intentionally combine multiple independent sources of truth:
+
+```text
+Distribution metadata
+    immutable build/source facts
+
+Configuration
+    requested mutable runtime settings
+
+Machine observation
+    Windows-observed graphics adapters and drivers
+
+Transcription-runtime observation
+    capabilities of the initialized CTranslate2 runtime
+```
+
+These must not be inferred from one another.
+
+The controller remains isolated from native transcription-runtime initialization.
+
+Runtime observations therefore originate inside the spawned transcription process and cross the existing ADR-050 IPC boundary as typed diagnostic events:
+
+```text
+Windows Controller
+        │
+        ▼
+RuntimeProcessHost
+        │
+        ├── lifecycle snapshot
+        │
+        └── diagnostics snapshot
+                │
+                ├── graphics adapters
+                └── transcription runtime
+
+
+Spawned Runtime Process
+        │
+        ├── Win32_VideoController observation
+        │       ↓
+        │   diagnostic event
+        │
+        └── Application.start()
+                ↓
+           Faster-Whisper
+                ↓
+            CTranslate2
+                ↓
+        runtime capability observation
+                ↓
+           diagnostic event
+```
+
+Graphics hardware is observed before application startup so useful machine information can remain available even if later runtime initialization fails.
+
+CTranslate2 capability observation occurs only after successful application startup and uses the exact loaded application settings.
+
+Diagnostic failures do not change runtime lifecycle state.
+
+`RuntimeProcessHost` retains the latest diagnostic snapshot after normal Stop so the user can:
+
+```text
+Start
+    ↓
+run conversation
+    ↓
+Stop
+    ↓
+Create Support Bundle
+```
+
+A fresh Start clears observations from the previous runtime session.
+
+The initial implementation does not persist runtime observations across controller restarts.
+
+The support-bundle collector receives the current diagnostic snapshot through dependency injection and does not depend directly on process-management implementation details.
+
+`system-info.json` therefore separates:
+
+```text
+distribution
+configuration
+hardware
+transcription_runtime
+packages
+```
+
+where `packages` remains best-effort environment metadata rather than authoritative distribution identity.

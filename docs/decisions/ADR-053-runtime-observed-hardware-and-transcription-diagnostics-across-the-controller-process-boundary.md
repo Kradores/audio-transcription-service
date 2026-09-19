@@ -6,113 +6,156 @@ Accepted
 
 ## Date
 
-2026-09-18
+2026-09-19
 
 ## Context
 
-ADR-049 introduced the Windows end-user distribution and support-bundle workflow.
+ADR-052 introduced deterministic distribution metadata for support diagnostics.
 
-ADR-050 separated the interactive controller from the transcription runtime using a fresh child process and lightweight local lifecycle IPC.
-
-ADR-051 introduced independent CPU and NVIDIA Windows distributions and retained the existing AMD/TheRock runtime architecture.
-
-ADR-052 introduced deterministic distribution metadata so support diagnostics can reliably describe the built artifact without relying on mutable configuration or Python package discovery inside PyInstaller.
-
-ADR-052 intentionally separated deterministic artifact metadata from runtime-observed information.
-
-The support bundle can now reliably answer:
+That metadata answers questions such as:
 
 ```text
-what application artifact was built?
-what dependency versions were packaged?
-what accelerator libraries were packaged?
-what configuration is currently selected?
+which distribution profile was built?
+which application version is this?
+which Faster-Whisper/CTranslate2 versions were packaged?
+which NVIDIA runtime components were bundled?
 ```
 
-It cannot yet reliably answer:
+Those are build/distribution facts.
+
+They do not answer separate runtime questions such as:
 
 ```text
-what graphics hardware does this machine expose?
-what graphics driver is installed?
-did the configured transcription backend initialize successfully?
-how many accelerator devices can CTranslate2 see?
-what compute types does CTranslate2 report on this machine?
+which graphics adapters does Windows currently see?
+which driver versions are installed?
+did the configured transcription runtime actually initialize?
+how many accelerator devices can CTranslate2 currently see?
+which compute types does the initialized CTranslate2 runtime support?
 ```
 
-These facts are machine/runtime observations rather than build facts.
-
-The controller must remain isolated from transcription-native dependencies. Support-bundle creation must not cause the controller to import or initialize:
+These distinctions matter because the following states are not equivalent:
 
 ```text
-Faster-Whisper
-CTranslate2
-CUDA
-TheRock / HIP
-ROCm
+NVIDIA distribution installed
 ```
 
-because doing so would weaken the runtime failure isolation established by ADR-050 and ADR-052.
+```text
+NVIDIA GPU visible to Windows
+```
+
+```text
+CTranslate2 successfully initialized CUDA
+```
+
+Likewise, the AMD/TheRock runtime uses CTranslate2's CUDA-facing device APIs even though the physical accelerator is AMD.
+
+Configuration alone is therefore not sufficient to describe runtime capability.
+
+ADR-050 also established an explicit process boundary:
+
+```text
+Windows Controller
+        ↓
+spawned runtime process
+        ↓
+Application / Faster-Whisper / native runtime
+```
+
+The controller must remain isolated from native transcription-runtime initialization.
+
+Importing or initializing CTranslate2, CUDA, TheRock, Faster-Whisper, or similar native runtime state solely to create a support bundle would violate that boundary and could make diagnostics themselves capable of causing startup or native-runtime failures.
+
+We therefore need runtime-observed diagnostics while preserving process isolation.
+
+---
 
 ## Decision
 
-Runtime-observed diagnostics will be collected inside the spawned transcription-runtime process and communicated to the controller through the existing local runtime status channel.
+### 1. Distribution metadata, machine observation, and transcription-runtime observation are separate concepts
 
-The controller will store immutable snapshots of the most recent observations and expose them to support-bundle collection.
-
-No network API, external service, shared global state, or direct controller access to transcription objects will be introduced.
-
-### Machine and transcription observations remain separate
-
-Runtime diagnostics will distinguish:
+Support diagnostics distinguish three independent sources of truth.
 
 ```text
-machine observation
-    → characteristics of the Windows machine
+distribution
+    immutable build/source identity
 
-transcription-runtime observation
-    → characteristics of the initialized ML runtime
+hardware
+    operating-system-observed machine state
+
+transcription_runtime
+    capabilities observed from the initialized transcription runtime
 ```
 
-Machine observation will initially include Windows graphics adapters.
-
-Conceptually:
+Mutable configuration remains separate:
 
 ```text
-graphics adapters
-    name
-    driver version
-    PNP device ID
+configuration
+    what the user requested
 ```
 
-Transcription-runtime observation will initially include:
+No one layer is inferred from another.
+
+For example:
 
 ```text
-configured runtime
-configured device
-configured compute type
-successful runtime/application startup
-CTranslate2 visible CUDA device count
-CTranslate2 supported compute types
+distribution.profile = amd
 ```
 
-The two observations must not be conflated.
-
-For example, a machine may contain an NVIDIA GPU while the application is intentionally running with:
+does not imply:
 
 ```text
-runtime = default
-device = cpu
+hardware contains AMD GPU
 ```
 
-That state is valid and must remain observable.
+and:
 
-### Windows graphics information will use OS-level inventory
+```text
+configuration.whisper.device = cuda
+```
 
-The initial Windows implementation will use `Win32_VideoController` data.
+does not imply:
 
-It will report all discovered graphics adapters rather than trying to guess which adapter CTranslate2 selected.
+```text
+CTranslate2 successfully initialized an accelerator
+```
 
-The initial fields will be:
+---
+
+### 2. Runtime observations are collected inside the spawned runtime process
+
+The controller process must not import or initialize native ML/GPU runtimes solely for diagnostics.
+
+Runtime observation therefore follows the existing ADR-050 process boundary:
+
+```text
+runtime child
+    ↓
+collect observation
+    ↓
+typed runtime event
+    ↓
+status queue
+    ↓
+RuntimeProcessHost
+    ↓
+diagnostic snapshot
+```
+
+The controller receives plain typed diagnostic data only.
+
+---
+
+### 3. Windows graphics inventory uses the operating-system boundary
+
+Graphics adapters are observed through Windows:
+
+```text
+Win32_VideoController
+```
+
+using PowerShell/CIM.
+
+The initial observation records every returned adapter with:
 
 ```text
 name
@@ -120,258 +163,490 @@ driver_version
 pnp_device_id
 ```
 
-No NVIDIA-only dependency will be introduced merely to discover graphics hardware.
+The implementation does not depend on NVIDIA-, AMD-, or Intel-specific tooling.
 
-This keeps the machine observation usable for:
+The result is represented as an application-owned typed observation.
 
-```text
-CPU systems
-NVIDIA systems
-AMD systems
-hybrid laptops
-```
+A machine with multiple adapters retains all adapters rather than choosing or inferring a preferred GPU.
 
-### Machine observation occurs in the runtime child
+---
 
-The runtime child will perform the Windows graphics-adapter query before application startup.
+### 4. Hardware observation occurs before application startup
 
-It will publish the result using a small diagnostic runtime-process event.
+The spawned runtime process performs the Windows graphics observation before the transcription application starts.
 
 Conceptually:
 
 ```text
-RuntimeEnvironmentEvent
-    ↓
-RuntimeProcessHost
-    ↓
-latest environment observation
+spawn runtime child
+        ↓
+observe Windows graphics adapters
+        ↓
+publish hardware diagnostic event
+        ↓
+initialize application
 ```
 
-Machine-observation failure must not prevent application startup.
+This allows hardware information to remain available even when later application or transcription-runtime initialization fails.
 
-Failures will produce structured unavailable/error information.
+Hardware-observation failure is diagnostic only and must not prevent normal application startup.
 
-### Transcription-runtime observation occurs after successful startup
+Observation failures are represented explicitly using:
 
-CTranslate2 runtime observation will only happen after the application has successfully completed startup.
+```text
+available = false
+error_type
+error
+```
 
-At that point the configured runtime initializer and model construction have already succeeded.
+rather than raising through the runtime lifecycle.
 
-The observer may dynamically access the already initialized CTranslate2 runtime.
+---
 
-The initial CTranslate2 observations will use:
+### 5. Transcription-runtime observation occurs only after successful application startup
+
+CTranslate2 capabilities are observed only after the configured application has successfully initialized.
+
+The exact loaded `Settings` instance from the successfully started application is used.
+
+The diagnostic layer does not reload `config.yaml` independently.
+
+Conceptually:
+
+```text
+Application.start()
+        ↓
+successful runtime initialization
+        ↓
+RuntimeStartedEvent
+        ↓
+observe CTranslate2 capabilities
+        ↓
+RuntimeTranscriptionObservedEvent
+```
+
+Diagnostics therefore inspect the runtime that actually initialized rather than creating a second runtime.
+
+---
+
+### 6. Runtime-start notification is not delayed by diagnostics
+
+Once application startup succeeds, the runtime publishes:
+
+```text
+RuntimeStartedEvent
+```
+
+before querying the optional CTranslate2 diagnostic information.
+
+Therefore:
+
+```text
+diagnostic query failure
+```
+
+must never become:
+
+```text
+application startup failure
+```
+
+The lifecycle and diagnostics event streams remain semantically separate.
+
+---
+
+### 7. CTranslate2 observation is vendor-neutral
+
+For explicit CPU configuration:
+
+```text
+device = cpu
+```
+
+the observer queries CTranslate2-supported CPU compute types.
+
+For accelerator configuration:
+
+```text
+device = cuda
+```
+
+the observer queries:
 
 ```text
 get_cuda_device_count()
-get_supported_compute_types()
+get_supported_compute_types("cuda", ...)
 ```
 
-GPU-specific queries will only be performed where relevant to the configured device.
+The term `cuda` in this diagnostic contract refers to the CTranslate2 device API.
 
-### Runtime observations are diagnostic only
+It must not be interpreted as proof that the physical GPU vendor is NVIDIA.
 
-Observation failures must never change functional runtime behavior.
+This is required because the validated ADR-044 AMD/TheRock runtime exposes the AMD accelerator through the same CTranslate2 CUDA-facing API.
 
-A failure to discover:
+Physical hardware identity comes from the separate Windows hardware observation.
+
+---
+
+### 8. `auto` is not guessed
+
+If the configured transcription device is:
 
 ```text
-graphics adapters
-driver version
-CTranslate2 capabilities
+auto
 ```
 
-must not:
+the diagnostic observer does not guess which backend CTranslate2 selected.
+
+Capability observation requiring an explicit CTranslate2 device is reported as unavailable rather than inferring CPU or accelerator state.
+
+---
+
+### 9. Runtime diagnostic snapshots belong to the controller session
+
+`RuntimeProcessHost` retains the latest:
 
 ```text
-fail application startup
-stop transcription
-change runtime selection
-cause CPU fallback
-change device selection
+graphics_adapters
+transcription_runtime
 ```
 
-Diagnostic failures will be recorded as unavailable/error information.
+observations.
 
-### Runtime observations cross the existing IPC boundary
+A fresh Start clears observations from the previous runtime session.
 
-The existing multiprocessing status queue will remain the communication mechanism.
+Normal Stop retains observations from the runtime that just stopped.
 
-The runtime-process event contract will be extended with small strongly typed diagnostic values.
+This allows the expected support workflow:
 
-No transcript content, captured audio, models, application objects, or large payloads will cross this channel.
+```text
+Start
+    ↓
+run conversation
+    ↓
+Stop
+    ↓
+Create Support Bundle
+```
 
-The channel remains strictly operational.
+to include the runtime that was actually used.
 
-### RuntimeProcessHost owns the latest observation snapshot
+The first implementation does not persist these snapshots across controller process restarts.
 
-`RuntimeProcessHost` will retain the latest machine and transcription-runtime observations.
+---
 
-Starting a new runtime process clears previous runtime observations before the new attempt begins.
+### 10. Support-bundle collection consumes snapshots through dependency injection
 
-This prevents diagnostics from a previous runtime session from being mistaken for observations from the current attempt.
+The support-bundle collector does not depend directly on `RuntimeProcessHost`.
 
-After a successfully started runtime stops normally, its most recent observations may remain available while the same controller remains open so a support bundle can be created after Stop.
-
-No persistent runtime-observation cache will be introduced initially.
-
-If the controller itself is restarted, old runtime observations are discarded.
-
-Persistent diagnostic snapshots may be considered later if real support experience demonstrates a need.
-
-### Support bundles consume snapshots through dependency injection
-
-The support-bundle collector will not know how observations are produced.
-
-It will receive a small provider/callable capable of returning the controller's current runtime-process diagnostic snapshot.
-
-Conceptually:
+The controller injects a snapshot provider:
 
 ```text
 RuntimeProcessHost
         ↓
-snapshot provider
+diagnostics snapshot provider
         ↓
 DefaultSupportInfoCollector
-        ↓
-system-info.json
 ```
 
-This keeps support diagnostics testable and independent from multiprocessing implementation details.
+The collector reads one snapshot per collection operation so related diagnostic sections represent the same controller state.
 
-### Support information will preserve source semantics
+---
 
-The resulting support bundle will continue to distinguish:
+### 11. `system-info.json` keeps diagnostic sources visibly separate
+
+Support bundles expose:
 
 ```text
 distribution
-    immutable build facts
+configuration
+hardware
+transcription_runtime
+packages
+```
+
+Their meanings are:
+
+```text
+distribution
+    deterministic application/build identity
 
 configuration
-    mutable requested behavior
+    mutable configured settings
 
 hardware
-    machine-observed facts
+    operating-system-observed graphics hardware
 
 transcription_runtime
-    runtime-observed facts
+    capabilities reported by the initialized ML runtime
 
 packages
-    best-effort Python metadata discovery
+    legacy/best-effort Python environment discovery
 ```
 
-No source will silently override another.
-
-### AMD compatibility is a design requirement
-
-The runtime-observation contract must not assume that `"cuda"` means NVIDIA.
-
-The existing TheRock CTranslate2 backend also exposes its accelerator through CTranslate2's CUDA-facing APIs.
-
-Therefore the CTranslate2 diagnostic abstraction will remain backend-neutral.
-
-Future AMD gfx1031 packaging should be able to reuse the same runtime observation contract while adding AMD-specific information only where necessary.
-
-### No persistence initially
-
-Runtime observations will remain controller-session state.
-
-We will not introduce:
+A missing runtime observation is represented distinctly as:
 
 ```text
-runtime-observation.json
-diagnostic database tables
-registry persistence
+error_type = NotObserved
 ```
 
-until there is evidence that cross-controller-session persistence is useful.
+This is different from a failed observation such as a PowerShell, import, or native-runtime query failure.
 
-This avoids stale diagnostic data and keeps the first implementation small.
+---
 
-## Failure semantics
+### 12. Diagnostics contain no transcription content
 
-Machine observation failure produces:
-
-```text
-hardware.graphics_adapters.available = false
-```
-
-plus a bounded diagnostic error.
-
-Application startup continues.
-
-CTranslate2 observation failure after successful application startup produces:
+Runtime hardware/capability snapshots must not include:
 
 ```text
-transcription_runtime.available = false
-```
-
-plus a bounded diagnostic error.
-
-The runtime still reports `RUNNING`.
-
-Actual transcription-runtime initialization failure remains an application startup failure and continues to produce the existing:
-
-```text
-STARTING → FAILED
-```
-
-controller transition.
-
-Diagnostics must not hide or reinterpret that failure.
-
-## Privacy
-
-Runtime diagnostic events must not contain:
-
-```text
+audio
 transcript text
-captured audio
 model input
 model output
-database contents
-user documents
+database rows
+conversation content
 ```
 
-Hardware names, driver versions, runtime versions, device counts, process identifiers, and compute capabilities are acceptable operational diagnostic information.
+They contain only environment, hardware, configuration, lifecycle, and runtime capability information.
 
-## Testing
+Transcript database inclusion remains an explicit support-bundle choice established by the existing support-bundle architecture.
 
-Focused tests should prove the Windows graphics observer parses zero, one, and multiple adapters; malformed/failed OS queries degrade gracefully; CTranslate2 observation handles CPU and accelerator devices; supported compute types are sorted deterministically; diagnostic failure does not fail application startup; multiprocessing transports observations correctly; `RuntimeProcessHost` clears observations on a fresh Start; observations remain available after normal Stop; failed startup never reuses an earlier runtime observation; and support bundles serialize the observations without loading ML dependencies in the controller.
+---
 
-Real Windows acceptance should validate both CPU and NVIDIA packaged applications.
+## Resulting Architecture
 
-NVIDIA acceptance should confirm a real RTX GPU name and driver version, CTranslate2 GPU count, and `float16` support.
+```text
+                    Windows Controller
+                           │
+                           │ lifecycle + diagnostics IPC
+                           ▼
+                 RuntimeProcessHost
+                           │
+             ┌─────────────┴─────────────┐
+             │                           │
+             ▼                           ▼
+        lifecycle state          diagnostic snapshot
+                                      │
+                                      ├── graphics adapters
+                                      └── transcription runtime
+                                             │
+                                             ▼
+                                      Support Bundle
+                                             │
+                                             ▼
+                                      system-info.json
 
-AMD gfx1031 acceptance will be added when the AMD packaged build/installer milestone is implemented.
+
+                    Spawned Runtime Child
+                           │
+                           ▼
+                Win32_VideoController
+                           │
+                           ▼
+                  hardware observation
+                           │
+                           ▼
+                  Application.start()
+                           │
+                           ▼
+                configured native runtime
+                           │
+                           ▼
+                    Faster-Whisper
+                           │
+                           ▼
+                     CTranslate2
+                           │
+                           ▼
+            transcription-runtime observation
+```
+
+---
+
+## Failure Semantics
+
+Diagnostics are deliberately best-effort.
+
+The following must not fail application startup:
+
+```text
+PowerShell unavailable
+Win32_VideoController query failure
+malformed hardware output
+CTranslate2 capability query failure
+diagnostic serialization failure at the observer boundary
+```
+
+Where possible, diagnostic failures are converted into typed unavailable observations containing:
+
+```text
+available = false
+error_type
+error
+```
+
+Application lifecycle failures remain represented separately through the normal runtime failure contract.
+
+---
+
+## Validation
+
+### Unit and process-boundary validation
+
+Tests cover:
+
+- typed hardware observation;
+- Windows graphics query parsing;
+- diagnostic failure degradation;
+- typed CTranslate2 capability observation;
+- CPU and accelerator capability queries;
+- `auto` without backend guessing;
+- IPC transport of hardware observations;
+- IPC transport of transcription-runtime observations;
+- diagnostic events not changing lifecycle state;
+- fresh Start clearing stale runtime observations;
+- normal Stop preserving the latest observations;
+- diagnostics remaining independent from application startup success;
+- support-bundle serialization;
+- distinction between `NotObserved` and actual observation failure.
+
+### Real AMD/TheRock acceptance
+
+The implementation was validated on Windows 11 with:
+
+```text
+AMD Radeon RX 6800M
+driver: 32.0.21045.5002
+
+AMD Radeon(TM) Graphics
+driver: 31.0.21925.1001
+```
+
+The configured transcription runtime was:
+
+```text
+runtime: therock
+device: cuda
+compute_type: float16
+```
+
+After successful application startup, CTranslate2 reported:
+
+```text
+cuda_device_count = 1
+
+supported_compute_types:
+    bfloat16
+    float16
+    float32
+    int8
+    int8_bfloat16
+    int8_float16
+    int8_float32
+```
+
+A Start → Stop → Start → Stop runtime test reproduced the same hardware and transcription-runtime observations in two fresh spawned processes.
+
+Both diagnostic snapshots remained available after normal Stop.
+
+A real support bundle created after Stop contained:
+
+```text
+distribution
+configuration
+hardware
+transcription_runtime
+packages
+```
+
+with the Windows hardware observation and the initialized TheRock/CTranslate2 capability observation preserved in `system-info.json`.
+
+### Final quality gate
+
+```text
+ruff:
+clean
+
+mypy:
+clean
+
+pytest:
+624 passed
+```
+
+The two existing Python 3.14 `torch.jit.load` deprecation warnings remain known and unrelated.
+
+---
 
 ## Consequences
 
-The positive consequence is much stronger remote diagnosability without breaking controller/runtime isolation. The same high-level diagnostic contract can serve CPU, NVIDIA, and future AMD packages.
+### Positive
 
-The cost is a slightly richer controller/runtime IPC contract and additional session state in `RuntimeProcessHost`.
+- Support bundles distinguish packaged identity, requested configuration, OS-visible hardware, and actual ML-runtime capability.
+- The controller remains isolated from native ML/GPU initialization.
+- Hardware information can survive later runtime startup failure.
+- Runtime capabilities describe the runtime that actually initialized.
+- The same model supports CPU, NVIDIA, and AMD/TheRock without vendor-specific controller dependencies.
+- Support bundles created after Stop retain useful runtime diagnostics.
+- Diagnostic failures do not affect application availability.
+- Components remain strongly typed and independently testable.
 
-Those costs are preferable to loading native ML dependencies in the controller or inferring runtime behavior from logs/configuration.
+### Negative
 
-## Alternatives considered
+- Additional typed diagnostic events cross the controller/runtime process boundary.
+- The controller retains session-scoped diagnostic state.
+- PowerShell/CIM is a Windows-specific machine-observation dependency.
+- Runtime diagnostic state is currently lost when the controller process itself exits.
+- CTranslate2's `cuda` terminology cannot by itself identify GPU vendor and must be interpreted together with the separate hardware observation.
 
-Query CTranslate2 directly from the controller was rejected because it would weaken native-runtime failure isolation.
+These costs are acceptable because they materially improve remote diagnosability while preserving the process isolation established by ADR-050.
 
-Using NVIDIA NVML as the sole hardware inventory was rejected because it would make generic machine diagnostics vendor-specific and would not serve AMD systems.
+---
 
-Parsing application logs was rejected because structured state should not be reconstructed from human-oriented log messages.
+## Alternatives Considered
 
-Persisting runtime observations immediately to disk was deferred because no current requirement justifies stale-state handling and lifecycle complexity.
+### Infer runtime capability from distribution metadata
 
-Inferring GPU/runtime state from the distribution profile was rejected because build identity does not prove hardware availability or successful runtime initialization.
+Rejected.
 
-## Documentation impact
+Distribution metadata describes what was built, not what the current machine or initialized runtime can use.
 
-`architecture.md` should show runtime-observed diagnostics crossing the child-process boundary.
+### Infer runtime capability from configuration
 
-`observability.md` should define the semantics of `hardware` and `transcription_runtime`.
+Rejected.
 
-`testing.md` should document the focused IPC/observer tests and packaged acceptance.
+Configuration describes requested behavior, not successful initialization or hardware visibility.
 
-`changelog.md` should record the feature once implemented.
+### Import CTranslate2 directly in the controller
 
-`deployment.md` only needs a small note if packaged acceptance exposes distribution-specific behavior.
+Rejected.
+
+This would allow support diagnostics to initialize or fail native runtime state in the controller process and violate ADR-050 isolation.
+
+### Use vendor-specific NVIDIA/AMD hardware tools
+
+Rejected for the initial machine inventory.
+
+`Win32_VideoController` provides a simple vendor-neutral Windows boundary sufficient for GPU name and driver information.
+
+Vendor-specific diagnostics can be added later only if a concrete support requirement requires them.
+
+### Persist runtime observations to disk
+
+Deferred.
+
+Keeping the latest observation in the controller session is sufficient for the current Start → Stop → Create Support Bundle workflow.
+
+Persistence can be introduced later if support bundles must retain runtime observations across controller restarts.
+
+---
+
+## Related Decisions
+
+- ADR-016 — Application Composition Root
+- ADR-017 — Logging Strategy
+- ADR-044 — AMD GPU Transcription Runtime and CPU Fallback Strategy
+- ADR-049 — Windows End-User Packaging, Runtime Layout and Interactive Control Host
+- ADR-050 — Interactive Controller and Transcription Runtime Process Boundary
+- ADR-051 — Windows NVIDIA Faster-Whisper Runtime Distribution
+- ADR-052 — Deterministic Distribution Metadata for Support Diagnostics
