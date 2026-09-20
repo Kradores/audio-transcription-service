@@ -124,6 +124,159 @@ Configured relative filesystem paths are resolved against the runtime root, not 
 
 The configuration loader receives `RuntimePaths` explicitly and does not discover the runtime root itself.
 
+## Windows distribution builds
+
+Windows end-user distributions are built as PyInstaller `onedir` applications
+and optionally wrapped in an Inno Setup installer.
+
+CPU, NVIDIA, and AMD are separate distribution profiles. They share the same
+mutable runtime root:
+
+```text
+%LOCALAPPDATA%\AudioTranscriptionService
+```
+
+with configuration, transcripts, logs, diagnostics, and support bundles kept
+outside the installed application directory.
+
+### CPU
+
+Build the packaged CPU application:
+
+```powershell
+.\scripts\windows\build.ps1
+```
+
+Build the CPU installer:
+
+```powershell
+.\scripts\windows\build-installer.ps1
+```
+
+### NVIDIA
+
+Build the packaged NVIDIA application:
+
+```powershell
+.\scripts\windows\build-nvidia.ps1
+```
+
+Build the NVIDIA installer:
+
+```powershell
+.\scripts\windows\build-nvidia-installer.ps1
+```
+
+The NVIDIA build stages its private CUDA runtime automatically from the pinned
+runtime definition used by the build scripts.
+
+### AMD gfx1031
+
+The currently validated AMD distribution targets `gfx1031`, including the
+AMD Radeon RX 6800M-class runtime path.
+
+AMD development/runtime preparation has one authoritative entry point:
+
+```powershell
+.\scripts\amd\prepare.ps1
+```
+
+Developers should use `prepare.ps1` rather than manually deciding which
+lower-level scripts under `scripts\amd` need to run.
+
+The AMD runtime uses the dedicated:
+
+```text
+.venv-therock
+```
+
+environment containing the validated TheRock/ROCm packages and custom
+HIP-enabled CTranslate2 build.
+
+Build the packaged AMD application with:
+
+```powershell
+.\scripts\windows\build-amd.ps1
+```
+
+This build:
+
+- stages the reduced AMD runtime required for inference;
+- generates deterministic `profile=amd` distribution metadata;
+- runs PyInstaller using `.venv-therock`;
+- produces:
+
+```text
+dist\amd\AudioTranscriptionService\
+```
+
+Build the AMD installer with:
+
+```powershell
+.\scripts\windows\build-amd-installer.ps1
+```
+
+The installer is produced under:
+
+```text
+dist\installer\amd\
+```
+
+The currently validated AMD artifact is intentionally specific to `gfx1031`.
+Do not assume other AMD GPU architectures are supported without separate
+runtime and packaged acceptance.
+
+### Distribution metadata
+
+Packaged Windows builds generate an immutable:
+
+```text
+distribution-metadata.json
+```
+
+during the build.
+
+The metadata records artifact facts such as:
+
+```text
+profile
+application version
+packaged Python dependency versions
+runtime kind
+runtime component versions
+```
+
+Distribution profile must come from the build profile. It must not be inferred
+from configuration, detected GPU hardware, environment variables, or
+CTranslate2 device terminology.
+
+CPU and NVIDIA builds use the normal project build environment.
+
+AMD metadata generation and PyInstaller packaging run through
+`.venv-therock` so the packaged artifact is built from the validated AMD
+CTranslate2/TheRock environment.
+
+### Inno Setup
+
+Installer builds require Inno Setup.
+
+The build scripts search for `ISCC.exe` automatically. If it cannot be found,
+set:
+
+```powershell
+$env:INNO_SETUP_COMPILER = "C:\path\to\ISCC.exe"
+```
+
+The installer removes application binaries on uninstall but intentionally
+preserves mutable runtime data under:
+
+```text
+%LOCALAPPDATA%\AudioTranscriptionService
+```
+
+This includes configuration, transcripts, logs, diagnostics, and support
+bundles.
+
 ## Implementation-driven development
 Instead of asking "How should we design this?", we'll ask:
 "Is this implementation the simplest one that satisfies our architecture?"

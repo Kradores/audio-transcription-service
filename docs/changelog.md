@@ -311,6 +311,10 @@ We have successfully completed:
   - Ruff formatting clean;
   - Ruff checks clean;
   - mypy clean.
+- Added a Windows AMD installer targeting validated gfx1031-class hardware.
+- Added packaged TheRock/CTranslate2 AMD GPU transcription support.
+- Added deterministic AMD distribution metadata and support diagnostics.
+- Preserved configuration, transcripts, logs, diagnostics, and support bundles across uninstall.
 
 **Known follow-up**
 

@@ -646,7 +646,7 @@ NVIDIA toolchain/runtime mismatch detection
 Windows entry-point composition
 ```
 
-Packaged CPU acceptance verifies:
+### Packaged CPU acceptance verifies:
 
 ```text
 CPU metadata is generated
@@ -657,7 +657,7 @@ real packaged controller creates a support bundle
 system-info.json reports distribution.available = true
 ```
 
-Packaged NVIDIA acceptance additionally verifies:
+### Packaged NVIDIA acceptance additionally verifies:
 
 ```text
 profile = nvidia
@@ -666,6 +666,27 @@ cuBLAS/cuDNN/NVRTC versions match pinned build inputs
 existing twelve-DLL runtime contract remains intact
 real packaged controller creates a support bundle without starting transcription
 ```
+
+### AMD packaged distribution acceptance
+
+Validated on AMD Radeon RX 6800M / gfx1031:
+
+- isolated staged TheRock runtime
+- frozen runtime smoke executable
+- full packaged controller/runtime process
+- system-audio and microphone capture
+- Faster-Whisper GPU inference
+- SQLite persistence
+- clean Stop
+- deterministic distribution metadata
+- runtime hardware/transcription diagnostics
+- installed application execution
+- uninstall preserving mutable data
+
+Independent clean-machine validation on a second compatible AMD system
+is deferred due to hardware availability.
+
+Do not describe that deferred test as passed.
 
 A configuration/distribution mismatch is a valid acceptance case because
 artifact identity and mutable runtime configuration are intentionally

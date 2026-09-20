@@ -364,3 +364,38 @@ The AMD integration is considered complete for the currently supported target.
 
 Further AMD GPU architectures require independent artifact and acceptance
 validation.
+
+
+## ✅ Completed milestone — Windows AMD gfx1031 packaged distribution
+
+The validated AMD/TheRock development runtime is now available as a
+deterministic Windows packaged distribution and installer.
+
+Validated target:
+
+- Windows x86_64
+- AMD Radeon RX 6800M
+- gfx1031
+- TheRock 10.1.0a20260829
+- custom HIP-enabled CTranslate2 4.8.1
+- Faster-Whisper 1.2.1
+- Intel OpenMP 2026.1
+
+Completed:
+
+- reduced AMD runtime staging
+- frozen PyInstaller runtime smoke test
+- deterministic `profile=amd` distribution metadata
+- full `dist\amd\AudioTranscriptionService` package
+- real packaged transcription acceptance
+- SQLite persistence
+- support-bundle diagnostics
+- AMD Inno Setup installer
+- installed application acceptance
+- uninstall with mutable user data preserved
+
+Independent clean-machine acceptance on a second supported AMD machine
+is deferred because suitable hardware is not currently available.
+
+This deferred validation is not considered passed and should be performed
+when compatible external hardware becomes available.

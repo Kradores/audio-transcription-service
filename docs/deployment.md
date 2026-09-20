@@ -157,7 +157,25 @@ The NVIDIA runtime must not modify machine-wide `PATH`, CUDA configuration, or o
 
 ### AMD
 
-AMD/TheRock remains a separate runtime and distribution path according to ADR-044.
+The Windows AMD distribution is:
+
+`dist\amd\AudioTranscriptionService\`
+
+The corresponding installer is built from the same shared Windows
+installer architecture used by CPU and NVIDIA.
+
+The currently supported AMD artifact targets `gfx1031`.
+
+Local packaged and installed acceptance has been completed on an
+AMD Radeon RX 6800M.
+
+Independent clean-machine acceptance on another compatible AMD system
+remains deferred.
+
+Uninstall removes application binaries but intentionally preserves the
+mutable runtime root under:
+
+`%LOCALAPPDATA%\AudioTranscriptionService\`
 
 ## Packaged distribution metadata
 
