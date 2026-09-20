@@ -7,7 +7,6 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
-
 DistributionFilter = Callable[[Path], bool]
 
 THEROCK_DISTRIBUTIONS = (
@@ -38,28 +37,21 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_expected_versions() -> dict[str, str]:
-    toolchain_path = (
-        Path(__file__).resolve().parent
-        / "toolchain.json"
-    )
+    toolchain_path = Path(__file__).resolve().parent / "toolchain.json"
 
     with toolchain_path.open(
         encoding="utf-8",
     ) as file:
         document = json.load(file)
 
-    return dict(
-        document["required"]["therock"]["packages"]
-    )
+    return dict(document["required"]["therock"]["packages"])
 
 
 def validate_versions(
     expected_versions: dict[str, str],
 ) -> None:
     for name in THEROCK_DISTRIBUTIONS:
-        actual = importlib.metadata.version(
-            name
-        )
+        actual = importlib.metadata.version(name)
 
         expected = expected_versions[name]
 
@@ -73,12 +65,7 @@ def validate_versions(
 
 
 def is_dist_info(path: Path) -> bool:
-    return (
-        len(path.parts) > 0
-        and path.parts[0].endswith(
-            ".dist-info"
-        )
-    )
+    return len(path.parts) > 0 and path.parts[0].endswith(".dist-info")
 
 
 def copy_distribution_files(
@@ -88,30 +75,18 @@ def copy_distribution_files(
     output: Path,
     include: DistributionFilter,
 ) -> int:
-    distribution = (
-        importlib.metadata.distribution(
-            distribution_name
-        )
-    )
+    distribution = importlib.metadata.distribution(distribution_name)
 
     copied = 0
 
     for item in distribution.files or []:
-        source = Path(
-            distribution.locate_file(
-                item
-            )
-        ).resolve()
+        source = Path(str(distribution.locate_file(item))).resolve()
 
         if not source.is_file():
             continue
 
         try:
-            relative = (
-                source.relative_to(
-                    site_packages
-                )
-            )
+            relative = source.relative_to(site_packages)
         except ValueError:
             # Ignore Scripts/, executables, etc.
             # The packaged runtime only stages
@@ -121,10 +96,7 @@ def copy_distribution_files(
         if not include(relative):
             continue
 
-        destination = (
-            output
-            / relative
-        )
+        destination = output / relative
 
         destination.parent.mkdir(
             parents=True,
@@ -144,10 +116,7 @@ def copy_distribution_files(
 def include_rocm(
     path: Path,
 ) -> bool:
-    return (
-        path.parts[0] == "rocm_sdk"
-        or is_dist_info(path)
-    )
+    return path.parts[0] == "rocm_sdk" or is_dist_info(path)
 
 
 def include_core(
@@ -202,20 +171,11 @@ def copy_minimal_devel_package_root(
     site_packages: Path,
     output: Path,
 ) -> None:
-    source_root = (
-        site_packages
-        / "_rocm_sdk_devel"
-    )
+    source_root = site_packages / "_rocm_sdk_devel"
 
-    destination_root = (
-        output
-        / "_rocm_sdk_devel"
-    )
+    destination_root = output / "_rocm_sdk_devel"
 
-    init_file = (
-        source_root
-        / "__init__.py"
-    )
+    init_file = source_root / "__init__.py"
 
     if init_file.is_file():
         destination_root.mkdir(
@@ -225,14 +185,10 @@ def copy_minimal_devel_package_root(
 
         shutil.copy2(
             init_file,
-            destination_root
-            / "__init__.py",
+            destination_root / "__init__.py",
         )
 
-    info_directory = (
-        source_root
-        / ".info"
-    )
+    info_directory = source_root / ".info"
 
     if info_directory.is_dir():
         shutil.copytree(
@@ -243,31 +199,18 @@ def copy_minimal_devel_package_root(
 
 
 def calculate_size(path: Path) -> int:
-    return sum(
-        item.stat().st_size
-        for item in path.rglob("*")
-        if item.is_file()
-    )
+    return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
 
 
 def main() -> None:
     args = parse_args()
 
-    source_venv = (
-        args.source_venv.resolve()
-    )
+    source_venv = args.source_venv.resolve()
 
-    site_packages = (
-        source_venv
-        / "Lib"
-        / "site-packages"
-    )
+    site_packages = source_venv / "Lib" / "site-packages"
 
     if not site_packages.is_dir():
-        raise RuntimeError(
-            "Source site-packages does not exist: "
-            f"{site_packages}"
-        )
+        raise RuntimeError(f"Source site-packages does not exist: {site_packages}")
 
     output = args.output.resolve()
 
@@ -279,9 +222,7 @@ def main() -> None:
         exist_ok=True,
     )
 
-    validate_versions(
-        load_expected_versions()
-    )
+    validate_versions(load_expected_versions())
 
     copy_distribution_files(
         distribution_name="rocm",
@@ -313,9 +254,7 @@ def main() -> None:
     # regardless of which ROCm tree they
     # were installed into.
     copy_distribution_files(
-        distribution_name=(
-            "rocm-sdk-device-gfx1031"
-        ),
+        distribution_name=("rocm-sdk-device-gfx1031"),
         site_packages=site_packages,
         output=output,
         include=include_all_site_package_files,

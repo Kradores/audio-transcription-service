@@ -59,43 +59,25 @@ def main() -> None:
     import rocm_sdk  # type: ignore[import-not-found]
 
     if args.expected_rocm_root is not None:
-        expected_root = (
-            args.expected_rocm_root.resolve()
-        )
+        expected_root = args.expected_rocm_root.resolve()
 
-        rocm_sdk_path = Path(
-            rocm_sdk.__file__
-        ).resolve()
+        rocm_sdk_path = Path(rocm_sdk.__file__).resolve()
 
-        if not rocm_sdk_path.is_relative_to(
-            expected_root
-        ):
+        if not rocm_sdk_path.is_relative_to(expected_root):
             raise RuntimeError(
-                "rocm_sdk was loaded outside "
-                "the expected staged runtime: "
-                f"{rocm_sdk_path}"
+                f"rocm_sdk was loaded outside the expected staged runtime: {rocm_sdk_path}"
             )
 
         for shortname in PRELOAD_LIBRARIES:
-            paths = rocm_sdk.find_libraries(
-                shortname
-            )
+            paths = rocm_sdk.find_libraries(shortname)
 
             if not paths:
-                raise RuntimeError(
-                    "ROCm runtime library "
-                    "could not be resolved: "
-                    f"{shortname}"
-                )
+                raise RuntimeError(f"ROCm runtime library could not be resolved: {shortname}")
 
             for path in paths:
-                resolved = Path(
-                    path
-                ).resolve()
+                resolved = Path(path).resolve()
 
-                if not resolved.is_relative_to(
-                    expected_root
-                ):
+                if not resolved.is_relative_to(expected_root):
                     raise RuntimeError(
                         "ROCm library resolved "
                         "outside staged runtime: "
@@ -104,8 +86,7 @@ def main() -> None:
                     )
 
         print(
-            "ROCm libraries resolved from "
-            f"staged runtime: {expected_root}",
+            f"ROCm libraries resolved from staged runtime: {expected_root}",
             flush=True,
         )
 
