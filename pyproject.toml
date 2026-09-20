@@ -72,6 +72,7 @@ explicit_package_bases = true
 exclude = [
     "^scripts/debug_.*\\.py$",
     "^dist/",
+    "^build/",
 ]
 
 
