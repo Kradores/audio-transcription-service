@@ -4,6 +4,22 @@ A local Windows speech-to-text application that transcribes both sides of a conv
 
 Audio is captured and processed locally, speech is detected with Silero VAD, transcribed with Faster-Whisper / CTranslate2, and persisted to SQLite. The Windows controller provides Start/Stop controls together with access to logs, configuration, transcript data, diagnostics, and support bundles.
 
+## Download
+
+Download the latest Windows installers from **[GitHub Releases](https://github.com/Kradores/audio-transcription-service/releases/latest)**.
+
+Choose the installer that matches the machine:
+
+| Profile | Installer | Use when |
+| --- | --- | --- |
+| CPU | `AudioTranscriptionService-Setup-<version>.exe` | Recommended if you are unsure which version to install. |
+| NVIDIA | `AudioTranscriptionService-Nvidia-Setup-<version>.exe` | The machine has a compatible NVIDIA GPU. The required CUDA runtime is packaged with the application. |
+| AMD | `AudioTranscriptionService-Amd-Setup-<version>.exe` | The machine has supported AMD gfx1031-class hardware. Currently validated on AMD Radeon RX 6800M. |
+
+The AMD distribution currently targets `gfx1031`; other AMD architectures are not assumed to be compatible. Independent clean-machine validation on a second compatible AMD computer is still deferred.
+
+Each release also includes `SHA256SUMS.txt` for installer integrity verification.
+
 ## Features
 
 - Captures Windows system audio through WASAPI loopback.
@@ -15,19 +31,11 @@ Audio is captured and processed locally, speech is detected with Silero VAD, tra
 - Stores completed transcripts in SQLite.
 - Provides persistent logs, runtime diagnostics, and privacy-aware support bundles.
 
-## Install on Windows
+## Install and use
 
 The current packaged distributions target Windows x86_64.
 
-Choose the installer that matches the machine:
-
-| Profile | Installer | Notes |
-| --- | --- | --- |
-| CPU | `AudioTranscriptionService-Setup-<version>.exe` | General Windows distribution. |
-| NVIDIA | `AudioTranscriptionService-Nvidia-Setup-<version>.exe` | Uses the packaged NVIDIA CUDA runtime. |
-| AMD | `AudioTranscriptionService-Amd-Setup-<version>.exe` | Currently validated for AMD gfx1031 / Radeon RX 6800M-class hardware. Other AMD architectures are not assumed to be compatible. |
-
-Run the installer and launch **Audio Transcription Service** from the Start Menu.
+After downloading the appropriate installer from GitHub Releases, run it and launch **Audio Transcription Service** from the Start Menu.
 
 Use **Start** to begin transcription and **Stop** to finish the current session gracefully.
 
@@ -49,7 +57,7 @@ Configuration, transcripts, logs, diagnostics, and support bundles are preserved
 The project uses Python 3.14 and `uv`.
 
 ```powershell
-git clone <repo>
+git clone https://github.com/Kradores/audio-transcription-service.git
 cd audio-transcription-service
 uv sync
 ```

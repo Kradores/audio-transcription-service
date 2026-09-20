@@ -108,6 +108,18 @@ Native AMD build preparation is performed ahead of runtime through
 The application must not compile CTranslate2 opportunistically during normal
 startup.
 
+## Public Windows releases
+
+GitHub Releases is the canonical public distribution channel for Windows installers:
+
+`https://github.com/Kradores/audio-transcription-service/releases`
+
+The stable user-facing link for the most recent published release is:
+
+`https://github.com/Kradores/audio-transcription-service/releases/latest`
+
+Each versioned release, such as `v0.1.0`, publishes the CPU, NVIDIA, and AMD installers together with `SHA256SUMS.txt`. Installer binaries are generated release artifacts and must not be committed to Git history; they are uploaded as GitHub Release assets associated with the corresponding version tag.
+
 ## Windows Distribution Profiles
 
 The Windows application is built as separate runtime-specific distributions.
