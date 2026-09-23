@@ -34,6 +34,10 @@ from app.core.config.models import (
 )
 from app.core.logging import configure_logging
 from app.core.runtime_paths import RuntimePaths
+from app.models.whisper import (
+    LocalWhisperModelResolver,
+    resolve_ready_whisper_model,
+)
 from app.services.conversation_pipeline import ConversationPipeline
 from app.services.speech_pipeline import SpeechPipeline
 from app.services.transcription_executor import TranscriptionExecutor, TranscriptionExecutorImpl
@@ -81,6 +85,11 @@ def create_application(
     settings = ConfigurationLoader(runtime_paths).load()
     configure_logging(settings.logging)
 
+    model_path = resolve_configured_whisper_model_path(
+        runtime_paths,
+        settings,
+    )
+
     timeline = MonotonicAudioTimeline()
 
     database_path = settings.database.path
@@ -90,6 +99,7 @@ def create_application(
     transcription_executor = create_transcription_executor(
         database=database,
         settings=settings,
+        model_path=model_path,
         nvidia_runtime_directory=(nvidia_runtime_directory),
     )
 
@@ -295,6 +305,7 @@ def create_faster_whisper_runtime_initializer(
 def create_whisper_model(
     settings: Settings,
     *,
+    model_path: Path,
     nvidia_runtime_directory: Path | None = None,
 ) -> WhisperModelProtocol:
     """Create the configured Faster-Whisper model."""
@@ -309,7 +320,7 @@ def create_whisper_model(
     )
 
     return factory.create(
-        model=settings.whisper.model.value,
+        model_path=model_path,
         device=settings.whisper.device.value,
         compute_type=settings.whisper.compute_type.value,
         worker_count=settings.transcription.worker_count,
@@ -378,6 +389,7 @@ def create_transcription_executor(
     *,
     database: sqlite3.Connection,
     settings: Settings,
+    model_path: Path,
     nvidia_runtime_directory: Path | None = None,
 ) -> TranscriptionExecutor:
     language_settings = settings.transcription.language
@@ -394,7 +406,8 @@ def create_transcription_executor(
 
     model = create_whisper_model(
         settings,
-        nvidia_runtime_directory=(nvidia_runtime_directory),
+        model_path=model_path,
+        nvidia_runtime_directory=nvidia_runtime_directory,
     )
 
     slow_inference_capture = SlowInferenceCapture(
@@ -454,3 +467,17 @@ def create_speech_pipeline(
         transcription_audio_preprocessor=transcription_audio_preprocessor,
         transcription_executor=transcription_executor,
     )
+
+
+def resolve_configured_whisper_model_path(
+    runtime_paths: RuntimePaths,
+    settings: Settings,
+) -> Path:
+    resolver = LocalWhisperModelResolver(
+        runtime_paths.models_directory,
+    )
+
+    return resolve_ready_whisper_model(
+        resolver,
+        settings.whisper.model,
+    ).path

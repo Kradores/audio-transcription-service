@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Callable
+from pathlib import Path
 from typing import Protocol, cast
 
 from app.transcription.faster_whisper_runtime import (
@@ -42,7 +43,7 @@ class FasterWhisperModelFactory:
     def create(
         self,
         *,
-        model: str,
+        model_path: Path,
         device: str,
         compute_type: str,
         worker_count: int,
@@ -52,7 +53,7 @@ class FasterWhisperModelFactory:
         model_constructor = self._model_loader()
 
         return model_constructor(
-            model,
+            str(model_path),
             device=device,
             compute_type=compute_type,
             num_workers=worker_count,

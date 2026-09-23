@@ -19,6 +19,7 @@ dependencies = [
     "silero-vad>=6.2.1,<7",
     "faster-whisper>=1.2.1",
     "pycaw>=20251023",
+    "huggingface-hub>=1.29.0,<2",
 ]
 
 [tool.uv.build-backend]

@@ -20,6 +20,7 @@ def test_development_runtime_paths_use_project_root(
     assert paths.data_directory == (tmp_path / "data").resolve()
     assert paths.logs_directory == (tmp_path / "logs").resolve()
     assert paths.diagnostics_directory == (tmp_path / "diagnostics").resolve()
+    assert paths.models_directory == (tmp_path / "models").resolve()
     assert paths.support_directory == (tmp_path / "support").resolve()
 
 
@@ -78,6 +79,7 @@ def test_installed_windows_runtime_paths_use_local_app_data(
     assert paths.data_directory == root / "data"
     assert paths.logs_directory == root / "logs"
     assert paths.diagnostics_directory == root / "diagnostics"
+    assert paths.models_directory == root / "models"
     assert paths.support_directory == root / "support"
 
 

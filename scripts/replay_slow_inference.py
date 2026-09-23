@@ -13,7 +13,7 @@ from typing import Protocol, cast
 import numpy as np
 from pydantic import BaseModel
 
-from app.composition import create_whisper_model
+from app.composition import create_whisper_model, resolve_configured_whisper_model_path
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
 from app.core.runtime_paths import create_development_runtime_paths
@@ -307,11 +307,18 @@ def main() -> None:
         args.capture_directory.resolve(),
     )
 
+    runtime_paths = create_development_runtime_paths(
+        config_path=args.config,
+    )
+
     settings = ConfigurationLoader(
-        create_development_runtime_paths(
-            config_path=args.config,
-        )
+        runtime_paths,
     ).load()
+
+    model_path = resolve_configured_whisper_model_path(
+        runtime_paths,
+        settings,
+    )
 
     language = resolve_language(
         args.language,
@@ -331,7 +338,7 @@ def main() -> None:
 
     model = cast(
         ReplayWhisperModel,
-        create_whisper_model(settings),
+        create_whisper_model(settings, model_path=model_path),
     )
 
     timings: list[ReplayTiming] = []

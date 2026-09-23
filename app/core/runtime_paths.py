@@ -16,6 +16,7 @@ class RuntimePaths:
     data_directory: Path
     logs_directory: Path
     diagnostics_directory: Path
+    models_directory: Path
     support_directory: Path
 
     def resolve(self, path: Path) -> Path:
@@ -84,5 +85,6 @@ def _create_runtime_paths(
         data_directory=root_directory / "data",
         logs_directory=root_directory / "logs",
         diagnostics_directory=root_directory / "diagnostics",
+        models_directory=root_directory / "models",
         support_directory=root_directory / "support",
     )

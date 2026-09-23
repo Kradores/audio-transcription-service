@@ -23,6 +23,9 @@ from app.services.speech_pipeline import SpeechPipeline
 from app.transcription.aggregation import TranscriptionSegmentAggregatorImpl
 from app.transcription.contracts import AudioSource
 from tests.integration.constants import INTEGRATION_CONFIGURATION_PATH
+from tests.integration.transcription.test_faster_whisper import (
+    resolve_configured_whisper_model_path,
+)
 
 FIXTURE_PATH = Path(__file__).parents[2] / "fixtures" / "audio" / "english_speech.wav"
 
@@ -79,11 +82,15 @@ def _read_wav(path: Path) -> AudioFrame:
 @pytest.mark.anyio
 async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None:
     # Arrange
-    settings = ConfigurationLoader(
-        create_development_runtime_paths(
-            config_path=INTEGRATION_CONFIGURATION_PATH,
-        )
-    ).load()
+    runtime_paths = create_development_runtime_paths(
+        config_path=INTEGRATION_CONFIGURATION_PATH,
+    )
+    settings = ConfigurationLoader(runtime_paths).load()
+
+    model_path = resolve_configured_whisper_model_path(
+        runtime_paths,
+        settings,
+    )
 
     frame = _read_wav(FIXTURE_PATH)
     capture = FixtureAudioCapture(frame)
@@ -114,6 +121,7 @@ async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None
     transcription_executor = create_transcription_executor(
         database=database,
         settings=settings,
+        model_path=model_path,
     )
 
     pipeline = SpeechPipeline(

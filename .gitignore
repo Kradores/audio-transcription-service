@@ -226,6 +226,9 @@ transcripts.db
 /diagnostics/*
 /support/*
 
+# Model Cache
+/models/*
+
 
 # Reproducible Windows application packaging configuration
 !packaging/windows/AudioTranscriptionService.spec

@@ -50,7 +50,7 @@ vad:
   min_silence_duration_ms: 300
 
 whisper:
-  model: small
+  model: medium
   runtime: default
   device: cpu
   compute_type: int8

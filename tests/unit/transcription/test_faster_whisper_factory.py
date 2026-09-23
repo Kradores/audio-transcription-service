@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -55,7 +56,7 @@ def test_factory_initializes_runtime_before_loading_model() -> None:
     )
 
     factory.create(
-        model="small",
+        model_path=Path("models") / "small",
         device="cuda",
         compute_type="float16",
         worker_count=1,
@@ -70,6 +71,7 @@ def test_factory_initializes_runtime_before_loading_model() -> None:
 
 def test_factory_passes_model_configuration_to_whisper_model() -> None:
     captured: dict[str, Any] = {}
+    model_path = Path("models") / "small"
 
     class Runtime:
         def initialize(self) -> None:
@@ -101,14 +103,14 @@ def test_factory_passes_model_configuration_to_whisper_model() -> None:
     )
 
     factory.create(
-        model="small",
+        model_path=model_path,
         device="cuda",
         compute_type="float16",
         worker_count=3,
     )
 
     assert captured == {
-        "model": "small",
+        "model": str(model_path),
         "device": "cuda",
         "compute_type": "float16",
         "num_workers": 3,
@@ -135,8 +137,9 @@ def test_factory_does_not_load_faster_whisper_during_construction() -> None:
     assert load_count == 0
 
 
-def test_factory_does_not_load_model_when_runtime_initialization_fails() -> None:
+def test_factory_does_not_load_model_when_runtime_initialization_fails(tmp_path: Path) -> None:
     load_count = 0
+    model_path = tmp_path / "models" / "small"
 
     class FailingRuntime:
         def initialize(self) -> None:
@@ -154,7 +157,7 @@ def test_factory_does_not_load_model_when_runtime_initialization_fails() -> None
 
     try:
         factory.create(
-            model="small",
+            model_path=model_path,
             device="cuda",
             compute_type="float16",
             worker_count=1,

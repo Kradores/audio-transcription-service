@@ -32,7 +32,8 @@ from app.composition import (
     create_whisper_model,
 )
 from app.core.config.enums import WhisperRuntime
-from app.core.runtime_paths import create_development_runtime_paths
+from app.core.runtime_paths import RuntimePaths, create_development_runtime_paths
+from app.models.whisper import WHISPER_MODEL_READY_MARKER_NAME, WhisperModel
 from app.services.transcription_executor import TranscriptionExecutor
 from app.transcription.adaptive_language_state import AdaptiveLanguageStateStore
 from app.transcription.audio_preprocessor import (
@@ -48,29 +49,53 @@ from app.transcription.faster_whisper_runtime import (
 )
 from app.vad.protocols import AudioVad
 from app.vad.silero import SileroVADAdapter
+from tests.integration.pipeline.test_real_ml_pipeline import resolve_configured_whisper_model_path
 from tests.unit.core.config.builders import SettingsBuilder, valid_configuration_document
 from tests.unit.core.config.helpers import write_configuration
+from tests.unit.models.test_whisper import WhisperModelNotReadyError
 
 
+def _mark_whisper_model_ready(
+    runtime_paths: RuntimePaths,
+    model: WhisperModel = WhisperModel.SMALL,
+) -> Path:
+    model_directory = runtime_paths.models_directory / model.value
+
+    model_directory.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    (model_directory / WHISPER_MODEL_READY_MARKER_NAME).touch()
+
+    return model_directory
+
+
+@patch("app.composition.create_transcription_executor")
 @patch("app.composition.create_vad")
 def test_create_application_loads_configuration(
     create_vad: MagicMock,
+    create_transcription_executor: MagicMock,
     tmp_path: Path,
 ) -> None:
     # Arrange
     document = valid_configuration_document()
-    config_path = write_configuration(tmp_path, document)
+    config_path = write_configuration(
+        tmp_path,
+        document,
+    )
 
-    vad = MagicMock()
-    create_vad.return_value = vad
+    runtime_paths = create_development_runtime_paths(
+        tmp_path,
+        config_path=config_path,
+    )
+    _mark_whisper_model_ready(runtime_paths)
+
+    create_vad.return_value = MagicMock()
+    create_transcription_executor.return_value = MagicMock(spec=TranscriptionExecutor)
 
     # Act
-    application = create_application(
-        create_development_runtime_paths(
-            tmp_path,
-            config_path=config_path,
-        )
-    )
+    application = create_application(runtime_paths)
 
     # Assert
     assert isinstance(application, Application)
@@ -78,25 +103,29 @@ def test_create_application_loads_configuration(
     assert application.settings.transcription.worker_count == 2
 
 
+@patch("app.composition.create_transcription_executor")
 @patch("app.composition.create_vad")
 def test_create_application_passes_loaded_settings_to_application(
     create_vad: MagicMock,
+    create_transcription_executor: MagicMock,
     tmp_path: Path,
 ) -> None:
     # Arrange
     document = valid_configuration_document()
     config_path = write_configuration(tmp_path, document)
 
+    runtime_paths = create_development_runtime_paths(
+        tmp_path,
+        config_path=config_path,
+    )
+    _mark_whisper_model_ready(runtime_paths)
+
     vad = MagicMock()
     create_vad.return_value = vad
+    create_transcription_executor.return_value = MagicMock(spec=TranscriptionExecutor)
 
     # Act
-    application = create_application(
-        create_development_runtime_paths(
-            tmp_path,
-            config_path=config_path,
-        )
-    )
+    application = create_application(runtime_paths)
 
     # Assert
     assert application.settings.database.path == (tmp_path / "data" / "transcripts.db").resolve()
@@ -330,75 +359,69 @@ def test_captures_can_share_same_timeline() -> None:
     assert microphone_capture._timeline is timeline
 
 
+@patch("app.composition.create_transcription_executor")
+@patch("app.composition.create_vad")
+@patch("app.composition.create_system_audio_capture")
+@patch("app.composition.create_conversation_pipeline")
+@patch("app.composition.Application")
 def test_create_application_builds_one_conversation_pipeline(
+    application_type: MagicMock,
+    conversation_pipeline: MagicMock,
+    create_system_audio_capture: MagicMock,
+    create_vad: MagicMock,
+    create_transcription_executor: MagicMock,
     tmp_path: Path,
 ) -> None:
     # Arrange
     document = valid_configuration_document()
     config_path = write_configuration(tmp_path, document)
 
-    capture = MagicMock(spec=AudioCapture)
-    vad = MagicMock(spec=AudioVad)
+    runtime_paths = create_development_runtime_paths(
+        tmp_path,
+        config_path=config_path,
+    )
+    _mark_whisper_model_ready(runtime_paths)
 
-    with (
-        patch(
-            "app.composition.create_system_audio_capture",
-            return_value=capture,
-        ),
-        patch(
-            "app.composition.create_vad",
-            return_value=vad,
-        ),
-        patch(
-            "app.composition.create_conversation_pipeline",
-        ) as conversation_pipeline,
-        patch("app.composition.Application") as application_type,
-    ):
-        # Act
-        create_application(
-            create_development_runtime_paths(
-                tmp_path,
-                config_path=config_path,
-            )
-        )
+    create_system_audio_capture.return_value = MagicMock(spec=AudioCapture)
+    create_vad.return_value = MagicMock(spec=AudioVad)
+    create_transcription_executor.return_value = MagicMock(spec=TranscriptionExecutor)
+
+    create_application(runtime_paths)
 
     # Assert
     conversation_pipeline.assert_called_once()
     application_type.assert_called_once()
 
 
+@patch("app.composition.create_system_audio_capture")
+@patch("app.composition.create_microphone_capture")
+@patch("app.composition.create_transcription_executor")
+@patch("app.composition.create_source_pipeline")
 def test_create_application_builds_two_source_pipelines_with_shared_executor(
+    create_source: MagicMock,
+    create_transcription_executor: MagicMock,
+    create_microphone_capture: MagicMock,
+    create_system_audio_capture: MagicMock,
     tmp_path: Path,
 ) -> None:
     # Arrange
     document = valid_configuration_document()
     config_path = write_configuration(tmp_path, document)
 
+    runtime_paths = create_development_runtime_paths(
+        tmp_path,
+        config_path=config_path,
+    )
+    _mark_whisper_model_ready(runtime_paths)
+
     system_capture = MagicMock(spec=AudioCapture)
     microphone_capture = MagicMock(spec=AudioCapture)
     transcription_executor = MagicMock(spec=TranscriptionExecutor)
+    create_transcription_executor.return_value = transcription_executor
+    create_microphone_capture.return_value = microphone_capture
+    create_system_audio_capture.return_value = system_capture
 
-    with (
-        patch(
-            "app.composition.create_system_audio_capture",
-            return_value=system_capture,
-        ),
-        patch(
-            "app.composition.create_microphone_capture",
-            return_value=microphone_capture,
-        ),
-        patch(
-            "app.composition.create_transcription_executor",
-            return_value=transcription_executor,
-        ),
-        patch("app.composition.create_source_pipeline") as create_source,
-    ):
-        create_application(
-            create_development_runtime_paths(
-                tmp_path,
-                config_path=config_path,
-            )
-        )
+    create_application(runtime_paths)
 
     calls = create_source.call_args_list
 
@@ -416,19 +439,21 @@ def test_create_application_builds_two_source_pipelines_with_shared_executor(
 @patch("app.composition.FasterWhisperModelFactory")
 def test_create_whisper_model_passes_configuration_to_factory(
     factory_type: MagicMock,
+    tmp_path: Path,
 ) -> None:
     settings = SettingsBuilder().with_whisper_runtime("therock").build()
+    model_path = tmp_path / "models" / "small"
 
     model = MagicMock()
     factory = factory_type.return_value
     factory.create.return_value = model
 
-    result = create_whisper_model(settings)
+    result = create_whisper_model(settings, model_path=model_path)
 
     assert result is model
 
     factory.create.assert_called_once_with(
-        model=settings.whisper.model.value,
+        model_path=model_path,
         device=settings.whisper.device.value,
         compute_type=settings.whisper.compute_type.value,
         worker_count=settings.transcription.worker_count,
@@ -446,8 +471,10 @@ def test_create_transcription_executor_creates_one_processor_per_worker(
     faster_whisper_transcriber: MagicMock,
     create_transcription_processor: MagicMock,
     transcription_executor_impl: MagicMock,
+    tmp_path: Path,
 ) -> None:
     settings = SettingsBuilder().with_transcription_worker_count(3).build()
+    model_path = tmp_path / "models" / "small"
 
     database = sqlite3.connect(":memory:")
 
@@ -474,10 +501,12 @@ def test_create_transcription_executor_creates_one_processor_per_worker(
     create_transcription_executor(
         database=database,
         settings=settings,
+        model_path=model_path,
     )
 
     create_whisper_model.assert_called_once_with(
         settings,
+        model_path=model_path,
         nvidia_runtime_directory=None,
     )
 
@@ -541,6 +570,7 @@ def test_create_transcription_executor_passes_nvidia_runtime_directory(
     tmp_path: Path,
 ) -> None:
     settings = SettingsBuilder().build()
+    model_path = tmp_path / "models" / "small"
     database = sqlite3.connect(":memory:")
 
     create_whisper_model.return_value = MagicMock()
@@ -553,11 +583,13 @@ def test_create_transcription_executor_passes_nvidia_runtime_directory(
     create_transcription_executor(
         database=database,
         settings=settings,
+        model_path=model_path,
         nvidia_runtime_directory=(nvidia_runtime_directory),
     )
 
     create_whisper_model.assert_called_once_with(
         settings,
+        model_path=model_path,
         nvidia_runtime_directory=(nvidia_runtime_directory),
     )
 
@@ -571,6 +603,7 @@ def test_create_transcription_executor_shares_adaptive_language_state_across_wor
     faster_whisper_transcriber: MagicMock,
     create_transcription_processor: MagicMock,
     transcription_executor_impl: MagicMock,
+    tmp_path: Path,
 ) -> None:
     settings = (
         SettingsBuilder()
@@ -578,6 +611,7 @@ def test_create_transcription_executor_shares_adaptive_language_state_across_wor
         .with_adaptive_transcription_language()
         .build()
     )
+    model_path = tmp_path / "models" / "small"
 
     database = sqlite3.connect(":memory:")
 
@@ -599,6 +633,7 @@ def test_create_transcription_executor_shares_adaptive_language_state_across_wor
     create_transcription_executor(
         database=database,
         settings=settings,
+        model_path=model_path,
     )
 
     first_store = create_transcription_processor.call_args_list[0].kwargs["adaptive_state_store"]
@@ -634,6 +669,7 @@ def test_system_and_microphone_captures_share_portaudio_refresh_coordinator() ->
     assert microphone_capture._portaudio_refresh is coordinator
 
 
+@patch("app.composition.create_transcription_executor")
 @patch("app.composition.PortAudioRefreshCoordinator")
 @patch("app.composition.create_microphone_capture")
 @patch("app.composition.create_system_audio_capture")
@@ -643,11 +679,18 @@ def test_create_application_wires_shared_portaudio_refresh_coordinator(
     create_system_audio_capture: MagicMock,
     create_microphone_capture: MagicMock,
     coordinator_type: MagicMock,
+    create_transcription_executor: MagicMock,
     tmp_path: Path,
 ) -> None:
     # Arrange
     document = valid_configuration_document()
     config_path = write_configuration(tmp_path, document)
+
+    runtime_paths = create_development_runtime_paths(
+        tmp_path,
+        config_path=config_path,
+    )
+    _mark_whisper_model_ready(runtime_paths)
 
     create_vad.return_value = MagicMock()
 
@@ -656,17 +699,14 @@ def test_create_application_wires_shared_portaudio_refresh_coordinator(
 
     system_capture = MagicMock(spec=PyAudioCapture)
     microphone_capture = MagicMock(spec=PyAudioCapture)
+    transcription_executor = MagicMock(spec=TranscriptionExecutor)
 
     create_system_audio_capture.return_value = system_capture
     create_microphone_capture.return_value = microphone_capture
+    create_transcription_executor.return_value = transcription_executor
 
     # Act
-    application = create_application(
-        create_development_runtime_paths(
-            tmp_path,
-            config_path=config_path,
-        )
-    )
+    application = create_application(runtime_paths)
 
     # Assert
     create_system_audio_capture.assert_called_once_with(
@@ -710,10 +750,12 @@ def test_create_faster_whisper_runtime_initializer_selects_configured_runtime(
 @patch("app.composition.FasterWhisperModelFactory")
 def test_create_whisper_model_uses_configured_runtime(
     factory_type: MagicMock,
+    tmp_path: Path,
 ) -> None:
     settings = SettingsBuilder().with_whisper_runtime("therock").build()
+    model_path = tmp_path / "models" / "small"
 
-    create_whisper_model(settings)
+    create_whisper_model(settings, model_path=model_path)
 
     initializer = factory_type.call_args.kwargs["runtime_initializer"]
 
@@ -809,3 +851,51 @@ def test_create_nvidia_runtime_initializer_requires_runtime_directory() -> None:
         create_faster_whisper_runtime_initializer(
             WhisperRuntime.NVIDIA,
         )
+
+
+def test_create_application_rejects_model_that_is_not_locally_ready(
+    tmp_path: Path,
+) -> None:
+    document = valid_configuration_document()
+    config_path = write_configuration(
+        tmp_path,
+        document,
+    )
+
+    runtime_paths = create_development_runtime_paths(
+        tmp_path,
+        config_path=config_path,
+    )
+
+    with (
+        patch("app.composition.create_transcription_executor") as create_executor,
+        pytest.raises(
+            WhisperModelNotReadyError,
+            match="small.*not installed locally",
+        ),
+    ):
+        create_application(runtime_paths)
+
+    create_executor.assert_not_called()
+
+
+def test_resolve_configured_whisper_model_path_returns_ready_model(
+    tmp_path: Path,
+) -> None:
+    settings = SettingsBuilder().build()
+
+    runtime_paths = create_development_runtime_paths(
+        tmp_path,
+    )
+
+    expected_path = _mark_whisper_model_ready(
+        runtime_paths,
+        settings.whisper.model,
+    )
+
+    result = resolve_configured_whisper_model_path(
+        runtime_paths,
+        settings,
+    )
+
+    assert result == expected_path
