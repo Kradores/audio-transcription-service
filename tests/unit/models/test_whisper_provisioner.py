@@ -1,9 +1,12 @@
 from pathlib import Path
 
 import pytest
+from huggingface_hub.utils import are_progress_bars_disabled
 
+import app.models.whisper_provisioner as whisper_provisioner_module
 from app.core.config.enums import WhisperModel
 from app.models.whisper import (
+    WHISPER_MODEL_ARTIFACT_PATTERNS,
     WHISPER_MODEL_READY_MARKER_NAME,
     LocalWhisperModelResolver,
 )
@@ -183,3 +186,59 @@ def test_failed_download_does_not_replace_existing_model(
         provisioner.provision(WhisperModel.SMALL)
 
     assert existing_file.read_text(encoding="utf-8") == "existing"
+
+
+def test_default_downloader_disables_hugging_face_progress_bars(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    models_directory = tmp_path / "models"
+    resolver = LocalWhisperModelResolver(models_directory)
+
+    original_progress_state = are_progress_bars_disabled()
+
+    calls: list[tuple[str, Path, list[str]]] = []
+
+    def fake_snapshot_download(
+        *,
+        repo_id: str,
+        local_dir: Path,
+        allow_patterns: list[str],
+    ) -> str:
+        assert are_progress_bars_disabled()
+
+        calls.append(
+            (
+                repo_id,
+                local_dir,
+                allow_patterns,
+            )
+        )
+
+        _write_valid_model(local_dir)
+
+        return str(local_dir)
+
+    monkeypatch.setattr(
+        whisper_provisioner_module,
+        "snapshot_download",
+        fake_snapshot_download,
+    )
+
+    provisioner = HuggingFaceWhisperModelProvisioner(
+        resolver=resolver,
+    )
+
+    result = provisioner.provision(WhisperModel.SMALL)
+
+    assert result.ready is True
+
+    assert calls == [
+        (
+            WHISPER_MODEL_REPOSITORIES[WhisperModel.SMALL],
+            models_directory / ".small.download",
+            list(WHISPER_MODEL_ARTIFACT_PATTERNS),
+        )
+    ]
+
+    assert are_progress_bars_disabled() is original_progress_state

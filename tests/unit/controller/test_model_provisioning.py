@@ -104,9 +104,48 @@ class CountingStatusProvider:
         return self.status
 
 
+class RetryProvisioner:
+    def __init__(
+        self,
+        model_path: Path,
+    ) -> None:
+        self.model_path = model_path
+        self.calls = 0
+
+        self.retry_started = threading.Event()
+        self.retry_release = threading.Event()
+
+    def provision(
+        self,
+        model: WhisperModel,
+    ) -> ResolvedWhisperModel:
+        self.calls += 1
+
+        if self.calls == 1:
+            raise RuntimeError("download failed")
+
+        self.retry_started.set()
+
+        if not self.retry_release.wait(timeout=2.0):
+            raise TimeoutError("retry was not released by test")
+
+        self.model_path.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        (self.model_path / WHISPER_MODEL_READY_MARKER_NAME).touch()
+
+        return ResolvedWhisperModel(
+            model=model,
+            path=self.model_path,
+            ready=True,
+        )
+
+
 def _create_host(
     tmp_path: Path,
-    provisioner: ControlledProvisioner,
+    provisioner: ControlledProvisioner | RetryProvisioner,
     *,
     ready: bool = False,
 ) -> WhisperModelProvisioningHost:
@@ -479,3 +518,55 @@ def test_failed_provisioning_logs_failure(
     messages = [record.getMessage() for record in caplog.records]
 
     assert "Whisper model provisioning failed model=medium" in messages
+
+
+def test_failed_provisioning_can_retry_to_ready(
+    tmp_path: Path,
+) -> None:
+    model_path = tmp_path / "models" / WhisperModel.MEDIUM.value
+
+    provisioner = RetryProvisioner(
+        model_path=model_path,
+    )
+
+    host = _create_host(
+        tmp_path,
+        provisioner,
+    )
+
+    try:
+        first_status = host.provision()
+
+        assert first_status.state is WhisperModelProvisioningState.DOWNLOADING
+
+        failed_status = _wait_for_state(
+            host,
+            WhisperModelProvisioningState.FAILED,
+        )
+
+        assert failed_status.failure_message is not None
+        assert "download failed" in (failed_status.failure_message)
+
+        retry_status = host.provision()
+
+        assert retry_status.state is WhisperModelProvisioningState.DOWNLOADING
+
+        assert provisioner.retry_started.wait(timeout=2.0)
+
+        # While the retry worker is still blocked,
+        # refresh must preserve DOWNLOADING.
+        assert host.refresh().state is WhisperModelProvisioningState.DOWNLOADING
+
+        provisioner.retry_release.set()
+
+        ready_status = _wait_for_state(
+            host,
+            WhisperModelProvisioningState.READY,
+        )
+
+        assert ready_status.failure_message is None
+        assert ready_status.path == model_path
+        assert provisioner.calls == 2
+
+    finally:
+        provisioner.retry_release.set()

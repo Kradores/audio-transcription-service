@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Protocol
 
 from huggingface_hub import snapshot_download
+from huggingface_hub.utils import disable_progress_bars
 
 from app.core.config.enums import WhisperModel
 from app.models.whisper import (
@@ -50,11 +51,12 @@ def download_whisper_model_snapshot(
     repository_id: str,
     destination: Path,
 ) -> None:
-    snapshot_download(
-        repo_id=repository_id,
-        local_dir=destination,
-        allow_patterns=list(WHISPER_MODEL_ARTIFACT_PATTERNS),
-    )
+    with disable_progress_bars():
+        snapshot_download(
+            repo_id=repository_id,
+            local_dir=destination,
+            allow_patterns=list(WHISPER_MODEL_ARTIFACT_PATTERNS),
+        )
 
 
 class WhisperModelProvisioningError(RuntimeError):
