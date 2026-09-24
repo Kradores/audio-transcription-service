@@ -892,6 +892,58 @@ Validate fresh offline startup and optional-model download/retry behavior on ext
 
 ---
 
+## Implementation status
+
+Implemented and acceptance-tested on Windows.
+
+The application now separates Whisper model provisioning from runtime
+execution.
+
+Configured model names are resolved through the application-owned model
+directory:
+
+`<runtime-root>/models/<model>/`
+
+A model is considered published only when its contents are valid and the
+`.ready` marker exists.
+
+Runtime startup resolves the configured logical model to a local path before
+constructing Faster-Whisper. Runtime startup does not download models and does
+not depend on network access.
+
+The controller exposes the provisioning states:
+
+- `NOT_INSTALLED`
+- `DOWNLOADING`
+- `READY`
+- `FAILED`
+
+Users can install missing models and retry failed provisioning attempts from
+the controller. Provisioning runs outside the Tk UI thread.
+
+Support diagnostics include the configured model, resolved local path,
+provisioning state, and failure message when applicable. Provisioning start,
+success, and failure are recorded in application logs.
+
+The Windows CPU, NVIDIA, and AMD installers seed the default `small` model from
+a validated build artifact into the application-owned model directory when the
+directory does not already exist. Existing model data is preserved on reinstall
+and uninstall.
+
+Acceptance testing validated:
+
+- explicit provisioning from `NOT_INSTALLED` to `READY`;
+- offline runtime startup from an already provisioned model;
+- deterministic failure when a configured model is absent;
+- failed network provisioning followed by successful retry;
+- persisted `READY` state across controller restarts;
+- support-bundle model diagnostics;
+- fresh-install model seeding for CPU, NVIDIA, and AMD installers;
+- preservation of existing model data during reinstall;
+- preservation of model data during uninstall.
+
+---
+
 ## Related Decisions
 
 - ADR-005 — Architectural Boundaries

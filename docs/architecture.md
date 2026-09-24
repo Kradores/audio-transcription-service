@@ -767,3 +767,28 @@ packages
 ```
 
 where `packages` remains best-effort environment metadata rather than authoritative distribution identity.
+
+
+## Whisper model lifecycle
+
+Whisper model acquisition is separated from transcription runtime startup.
+
+```text
+logical model from configuration
+        ↓
+WhisperModelResolver
+        ↓
+application-owned models/<model>
+        ↓
+.ready publication marker
+        ↓
+local model path
+        ↓
+Faster-Whisper runtime
+```
+
+The transcription runtime receives only a local model path. It does not perform
+implicit model downloads.
+Model provisioning is owned by the controller-side provisioning subsystem and
+runs independently of the transcription runtime. CPU, NVIDIA, and AMD runtime
+profiles share the same application-owned model storage.

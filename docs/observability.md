@@ -1790,3 +1790,24 @@ database rows
 ```
 
 Transcript database inclusion remains explicit and optional.
+
+### Whisper model provisioning
+
+Provisioning lifecycle events are logged for:
+
+- provisioning started;
+- provisioning completed;
+- provisioning failed.
+
+Provisioning failures include exception details.
+
+`system-info.json` in the support bundle includes a `whisper_model` section with:
+
+- observed state;
+- logical model;
+- resolved local path;
+- provisioning state;
+- failure message when applicable.
+
+This is separate from `configuration.whisper.model`, which describes the user's
+configured logical model rather than the controller-observed local model state.

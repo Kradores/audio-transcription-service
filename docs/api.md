@@ -184,3 +184,23 @@ insert(result: TranscriptionResult) -> None
 Append-only persistence contract.
 
 
+## Whisper model provisioning contracts
+
+`WhisperModelResolver` resolves a logical `WhisperModel` to its application-owned
+local directory and publication state.
+
+`WhisperModelProvisioner` explicitly provisions one logical model and returns
+the published local model.
+
+`WhisperModelStatus` exposes:
+
+- logical model;
+- local path;
+- provisioning state;
+- optional provisioning failure message.
+
+The provisioning states are `NOT_INSTALLED`, `DOWNLOADING`, `READY`, and
+`FAILED`.
+
+The runtime boundary accepts a local model path rather than a logical model
+name.

@@ -310,3 +310,35 @@ support-bundle generation
 The accepted NVIDIA installer was approximately 1.08 GB compressed, with the unpacked application approximately 2.8 GB.
 
 Runtime-size optimization is intentionally deferred until after correctness and portability validation.
+
+### Default Whisper model
+
+Windows installers include the validated `small` Whisper model.
+
+Before building an installer, stage the model with:
+
+```powershell
+uv run python -m scripts.stage_default_whisper_model
+```
+
+The installer consumes:
+
+```text
+build/model-seed/small/
+```
+
+On a fresh installation the model is copied to:
+
+```text
+%LOCALAPPDATA%\AudioTranscriptionService\models\small
+```
+
+The installer seeds this directory only when `models\small` does not already
+exist.
+
+Existing model data is therefore preserved during reinstall or upgrade.
+
+Application-owned models are also preserved during uninstall.
+
+The CPU, NVIDIA, and AMD installers use the same model seed and installation
+semantics.

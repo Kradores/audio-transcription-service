@@ -8,6 +8,10 @@ from app.controller.distribution_metadata import (
     DevelopmentDistributionMetadataProvider,
     DistributionMetadataProvider,
 )
+from app.controller.model_provisioning import WhisperModelProvisioningHost
+from app.controller.model_status import (
+    ConfiguredWhisperModelStatusProvider,
+)
 from app.controller.multiprocessing_runtime import (
     MultiprocessingRuntimeProcessSessionFactory,
 )
@@ -19,10 +23,13 @@ from app.controller.support_bundle import (
     SupportBundleBuilder,
 )
 from app.controller.window import ControllerWindow
+from app.core.config.loader import ConfigurationLoader
 from app.core.runtime_paths import (
     RuntimePaths,
     create_development_runtime_paths,
 )
+from app.models.whisper import LocalWhisperModelResolver
+from app.models.whisper_provisioner import HuggingFaceWhisperModelProvisioner
 
 
 def run_controller(
@@ -42,6 +49,22 @@ def run_controller(
         ),
     )
 
+    model_resolver = LocalWhisperModelResolver(
+        runtime_paths.models_directory,
+    )
+
+    model_status_provider = ConfiguredWhisperModelStatusProvider(
+        settings_loader=lambda: ConfigurationLoader(runtime_paths).load(),
+        resolver=model_resolver,
+    )
+
+    model_provisioning_host = WhisperModelProvisioningHost(
+        status_provider=model_status_provider,
+        provisioner=HuggingFaceWhisperModelProvisioner(
+            resolver=model_resolver,
+        ),
+    )
+
     shell_opener = WindowsShellOpener()
 
     support_bundle_creator = SupportBundleBuilder(
@@ -53,6 +76,7 @@ def run_controller(
             runtime_paths,
             distribution_metadata_provider=(distribution_metadata_provider),
             runtime_diagnostics_provider=(lambda: runtime_host.diagnostics_snapshot),
+            whisper_model_diagnostics_provider=(lambda: model_provisioning_host.status),
         ),
     )
 
@@ -61,7 +85,8 @@ def run_controller(
         runtime_host=runtime_host,
         runtime_paths=runtime_paths,
         shell_opener=shell_opener,
-        support_bundle_creator=(support_bundle_creator),
+        support_bundle_creator=support_bundle_creator,
+        model_provisioning_host=model_provisioning_host,
     )
 
     root.mainloop()

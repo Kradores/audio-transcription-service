@@ -871,3 +871,27 @@ clean
 ```
 
 The two existing Python 3.14 `torch.jit.load` deprecation warnings remain known and unrelated.
+
+### Whisper model provisioning
+
+Provisioning tests cover:
+
+- `NOT_INSTALLED → DOWNLOADING`;
+- duplicate provisioning suppression;
+- successful `DOWNLOADING → READY`;
+- failed `DOWNLOADING → FAILED`;
+- retry after failure;
+- READY short-circuiting;
+- persisted readiness through `.ready`;
+- local model validation;
+- deterministic installer-model staging.
+
+Manual Windows acceptance additionally verifies:
+
+- runtime startup without network access;
+- missing-model startup rejection;
+- controller Install Model and Retry flows;
+- controller restart with a persisted READY model;
+- CPU, NVIDIA, and AMD fresh-install default-model seeding;
+- reinstall preservation of existing model data;
+- uninstall preservation of application-owned model data.

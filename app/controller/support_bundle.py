@@ -23,6 +23,7 @@ from app.controller.runtime_process import RuntimeProcessDiagnosticsSnapshot
 from app.core.config.exceptions import ConfigurationError
 from app.core.config.loader import ConfigurationLoader
 from app.core.runtime_paths import RuntimePaths
+from app.models.whisper import WhisperModelStatus
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,11 @@ _PACKAGE_NAMES = (
 type RuntimeDiagnosticsProvider = Callable[
     [],
     RuntimeProcessDiagnosticsSnapshot,
+]
+
+type WhisperModelDiagnosticsProvider = Callable[
+    [],
+    WhisperModelStatus,
 ]
 
 
@@ -138,10 +144,12 @@ class DefaultSupportInfoCollector:
         *,
         distribution_metadata_provider: (DistributionMetadataProvider | None) = None,
         runtime_diagnostics_provider: (RuntimeDiagnosticsProvider | None) = None,
+        whisper_model_diagnostics_provider: (WhisperModelDiagnosticsProvider | None) = None,
     ) -> None:
         self._runtime_paths = runtime_paths
         self._distribution_metadata_provider = distribution_metadata_provider
         self._runtime_diagnostics_provider = runtime_diagnostics_provider
+        self._whisper_model_diagnostics_provider = whisper_model_diagnostics_provider
 
     def collect(self) -> dict[str, object]:
         runtime_diagnostics = self._get_runtime_diagnostics()
@@ -179,6 +187,7 @@ class DefaultSupportInfoCollector:
             ),
             "packages": self._collect_package_versions(),
             "configuration": self._collect_configuration(),
+            "whisper_model": self._collect_whisper_model(),
         }
 
     def _collect_package_versions(
@@ -259,6 +268,30 @@ class DefaultSupportInfoCollector:
         return {
             "available": True,
             **distribution_metadata.to_dict(),
+        }
+
+    def _collect_whisper_model(
+        self,
+    ) -> dict[str, object]:
+        provider = self._whisper_model_diagnostics_provider
+
+        if provider is None:
+            return {
+                "observed": False,
+                "error_type": "NotObserved",
+                "error": (
+                    "No Whisper model status observation is available for this controller session."
+                ),
+            }
+
+        status = provider()
+
+        return {
+            "observed": True,
+            "model": status.model.value,
+            "path": str(status.path),
+            "provisioning_state": status.state.value,
+            "failure_message": status.failure_message,
         }
 
     def _get_runtime_diagnostics(

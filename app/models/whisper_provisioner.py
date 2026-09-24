@@ -3,14 +3,18 @@ from __future__ import annotations
 import shutil
 from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 
 from huggingface_hub import snapshot_download
 
 from app.core.config.enums import WhisperModel
 from app.models.whisper import (
+    WHISPER_MODEL_ARTIFACT_PATTERNS,
     WHISPER_MODEL_READY_MARKER_NAME,
     ResolvedWhisperModel,
     WhisperModelResolver,
+    WhisperModelValidationError,
+    validate_whisper_model_contents,
 )
 
 WHISPER_MODEL_REPOSITORIES: dict[WhisperModel, str] = {
@@ -30,14 +34,16 @@ WHISPER_MODEL_DOWNLOAD_PATTERNS = (
     "vocabulary.*",
 )
 
-WHISPER_MODEL_REQUIRED_FILES = (
-    "config.json",
-    "model.bin",
-    "tokenizer.json",
-)
-
 
 type SnapshotDownloader = Callable[[str, Path], None]
+
+
+class WhisperModelProvisioner(Protocol):
+    def provision(
+        self,
+        model: WhisperModel,
+    ) -> ResolvedWhisperModel:
+        """Provision one Whisper model and return the published model."""
 
 
 def download_whisper_model_snapshot(
@@ -47,7 +53,7 @@ def download_whisper_model_snapshot(
     snapshot_download(
         repo_id=repository_id,
         local_dir=destination,
-        allow_patterns=list(WHISPER_MODEL_DOWNLOAD_PATTERNS),
+        allow_patterns=list(WHISPER_MODEL_ARTIFACT_PATTERNS),
     )
 
 
@@ -97,8 +103,7 @@ class HuggingFaceWhisperModelProvisioner:
 
         self._validate_download(temporary_path)
 
-        ready_marker = temporary_path / WHISPER_MODEL_READY_MARKER_NAME
-        ready_marker.touch()
+        (temporary_path / WHISPER_MODEL_READY_MARKER_NAME).touch()
 
         if resolved.path.exists():
             shutil.rmtree(resolved.path)
@@ -118,15 +123,7 @@ class HuggingFaceWhisperModelProvisioner:
     def _validate_download(
         model_directory: Path,
     ) -> None:
-        missing_files = [
-            filename
-            for filename in WHISPER_MODEL_REQUIRED_FILES
-            if not (model_directory / filename).is_file()
-        ]
-
-        if missing_files:
-            missing = ", ".join(missing_files)
-
-            raise WhisperModelProvisioningError(
-                f"Downloaded Whisper model is incomplete; missing: {missing}"
-            )
+        try:
+            validate_whisper_model_contents(model_directory)
+        except WhisperModelValidationError as exc:
+            raise WhisperModelProvisioningError(str(exc)) from exc

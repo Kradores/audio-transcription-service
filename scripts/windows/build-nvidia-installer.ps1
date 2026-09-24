@@ -108,6 +108,14 @@ $defaultConfigSource = Join-Path `
     $repositoryRoot `
     "config\config.nvidia.example.yaml"
 
+$defaultModelSeedSource = Join-Path `
+    $repositoryRoot `
+    "build\model-seed\small"
+
+$defaultModelReadyMarker = Join-Path `
+    $defaultModelSeedSource `
+    ".ready"
+
 
 Write-Host ""
 Write-Host "=== Build Windows installer ===" `
@@ -119,6 +127,41 @@ Write-Host "Repository: $repositoryRoot"
 Write-Host ""
 Write-Host "=== Build packaged application ===" `
     -ForegroundColor Cyan
+
+
+if (-not (Test-Path -LiteralPath $defaultConfigSource)) {
+    throw (
+        "Default Windows configuration was not found: " +
+        $defaultConfigSource
+    )
+}
+
+if (-not (
+    Test-Path `
+        -LiteralPath $defaultModelSeedSource `
+        -PathType Container
+)) {
+    throw (
+        "Default Whisper model seed was not found: " +
+        $defaultModelSeedSource +
+        "`nRun first:`n" +
+        "    uv run python -m scripts.stage_default_whisper_model"
+    )
+}
+
+if (-not (
+    Test-Path `
+        -LiteralPath $defaultModelReadyMarker `
+        -PathType Leaf
+)) {
+    throw (
+        "Default Whisper model seed is not READY: " +
+        $defaultModelSeedSource +
+        "`nRun first:`n" +
+        "    uv run python -m scripts.stage_default_whisper_model"
+    )
+}
+
 
 & $applicationBuildScript
 
@@ -177,14 +220,6 @@ if ([string]::IsNullOrWhiteSpace($appVersion)) {
 }
 
 
-if (-not (Test-Path -LiteralPath $defaultConfigSource)) {
-    throw (
-        "Default Windows configuration was not found: " +
-        $defaultConfigSource
-    )
-}
-
-
 $installerBaseFilename = (
     "AudioTranscriptionService-Nvidia-Setup-" +
     $appVersion
@@ -206,13 +241,17 @@ Write-Host "=== Compile installer ===" `
     -ForegroundColor Cyan
 
 Write-Host "Application version: $appVersion"
+Write-Host "Application source:  $applicationDist"
+Write-Host "Default config:      $defaultConfigSource"
 Write-Host "Inno Setup compiler: $innoSetupCompiler"
+Write-Host "Default model seed:  $defaultModelSeedSource"
 
 
 & $innoSetupCompiler `
     "-dAppVersion=$appVersion" `
     "-dAppSourceDir=$applicationDist" `
     "-dDefaultConfigSource=$defaultConfigSource" `
+    "-dDefaultModelSeedSource=$defaultModelSeedSource" `
     "-dInstallerOutputDir=$installerOutputDirectory" `
     "-dInstallerBaseFilename=$installerBaseFilename" `
     $installerScript

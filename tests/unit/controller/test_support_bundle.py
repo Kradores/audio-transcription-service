@@ -27,10 +27,15 @@ from app.controller.support_bundle import (
 from app.core.config.enums import (
     WhisperComputeType,
     WhisperDevice,
+    WhisperModel,
     WhisperRuntime,
 )
 from app.core.runtime_paths import (
     create_development_runtime_paths,
+)
+from app.models.whisper import (
+    WhisperModelProvisioningState,
+    WhisperModelStatus,
 )
 from app.observability.hardware import (
     GraphicsAdapterInfo,
@@ -546,4 +551,73 @@ def test_support_info_preserves_graphics_observation_failure(
             "error_type": "PowerShellCommandError",
             "error": "Get-CimInstance failed",
         }
+    }
+
+
+def test_support_info_includes_whisper_model_status(
+    tmp_path: Path,
+) -> None:
+    runtime_paths = create_development_runtime_paths(tmp_path)
+
+    status = WhisperModelStatus(
+        model=WhisperModel.SMALL,
+        path=runtime_paths.models_directory / "small",
+        state=WhisperModelProvisioningState.READY,
+    )
+
+    collector = DefaultSupportInfoCollector(
+        runtime_paths,
+        whisper_model_diagnostics_provider=lambda: status,
+    )
+
+    result = collector.collect()
+
+    assert result["whisper_model"] == {
+        "observed": True,
+        "model": "small",
+        "path": str(runtime_paths.models_directory / "small"),
+        "provisioning_state": "ready",
+        "failure_message": None,
+    }
+
+
+def test_support_info_preserves_whisper_model_failure(
+    tmp_path: Path,
+) -> None:
+    runtime_paths = create_development_runtime_paths(tmp_path)
+
+    status = WhisperModelStatus(
+        model=WhisperModel.SMALL,
+        path=runtime_paths.models_directory / "small",
+        state=WhisperModelProvisioningState.FAILED,
+        failure_message=("ConnectionError: download failed"),
+    )
+
+    collector = DefaultSupportInfoCollector(
+        runtime_paths,
+        whisper_model_diagnostics_provider=lambda: status,
+    )
+
+    result = collector.collect()
+
+    assert result["whisper_model"] == {
+        "observed": True,
+        "model": "small",
+        "path": str(runtime_paths.models_directory / "small"),
+        "provisioning_state": "failed",
+        "failure_message": ("ConnectionError: download failed"),
+    }
+
+
+def test_support_info_reports_whisper_model_not_observed(
+    tmp_path: Path,
+) -> None:
+    collector = DefaultSupportInfoCollector(create_development_runtime_paths(tmp_path))
+
+    result = collector.collect()
+
+    assert result["whisper_model"] == {
+        "observed": False,
+        "error_type": "NotObserved",
+        "error": ("No Whisper model status observation is available for this controller session."),
     }

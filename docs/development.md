@@ -795,3 +795,34 @@ CTranslate2 versions match the pinned NVIDIA toolchain before packaging.
 
 Both Windows build scripts verify that the generated manifest is bundled by
 PyInstaller unchanged.
+
+### Provisioning Whisper models
+
+Provision the model selected by the development configuration:
+
+```powershell
+uv run python -m scripts.provision_whisper_model
+```
+
+Provisioning publishes the model under `models/<model>` only after validation.
+A published model contains the `.ready` marker.
+
+Runtime startup does not download missing models.
+
+### Staging the default installer model
+
+Windows installers use a validated `small` model seed.
+
+First ensure `models/small` is provisioned and ready, then run:
+
+```powershell
+uv run python -m scripts.stage_default_whisper_model
+```
+
+The resulting installer input is:
+
+```text
+build/model-seed/small/
+```
+
+The staging operation is offline and does not download models.

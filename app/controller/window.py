@@ -4,6 +4,7 @@ import tkinter as tk
 from collections.abc import Callable
 from tkinter import messagebox, ttk
 
+from app.controller.model_provisioning import WhisperModelProvisioningHost
 from app.controller.runtime_process import (
     RuntimeProcessHost,
     RuntimeProcessSnapshot,
@@ -12,6 +13,10 @@ from app.controller.runtime_process import (
 from app.controller.shell import ShellOpener
 from app.controller.support_bundle import SupportBundleCreator, SupportBundleError
 from app.core.runtime_paths import RuntimePaths
+from app.models.whisper import (
+    WhisperModelProvisioningState,
+    WhisperModelStatus,
+)
 
 _REFRESH_INTERVAL_MS = 100
 
@@ -27,15 +32,19 @@ class ControllerWindow:
         runtime_paths: RuntimePaths,
         shell_opener: ShellOpener,
         support_bundle_creator: SupportBundleCreator,
+        model_provisioning_host: WhisperModelProvisioningHost,
     ) -> None:
         self._root = root
         self._runtime_host = runtime_host
         self._runtime_paths = runtime_paths
         self._shell_opener = shell_opener
         self._support_bundle_creator = support_bundle_creator
+        self._model_provisioning_host = model_provisioning_host
         self._closing = False
 
         self._status_value = tk.StringVar()
+        self._model_value = tk.StringVar()
+        self._model_status: WhisperModelStatus = model_provisioning_host.status
 
         self._include_transcript_database = tk.BooleanVar(
             value=False,
@@ -43,6 +52,7 @@ class ControllerWindow:
 
         self._configure_window()
         self._create_widgets()
+        self._apply_model_status(self._model_status)
         self._apply_snapshot(
             runtime_host.snapshot,
         )
@@ -98,13 +108,45 @@ class ControllerWindow:
             sticky="w",
         )
 
+        ttk.Label(
+            frame,
+            text="Model:",
+        ).grid(
+            row=2,
+            column=0,
+            sticky="w",
+        )
+
+        ttk.Label(
+            frame,
+            textvariable=self._model_value,
+        ).grid(
+            row=2,
+            column=1,
+            sticky="w",
+        )
+
+        self._model_action_button = ttk.Button(
+            frame,
+            text="Install Model",
+            command=self._provision_model,
+        )
+
+        self._model_action_button.grid(
+            row=3,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            pady=(8, 0),
+        )
+
         self._start_button = ttk.Button(
             frame,
             text="Start",
             command=self._start,
         )
         self._start_button.grid(
-            row=2,
+            row=4,
             column=0,
             padx=(0, 8),
             pady=(16, 0),
@@ -116,7 +158,7 @@ class ControllerWindow:
             command=self._stop,
         )
         self._stop_button.grid(
-            row=2,
+            row=4,
             column=1,
             padx=(8, 0),
             pady=(16, 0),
@@ -126,7 +168,7 @@ class ControllerWindow:
             frame,
             orient="horizontal",
         ).grid(
-            row=3,
+            row=5,
             column=0,
             columnspan=2,
             sticky="ew",
@@ -138,7 +180,7 @@ class ControllerWindow:
             text="Open Logs",
             command=self._open_logs,
         ).grid(
-            row=4,
+            row=6,
             column=0,
             columnspan=2,
             sticky="ew",
@@ -150,7 +192,7 @@ class ControllerWindow:
             text="Open Configuration",
             command=self._open_configuration,
         ).grid(
-            row=5,
+            row=7,
             column=0,
             columnspan=2,
             sticky="ew",
@@ -162,7 +204,7 @@ class ControllerWindow:
             text="Open Data Folder",
             command=self._open_data_folder,
         ).grid(
-            row=6,
+            row=8,
             column=0,
             columnspan=2,
             sticky="ew",
@@ -172,7 +214,7 @@ class ControllerWindow:
             frame,
             orient="horizontal",
         ).grid(
-            row=7,
+            row=9,
             column=0,
             columnspan=2,
             sticky="ew",
@@ -184,7 +226,7 @@ class ControllerWindow:
             text=("Include transcript database (contains conversation text)"),
             variable=self._include_transcript_database,
         ).grid(
-            row=8,
+            row=10,
             column=0,
             columnspan=2,
             sticky="w",
@@ -196,13 +238,21 @@ class ControllerWindow:
             text="Create Support Bundle",
             command=self._create_support_bundle,
         ).grid(
-            row=9,
+            row=11,
             column=0,
             columnspan=2,
             sticky="ew",
         )
 
     def _start(self) -> None:
+        model_status = self._model_provisioning_host.reload_configured_status()
+
+        self._apply_model_status(model_status)
+
+        if model_status.state is not WhisperModelProvisioningState.READY:
+            self._apply_snapshot(self._runtime_host.snapshot)
+            return
+
         snapshot = self._runtime_host.start()
         self._apply_snapshot(snapshot)
 
@@ -217,6 +267,9 @@ class ControllerWindow:
         )
 
     def _refresh(self) -> None:
+        model_status = self._model_provisioning_host.refresh()
+        self._apply_model_status(model_status)
+
         snapshot = self._runtime_host.refresh()
         self._apply_snapshot(snapshot)
 
@@ -243,8 +296,18 @@ class ControllerWindow:
             RuntimeProcessState.STOPPING,
         }
 
+        model_status = self._model_status
+
+        model_ready = model_status.state is WhisperModelProvisioningState.READY
+
         self._start_button.configure(
-            state="disabled" if active else "normal",
+            state=("normal" if not active and model_ready else "disabled"),
+        )
+
+        _, model_action_available = self._model_action(model_status)
+
+        self._model_action_button.configure(
+            state=("normal" if not active and model_action_available else "disabled"),
         )
 
         stoppable = snapshot.state in {
@@ -338,6 +401,13 @@ class ControllerWindow:
             action=lambda: self._shell_opener.open_directory(self._runtime_paths.support_directory),
         )
 
+    def _provision_model(self) -> None:
+        status = self._model_provisioning_host.provision()
+
+        self._apply_model_status(status)
+
+        self._apply_snapshot(self._runtime_host.snapshot)
+
     @staticmethod
     def _status_text(
         snapshot: RuntimeProcessSnapshot,
@@ -368,3 +438,55 @@ class ControllerWindow:
             return
 
         self._root.destroy()
+
+    def _apply_model_status(
+        self,
+        status: WhisperModelStatus,
+    ) -> None:
+        self._model_status = status
+
+        self._model_value.set(
+            self._model_status_text(status),
+        )
+
+        text, _ = self._model_action(status)
+
+        self._model_action_button.configure(
+            text=text,
+        )
+
+    @staticmethod
+    def _model_status_text(
+        status: WhisperModelStatus,
+    ) -> str:
+        match status.state:
+            case WhisperModelProvisioningState.READY:
+                state = "Ready"
+
+            case WhisperModelProvisioningState.NOT_INSTALLED:
+                state = "Not installed"
+
+            case WhisperModelProvisioningState.DOWNLOADING:
+                state = "Downloading"
+
+            case WhisperModelProvisioningState.FAILED:
+                state = "Failed"
+
+        return f"{status.model.value} — {state}"
+
+    @staticmethod
+    def _model_action(
+        status: WhisperModelStatus,
+    ) -> tuple[str, bool]:
+        match status.state:
+            case WhisperModelProvisioningState.READY:
+                return ("Model Installed", False)
+
+            case WhisperModelProvisioningState.NOT_INSTALLED:
+                return ("Install Model", True)
+
+            case WhisperModelProvisioningState.DOWNLOADING:
+                return ("Installing Model...", False)
+
+            case WhisperModelProvisioningState.FAILED:
+                return ("Retry Model Install", True)

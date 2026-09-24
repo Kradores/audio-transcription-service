@@ -322,3 +322,20 @@ We have successfully completed:
 - AMD packaged distribution metadata should use the ADR-052 deterministic manifest contract;
 - runtime diagnostic snapshots are currently controller-session scoped and are not persisted across controller restarts;
 - the existing Python 3.14 `torch.jit.load` deprecation warnings remain known and unrelated.
+
+
+## Unreleased
+
+### Added
+
+- Added local Whisper model provisioning from the controller.
+- Added Install Model and Retry flows for missing or failed model provisioning.
+- Added Whisper model state and provisioning diagnostics to support bundles.
+- Windows installers now include the default `small` Whisper model.
+
+### Changed
+
+- Whisper runtime startup now uses only locally provisioned models and no longer
+  performs implicit model downloads.
+- CPU, NVIDIA, and AMD installers preserve existing application-owned model
+  data during reinstall and uninstall.
