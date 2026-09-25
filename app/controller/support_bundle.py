@@ -19,6 +19,9 @@ from app.controller.distribution_metadata import (
     DistributionMetadataError,
     DistributionMetadataProvider,
 )
+from app.controller.logging import (
+    derive_controller_log_path,
+)
 from app.controller.runtime_process import RuntimeProcessDiagnosticsSnapshot
 from app.core.config.exceptions import ConfigurationError
 from app.core.config.loader import ConfigurationLoader
@@ -75,7 +78,7 @@ class SupportBundleCreator(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class SupportArtifactPaths:
-    log_file_path: Path | None
+    log_file_paths: tuple[Path, ...]
     diagnostics_directory: Path
     transcript_database_path: Path | None
     configuration_error: str | None
@@ -119,14 +122,19 @@ class ConfigurationSupportArtifactPathResolver:
                 ) from exc
 
             return SupportArtifactPaths(
-                log_file_path=None,
+                log_file_paths=(),
                 diagnostics_directory=(self._runtime_paths.diagnostics_directory),
                 transcript_database_path=None,
                 configuration_error=(f"{type(exc).__name__}: {exc}"),
             )
 
+        runtime_log_path = settings.logging.file.path
+
         return SupportArtifactPaths(
-            log_file_path=settings.logging.file.path,
+            log_file_paths=(
+                runtime_log_path,
+                derive_controller_log_path(runtime_log_path),
+            ),
             diagnostics_directory=(settings.whisper.slow_inference_capture.directory),
             transcript_database_path=(
                 settings.database.path if include_transcript_database else None
@@ -516,13 +524,18 @@ class SupportBundleBuilder:
         included_files: list[str],
         warnings: list[str],
     ) -> None:
-        configured_log = artifact_paths.log_file_path
+        configured_logs = artifact_paths.log_file_paths
 
-        if configured_log is not None:
-            candidates = [
-                configured_log,
-                *sorted(configured_log.parent.glob(f"{configured_log.name}.*")),
-            ]
+        if configured_logs:
+            candidate_paths: set[Path] = set()
+
+            for configured_log in configured_logs:
+                candidate_paths.add(configured_log)
+
+                candidate_paths.update(configured_log.parent.glob(f"{configured_log.name}.*"))
+
+            candidates = sorted(candidate_paths)
+
         else:
             candidates = sorted(self._runtime_paths.logs_directory.glob("*.log*"))
 

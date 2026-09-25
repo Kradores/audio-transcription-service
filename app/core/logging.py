@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import logging
+import sys
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from app.core.config.models import LoggingSettings
 
 LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 
 
-def configure_logging(settings: LoggingSettings) -> None:
+def configure_logging(
+    settings: LoggingSettings,
+    *,
+    file_path: Path | None = None,
+) -> None:
     """Configure application-wide console and persistent logging."""
 
     root_logger = logging.getLogger()
@@ -18,20 +24,23 @@ def configure_logging(settings: LoggingSettings) -> None:
 
     formatter = logging.Formatter(LOG_FORMAT)
 
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
+    if sys.stderr is not None:
+        console_handler = logging.StreamHandler(sys.stderr)
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
 
     if not settings.file.enabled:
         return
 
-    settings.file.path.parent.mkdir(
+    resolved_file_path = file_path if file_path is not None else settings.file.path
+
+    resolved_file_path.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
 
     file_handler = RotatingFileHandler(
-        filename=settings.file.path,
+        filename=resolved_file_path,
         maxBytes=settings.file.max_bytes,
         backupCount=settings.file.backup_count,
         encoding="utf-8",

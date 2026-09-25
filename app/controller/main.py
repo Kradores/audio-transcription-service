@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import multiprocessing
 import tkinter as tk
 from pathlib import Path
@@ -7,6 +8,9 @@ from pathlib import Path
 from app.controller.distribution_metadata import (
     DevelopmentDistributionMetadataProvider,
     DistributionMetadataProvider,
+)
+from app.controller.logging import (
+    configure_controller_logging,
 )
 from app.controller.model_provisioning import WhisperModelProvisioningHost
 from app.controller.model_status import (
@@ -31,6 +35,8 @@ from app.core.runtime_paths import (
 from app.models.whisper import LocalWhisperModelResolver
 from app.models.whisper_provisioner import HuggingFaceWhisperModelProvisioner
 
+logger = logging.getLogger(__name__)
+
 
 def run_controller(
     runtime_paths: RuntimePaths,
@@ -38,6 +44,15 @@ def run_controller(
     distribution_metadata_provider: DistributionMetadataProvider | None = None,
     nvidia_runtime_directory: Path | None = None,
 ) -> None:
+    settings = ConfigurationLoader(runtime_paths).load()
+
+    controller_log_path = configure_controller_logging(settings.logging)
+
+    logger.info(
+        "controller logging initialized path=%s",
+        controller_log_path,
+    )
+
     root = tk.Tk()
 
     runtime_host = RuntimeProcessHost(

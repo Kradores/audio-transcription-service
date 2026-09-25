@@ -4,6 +4,7 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 from zipfile import ZipFile
 
 import pytest
@@ -19,6 +20,7 @@ from app.controller.runtime_process import (
     RuntimeProcessDiagnosticsSnapshot,
 )
 from app.controller.support_bundle import (
+    ConfigurationSupportArtifactPathResolver,
     DefaultSupportInfoCollector,
     SupportArtifactPaths,
     SupportBundleBuilder,
@@ -44,6 +46,9 @@ from app.observability.hardware import (
 from app.observability.transcription_runtime import (
     CTranslate2CapabilitiesObservation,
     TranscriptionRuntimeObservation,
+)
+from tests.unit.core.config.builders import (
+    SettingsBuilder,
 )
 
 
@@ -97,7 +102,10 @@ def create_builder(
         runtime_paths=runtime_paths,
         path_resolver=FakePathResolver(
             SupportArtifactPaths(
-                log_file_path=(tmp_path / "logs" / "audio-transcription-service.log"),
+                log_file_paths=(
+                    (tmp_path / "logs" / "audio-transcription-service.log"),
+                    (tmp_path / "logs" / "audio-transcription-service.controller.log"),
+                ),
                 diagnostics_directory=(tmp_path / "diagnostics"),
                 transcript_database_path=database_path,
                 configuration_error=None,
@@ -174,6 +182,20 @@ def test_build_excludes_transcript_database_by_default(
         encoding="utf-8",
     )
 
+    controller_log = logs_directory / "audio-transcription-service.controller.log"
+
+    controller_log.write_text(
+        "controller log",
+        encoding="utf-8",
+    )
+
+    rotated_controller_log = logs_directory / "audio-transcription-service.controller.log.1"
+
+    rotated_controller_log.write_text(
+        "old controller log",
+        encoding="utf-8",
+    )
+
     rotated_log = logs_directory / "audio-transcription-service.log.1"
     rotated_log.write_text(
         "old log",
@@ -207,6 +229,8 @@ def test_build_excludes_transcript_database_by_default(
     assert "diagnostics/slow-inference/capture-1/metadata.json" in names
     assert "system-info.json" in names
     assert "manifest.json" in names
+    assert "logs/audio-transcription-service.controller.log" in names
+    assert "logs/audio-transcription-service.controller.log.1" in names
 
     assert "data/transcripts.db" not in names
 
@@ -621,3 +645,95 @@ def test_support_info_reports_whisper_model_not_observed(
         "error_type": "NotObserved",
         "error": ("No Whisper model status observation is available for this controller session."),
     }
+
+
+def test_build_deduplicates_configured_log_paths(
+    tmp_path: Path,
+) -> None:
+    runtime_paths = create_development_runtime_paths(tmp_path)
+
+    log_path = tmp_path / "logs" / "application.log"
+
+    log_path.parent.mkdir(
+        parents=True,
+    )
+
+    log_path.write_text(
+        "log",
+        encoding="utf-8",
+    )
+
+    builder = SupportBundleBuilder(
+        runtime_paths=runtime_paths,
+        path_resolver=FakePathResolver(
+            SupportArtifactPaths(
+                log_file_paths=(
+                    log_path,
+                    log_path,
+                ),
+                diagnostics_directory=(tmp_path / "diagnostics"),
+                transcript_database_path=None,
+                configuration_error=None,
+            )
+        ),
+        info_collector=FakeInfoCollector(),
+        clock=lambda: datetime(
+            2026,
+            9,
+            14,
+            12,
+            0,
+            0,
+            tzinfo=UTC,
+        ),
+    )
+
+    result = builder.build(include_transcript_database=False)
+
+    with ZipFile(result.path) as archive:
+        names = archive.namelist()
+
+    assert names.count("logs/application.log") == 1
+
+
+# File: tests/unit/controller/test_support_bundle.py
+
+
+def test_support_artifact_paths_include_runtime_and_controller_logs(
+    tmp_path: Path,
+) -> None:
+    runtime_paths = create_development_runtime_paths(tmp_path)
+
+    settings = SettingsBuilder().build()
+
+    runtime_log_path = tmp_path / "logs" / "audio-transcription-service.log"
+
+    resolved_settings = settings.model_copy(
+        update={
+            "logging": (
+                settings.logging.model_copy(
+                    update={
+                        "file": (
+                            settings.logging.file.model_copy(
+                                update={
+                                    "path": runtime_log_path,
+                                }
+                            )
+                        )
+                    }
+                )
+            )
+        }
+    )
+
+    with patch("app.controller.support_bundle.ConfigurationLoader") as loader_type:
+        loader_type.return_value.load.return_value = resolved_settings
+
+        resolver = ConfigurationSupportArtifactPathResolver(runtime_paths)
+
+        result = resolver.resolve(include_transcript_database=False)
+
+    assert result.log_file_paths == (
+        runtime_log_path,
+        (tmp_path / "logs" / "audio-transcription-service.controller.log"),
+    )
