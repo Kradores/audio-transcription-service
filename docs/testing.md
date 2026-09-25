@@ -895,3 +895,96 @@ Manual Windows acceptance additionally verifies:
 - CPU, NVIDIA, and AMD fresh-install default-model seeding;
 - reinstall preservation of existing model data;
 - uninstall preservation of application-owned model data.
+
+### Controller/runtime persistent logging acceptance
+
+ADR-055 logging ownership is covered by automated tests for:
+
+- deterministic controller-log path derivation;
+- distinct controller and runtime log ownership;
+- preservation of configured level and rotation settings;
+- persistent logging when packaged execution has no stderr stream;
+- repeat logging configuration without duplicate handlers;
+- controller logging before controller-owned hosts are constructed;
+- runtime and controller log-family collection;
+- rotated log collection;
+- duplicate-path suppression;
+- configuration-load fallback behavior.
+
+Packaged AMD acceptance was completed on Windows using the production
+windowed controller.
+
+#### Controller-only acceptance
+
+The controller was started without starting the transcription runtime.
+
+The configured `tiny` Whisper model was provisioned through the controller.
+
+The resulting files were:
+
+```text
+logs/audio-transcription-service.controller.log
+    present and non-empty
+
+logs/audio-transcription-service.log
+    absent
+```
+
+The controller log contained:
+
+```text
+controller logging initialized
+Whisper model provisioning started
+Whisper model provisioning completed
+```
+
+A support bundle created before runtime startup contained the controller log
+and did not contain a runtime log.
+
+#### Controller + runtime acceptance
+
+The transcription runtime was then started successfully and stopped through
+the controller.
+
+After runtime execution, both files existed:
+
+```text
+logs/audio-transcription-service.controller.log
+logs/audio-transcription-service.log
+```
+
+A subsequent support bundle contained both process-owned logs.
+
+This validates the intended ownership model:
+
+```text
+controller process
+    → controller log
+
+runtime child process
+    → runtime log
+
+support bundle
+    → all available process-owned log families
+```
+
+#### Milestone quality gate
+
+After ADR-054 provisioning and ADR-055 logging work:
+
+```text
+ruff format:
+clean
+
+ruff check:
+clean
+
+mypy:
+clean across 178 source files
+
+pytest:
+686 passed
+```
+
+Two existing `torch.jit.load` deprecation warnings under Python 3.14 remain
+known and unrelated to this milestone.

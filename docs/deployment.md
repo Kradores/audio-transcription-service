@@ -13,10 +13,28 @@ Installed per-user Windows execution uses:
     data\
         transcripts.db
     logs\
+        audio-transcription-service.controller.log
         audio-transcription-service.log
     diagnostics\
+    models\
     support\
 ```
+
+Persistent logging follows process ownership:
+
+```text
+controller process
+    → logs/audio-transcription-service.controller.log
+
+transcription runtime process
+    → logs/audio-transcription-service.log
+```
+
+Each log rotates independently using the configured logging limits.
+
+The controller log can exist before the runtime log because controller-owned
+operations, including Whisper model provisioning, do not require a
+transcription runtime process.
 
 Configured relative filesystem paths resolve against this runtime root. Absolute configured paths remain absolute.
 

@@ -332,6 +332,9 @@ We have successfully completed:
 - Added Install Model and Retry flows for missing or failed model provisioning.
 - Added Whisper model state and provisioning diagnostics to support bundles.
 - Windows installers now include the default `small` Whisper model.
+- Added a controller-owned persistent log:
+  `audio-transcription-service.controller.log`.
+- Support bundles now include available controller and runtime log families.
 
 ### Changed
 
@@ -339,3 +342,45 @@ We have successfully completed:
   performs implicit model downloads.
 - CPU, NVIDIA, and AMD installers preserve existing application-owned model
   data during reinstall and uninstall.
+- Controller logging is initialized before controller-owned operations, so
+  model provisioning and runtime supervision remain persistently diagnosable
+  before the transcription runtime starts.
+- Controller and runtime logs rotate independently.
+- Packaged model provisioning no longer depends on console output being
+  available in windowed PyInstaller execution.
+
+
+## As of 2026-09-25
+
+**Implemented**
+
+- ADR-054 — Local Whisper Model Provisioning and Offline Runtime Startup;
+- application-owned local Whisper model store;
+- explicit model provisioning with `NOT_INSTALLED`, `DOWNLOADING`, `READY`,
+  and `FAILED` states;
+- controller Install Model / Retry workflow;
+- validation and `.ready` publication before a model becomes runtime-usable;
+- local-path-only Faster-Whisper runtime startup with no implicit model
+  download;
+- default `small` model seeding in Windows installers;
+- packaged model provisioning fixed for windowed PyInstaller execution where
+  stdout/stderr may be unavailable;
+- ADR-055 — Controller and Runtime Process Logging Ownership;
+- controller-owned persistent log:
+  `audio-transcription-service.controller.log`;
+- runtime-owned persistent log remains:
+  `audio-transcription-service.log`;
+- independent controller/runtime log rotation;
+- controller logging available before the transcription runtime starts;
+- model-provisioning lifecycle and failures are now persistently diagnosable;
+- support bundles include all available controller and runtime log families;
+- packaged AMD acceptance verified controller-only provisioning diagnostics,
+  controller-only support collection, and support collection containing both
+  process logs after runtime execution;
+- final quality gate:
+  - 686 tests passed;
+  - mypy clean across 178 source files;
+  - Ruff formatting clean;
+  - Ruff checks clean;
+- two existing Python 3.14 `torch.jit.load` deprecation warnings remain known
+  and unrelated.

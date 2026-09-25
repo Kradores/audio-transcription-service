@@ -66,7 +66,54 @@ Transcript text is not logged at INFO level.
 
 Transcript text may be logged at DEBUG level for controlled diagnostic runs.
 
-Normal logging is emitted both to console and, when configured, to a bounded rotating file.
+Normal logging is emitted to console when a console stream is available and,
+when configured, to bounded rotating persistent files.
+
+### Controller and runtime process logging
+
+Persistent log ownership follows the controller/runtime process boundary
+defined by ADR-050 and ADR-055.
+
+The transcription runtime owns the configured application log:
+
+```text
+logs/audio-transcription-service.log
+```
+
+The interactive Windows controller owns the deterministic sibling log:
+
+```text
+logs/audio-transcription-service.controller.log
+```
+
+No persistent rotating log file is written by both processes.
+
+The controller configures logging before constructing controller-owned
+components. Controller lifecycle, runtime supervision, support-bundle creation,
+and Whisper model provisioning can therefore be persisted even when the
+transcription runtime has never started.
+
+The runtime child independently configures logging through the normal
+application composition path each time a fresh runtime process is started.
+
+Both log families use the configured log level, rotation size, backup count,
+and structured log format.
+
+Rotation is independent:
+
+```text
+audio-transcription-service.log
+audio-transcription-service.log.1
+audio-transcription-service.log.2
+
+audio-transcription-service.controller.log
+audio-transcription-service.controller.log.1
+audio-transcription-service.controller.log.2
+```
+
+Packaged Windows execution may not provide stdout or stderr. Console logging is
+therefore best-effort; absence of a console stream must not prevent persistent
+file logging or application operation.
 
 ---
 
@@ -1518,10 +1565,32 @@ support/support-<timestamp>.zip
 The default bundle contains:
 
 - application configuration, when available;
-- current application log and rotated application logs;
+- controller log and rotated controller logs, when available;
+- transcription-runtime log and rotated runtime logs, when available;
 - slow-inference `metadata.json` files;
 - `system-info.json`;
 - `manifest.json`.
+
+The controller and runtime log families are independent.
+
+A support bundle created before the transcription runtime has ever started may
+therefore contain only:
+
+```text
+logs/audio-transcription-service.controller.log
+```
+
+After a runtime has started, the bundle may additionally contain:
+
+```text
+logs/audio-transcription-service.log
+```
+
+and rotations from either family.
+
+When configuration cannot be loaded, support collection falls back to
+best-effort discovery of existing application logs under the runtime logs
+directory.
 
 Raw slow-inference audio (`audio.wav` and `audio.npy`) is excluded.
 
@@ -1811,3 +1880,8 @@ Provisioning failures include exception details.
 
 This is separate from `configuration.whisper.model`, which describes the user's
 configured logical model rather than the controller-observed local model state.
+
+These events are controller-owned and are persisted to the controller log.
+
+This means provisioning remains diagnosable even if downloading or validation
+fails before any transcription runtime process has been started.
