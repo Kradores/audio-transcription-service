@@ -326,6 +326,8 @@ We have successfully completed:
 
 ## Unreleased
 
+## 0.2.0 — 2026-09-25
+
 ### Added
 
 - Added local Whisper model provisioning from the controller.
