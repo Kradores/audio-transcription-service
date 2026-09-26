@@ -1,6 +1,8 @@
 # ADR-057 — Platform-Specific Composition, Source Ownership, and Quality Gates
 
-## Status Proposed
+## Status
+
+Accepted
 
 ## Context
 
