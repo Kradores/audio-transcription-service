@@ -1,8 +1,6 @@
 from collections.abc import AsyncIterator, Callable
 from typing import Protocol
 
-import pyaudiowpatch
-
 from app.audio.contracts import (
     AudioFrame,
     Float32Audio,
@@ -68,8 +66,3 @@ class AudioResamplerFactory(Protocol):
         channels: int,
     ) -> AudioResampler:
         """Create a streaming resampler for the requested rates."""
-
-
-class PyAudioFactory(Protocol):
-    def create(self) -> pyaudiowpatch.PyAudio:
-        """Create a fresh PyAudio instance."""

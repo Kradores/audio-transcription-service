@@ -10,7 +10,7 @@ authors = [
 dependencies = [
     "fastapi>=0.141.1",
     "numpy>=2.3.0",
-    "pyaudiowpatch>=0.2.12.8",
+    "pyaudiowpatch>=0.2.12.8; sys_platform == 'win32'",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.2",
     "pyyaml>=6.0.3",
@@ -18,7 +18,7 @@ dependencies = [
     "uvicorn>=0.52.1",
     "silero-vad>=6.2.1,<7",
     "faster-whisper>=1.2.1",
-    "pycaw>=20251023",
+    "pycaw>=20251023; sys_platform == 'win32'",
     "huggingface-hub>=1.29.0,<2",
 ]
 
