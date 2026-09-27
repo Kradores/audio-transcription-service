@@ -1,19 +1,19 @@
 from pathlib import Path
 
 from app.application import Application
-from app.audio.capture import (
+from app.audio.protocols import ConversationCaptureFactory, ConversationCaptures
+from app.audio.timeline import AudioTimeline
+from app.composition import create_application
+from app.core.runtime_paths import RuntimePaths
+from app.platforms.windows.audio.capture import (
     PyAudioCapture,
     PyAudioFactoryImpl,
     QueuedAudioCapture,
     WasapiInputDeviceProviderFactoryImpl,
     WasapiLoopbackDeviceProviderFactoryImpl,
 )
-from app.audio.portaudio_refresh import PortAudioRefreshCoordinator
-from app.audio.protocols import ConversationCaptureFactory, ConversationCaptures
-from app.audio.timeline import AudioTimeline
-from app.audio.windows_device_monitor import WindowsAudioDeviceMonitor
-from app.composition import create_application
-from app.core.runtime_paths import RuntimePaths
+from app.platforms.windows.audio.device_monitor import WindowsAudioDeviceMonitor
+from app.platforms.windows.audio.portaudio_refresh import PortAudioRefreshCoordinator
 from app.platforms.windows.faster_whisper_runtime import (
     WindowsFasterWhisperRuntimeInitializerFactory,
 )

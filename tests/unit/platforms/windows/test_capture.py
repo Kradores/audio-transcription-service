@@ -8,7 +8,11 @@ import numpy as np
 import pyaudiowpatch
 import pytest
 
-from app.audio.capture import (
+from app.audio.contracts import AudioFormat, AudioFrame
+from app.audio.device_monitor import AudioDeviceMonitor
+from app.audio.timeline import AudioTimeline
+from app.audio.transport import AudioFrameTransport
+from app.platforms.windows.audio.capture import (
     RECOVERY_INITIAL_DELAY_SECONDS,
     CaptureDeviceProvider,
     CaptureDeviceProviderFactory,
@@ -22,11 +26,7 @@ from app.audio.capture import (
     WasapiInputDeviceProviderFactoryImpl,
     WasapiLoopbackDevice,
 )
-from app.audio.contracts import AudioFormat, AudioFrame
-from app.audio.device_monitor import AudioDeviceMonitor
-from app.audio.portaudio_refresh import PortAudioRefreshRequester
-from app.audio.timeline import AudioTimeline
-from app.audio.transport import AudioFrameTransport
+from app.platforms.windows.audio.portaudio_refresh import PortAudioRefreshRequester
 from tests.unit.audio.helpers import (
     consume_one,
     consume_stream,

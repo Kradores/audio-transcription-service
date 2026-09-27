@@ -2,13 +2,13 @@ from pathlib import Path
 from unittest.mock import ANY, MagicMock, call, patch
 
 from app.application import Application
-from app.audio.capture import (
+from app.audio.timeline import MonotonicAudioTimeline
+from app.core.runtime_paths import RuntimePaths
+from app.platforms.windows.audio.capture import (
     PyAudioCapture,
     WasapiInputDeviceProviderFactoryImpl,
     WasapiLoopbackDeviceProviderFactoryImpl,
 )
-from app.audio.timeline import MonotonicAudioTimeline
-from app.core.runtime_paths import RuntimePaths
 from app.platforms.windows.composition import (
     WindowsConversationCaptureFactory,
     create_windows_application,

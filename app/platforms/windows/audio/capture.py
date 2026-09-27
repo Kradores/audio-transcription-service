@@ -14,9 +14,9 @@ import pyaudiowpatch
 
 from app.audio.contracts import AudioFormat, AudioFrame
 from app.audio.device_monitor import AudioDeviceMonitor
-from app.audio.portaudio_refresh import PortAudioRefreshRequester
 from app.audio.protocols import AudioCapture
 from app.audio.timeline import AudioTimeline
+from app.platforms.windows.audio.portaudio_refresh import PortAudioRefreshRequester
 
 type Sleep = Callable[[float], Awaitable[None]]
 RECOVERY_INITIAL_DELAY_SECONDS = 0.1

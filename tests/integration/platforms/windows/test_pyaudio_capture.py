@@ -5,11 +5,11 @@ import winsound
 
 import pytest
 
-from app.audio.capture import PyAudioCapture
 from app.audio.timeline import MonotonicAudioTimeline
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
 from app.core.runtime_paths import create_development_runtime_paths
+from app.platforms.windows.audio.capture import PyAudioCapture
 from app.platforms.windows.composition import WindowsConversationCaptureFactory
 
 CAPTURE_DURATION_SECONDS = 2.0

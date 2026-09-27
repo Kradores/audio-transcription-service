@@ -4,7 +4,10 @@ from typing import cast
 
 import pytest
 
-from app.audio.windows_device_monitor import WindowsAudioDeviceMonitor, _NotificationClient
+from app.platforms.windows.audio.device_monitor import (
+    WindowsAudioDeviceMonitor,
+    _NotificationClient,
+)
 
 
 class FakeEnumerator:

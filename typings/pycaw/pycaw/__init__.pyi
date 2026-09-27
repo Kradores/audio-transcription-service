@@ -1,4 +1,4 @@
-from app.audio.windows_device_monitor import _EndpointNotificationEnumerator
+from app.platforms.windows.audio.device_monitor import _EndpointNotificationEnumerator
 
 class AudioUtilities:
     @staticmethod

@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 import pytest
 
-from app.audio.portaudio_refresh import PortAudioRefreshCoordinator
+from app.platforms.windows.audio.portaudio_refresh import PortAudioRefreshCoordinator
 
 
 class FakeParticipant:
