@@ -239,7 +239,11 @@ def main() -> None:
 
     model = cast(
         ReplayWhisperModel,
-        create_whisper_model(settings, model_path=model_path, runtime_initializer_factory=runtime_initializer_factory,),
+        create_whisper_model(
+            settings,
+            model_path=model_path,
+            runtime_initializer_factory=runtime_initializer_factory,
+        ),
     )
 
     output_path = args.output.resolve()
