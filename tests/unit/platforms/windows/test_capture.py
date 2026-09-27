@@ -442,7 +442,7 @@ async def test_start_opens_default_wasapi_loopback_stream(
     audio.open.return_value = stream
 
     monkeypatch.setattr(
-        "app.audio.capture.pyaudiowpatch.PyAudio",
+        "app.platforms.windows.audio.capture.pyaudiowpatch.PyAudio",
         lambda: audio,
     )
 
@@ -500,7 +500,7 @@ async def test_start_uses_loopback_device_format(
     audio.open.return_value = stream
 
     monkeypatch.setattr(
-        "app.audio.capture.pyaudiowpatch.PyAudio",
+        "app.platforms.windows.audio.capture.pyaudiowpatch.PyAudio",
         lambda: audio,
     )
 
