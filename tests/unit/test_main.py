@@ -1,7 +1,7 @@
 import asyncio
 import signal
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -20,6 +20,12 @@ async def test_run_application_stops_gracefully_when_shutdown_is_requested(
     application.start = AsyncMock()
     application.stop = AsyncMock()
 
+    application_factory = MagicMock(
+        return_value=application,
+    )
+
+    runtime_paths = create_development_runtime_paths(tmp_path)
+
     shutdown_event = asyncio.Event()
     shutdown_event.set()
     runtime_finished = asyncio.Event()
@@ -29,19 +35,20 @@ async def test_run_application_stops_gracefully_when_shutdown_is_requested(
 
     application.wait = AsyncMock(side_effect=wait_for_runtime)
 
-    with patch(
-        "app.main.create_application",
-        return_value=application,
-    ):
-        # Act
-        await run_application(
-            create_development_runtime_paths(tmp_path),
-            shutdown_event=shutdown_event,
-        )
+    # Act
+    await run_application(
+        runtime_paths,
+        shutdown_event=shutdown_event,
+        application_factory=application_factory,
+    )
 
     # Assert
     application.start.assert_awaited_once()
     application.stop.assert_awaited_once()
+    application_factory.assert_called_once_with(
+        runtime_paths,
+        nvidia_runtime_directory=None,
+    )
 
 
 @pytest.mark.anyio
@@ -52,6 +59,12 @@ async def test_run_application_stops_application_when_cancelled(
     application.start = AsyncMock()
     application.stop = AsyncMock()
 
+    application_factory = MagicMock(
+        return_value=application,
+    )
+
+    runtime_paths = create_development_runtime_paths(tmp_path)
+
     shutdown_event = asyncio.Event()
     runtime_finished = asyncio.Event()
 
@@ -60,23 +73,20 @@ async def test_run_application_stops_application_when_cancelled(
 
     application.wait = AsyncMock(side_effect=wait_for_runtime)
 
-    with patch(
-        "app.main.create_application",
-        return_value=application,
-    ):
-        task = asyncio.create_task(
-            run_application(
-                create_development_runtime_paths(tmp_path),
-                shutdown_event=shutdown_event,
-            )
+    task = asyncio.create_task(
+        run_application(
+            runtime_paths,
+            shutdown_event=shutdown_event,
+            application_factory=application_factory,
         )
+    )
 
-        await asyncio.sleep(0)
+    await asyncio.sleep(0)
 
-        task.cancel()
+    task.cancel()
 
-        with pytest.raises(asyncio.CancelledError):
-            await task
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
     application.start.assert_awaited_once()
     application.stop.assert_awaited_once()
@@ -94,22 +104,25 @@ async def test_run_application_propagates_runtime_failure_and_stops_application(
     )
     application.stop = AsyncMock()
 
+    application_factory = MagicMock(
+        return_value=application,
+    )
+
+    runtime_paths = create_development_runtime_paths(tmp_path)
+
     shutdown_event = asyncio.Event()
 
     # Act / Assert
     with (
-        patch(
-            "app.main.create_application",
-            return_value=application,
-        ),
         pytest.raises(
             RuntimeError,
             match="pipeline failed",
         ),
     ):
         await run_application(
-            create_development_runtime_paths(tmp_path),
+            runtime_paths,
             shutdown_event=shutdown_event,
+            application_factory=application_factory,
         )
 
     application.stop.assert_awaited_once()
@@ -145,6 +158,12 @@ async def test_run_application_notifies_after_successful_start(
     )
     application.stop = AsyncMock()
 
+    application_factory = MagicMock(
+        return_value=application,
+    )
+
+    runtime_paths = create_development_runtime_paths(tmp_path)
+
     shutdown_event = asyncio.Event()
     shutdown_event.set()
 
@@ -158,15 +177,12 @@ async def test_run_application_notifies_after_successful_start(
         events.append("startup-notified")
         observed_settings.append(started_settings)
 
-    with patch(
-        "app.main.create_application",
-        return_value=application,
-    ):
-        await run_application(
-            create_development_runtime_paths(tmp_path),
-            shutdown_event=shutdown_event,
-            on_started=on_started,
-        )
+    await run_application(
+        runtime_paths,
+        shutdown_event=shutdown_event,
+        on_started=on_started,
+        application_factory=application_factory,
+    )
 
     assert events == [
         "application-started",
@@ -188,21 +204,24 @@ async def test_run_application_does_not_notify_when_start_fails(
     )
     application.stop = AsyncMock()
 
+    application_factory = MagicMock(
+        return_value=application,
+    )
+
+    runtime_paths = create_development_runtime_paths(tmp_path)
+
     on_started = MagicMock()
 
     with (
-        patch(
-            "app.main.create_application",
-            return_value=application,
-        ),
         pytest.raises(
             RuntimeError,
             match="startup failed",
         ),
     ):
         await run_application(
-            create_development_runtime_paths(tmp_path),
+            runtime_paths,
             on_started=on_started,
+            application_factory=application_factory,
         )
 
     on_started.assert_not_called()

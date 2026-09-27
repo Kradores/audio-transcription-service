@@ -3,25 +3,14 @@ from __future__ import annotations
 import logging
 import sqlite3
 from pathlib import Path
-from typing import assert_never
 
 from silero_vad import VADIterator, load_silero_vad
 
 from app.application import Application
-from app.audio.capture import (
-    PyAudioCapture,
-    PyAudioFactoryImpl,
-    QueuedAudioCapture,
-    WasapiInputDeviceProviderFactoryImpl,
-    WasapiLoopbackDeviceProviderFactoryImpl,
-)
 from app.audio.normalizer import AudioNormalizerImpl
-from app.audio.portaudio_refresh import PortAudioRefreshCoordinator
-from app.audio.protocols import AudioCapture, AudioNormalizer
+from app.audio.protocols import AudioCapture, AudioNormalizer, ConversationCaptureFactory
 from app.audio.resampler import SoXRResamplerFactory
-from app.audio.timeline import AudioTimeline, MonotonicAudioTimeline
-from app.audio.windows_device_monitor import WindowsAudioDeviceMonitor
-from app.core.config.enums import WhisperRuntime
+from app.audio.timeline import MonotonicAudioTimeline
 from app.core.config.loader import ConfigurationLoader
 from app.core.config.models import (
     AdaptiveTranscriptionLanguageSettings,
@@ -54,10 +43,7 @@ from app.transcription.contracts import AudioSource
 from app.transcription.faster_whisper import FasterWhisperTranscriber
 from app.transcription.faster_whisper_factory import FasterWhisperModelFactory
 from app.transcription.faster_whisper_runtime import (
-    DefaultFasterWhisperRuntimeInitializer,
-    FasterWhisperRuntimeInitializer,
-    NvidiaFasterWhisperRuntimeInitializer,
-    TheRockFasterWhisperRuntimeInitializer,
+    FasterWhisperRuntimeInitializerFactory,
 )
 from app.transcription.processor import TranscriptionProcessorImpl
 from app.transcription.protocols import (
@@ -78,7 +64,8 @@ logger = logging.getLogger(__name__)
 def create_application(
     runtime_paths: RuntimePaths,
     *,
-    nvidia_runtime_directory: Path | None = None,
+    capture_factory: ConversationCaptureFactory,
+    runtime_initializer_factory: FasterWhisperRuntimeInitializerFactory,
 ) -> Application:
     """Create and configure the application."""
 
@@ -100,35 +87,24 @@ def create_application(
         database=database,
         settings=settings,
         model_path=model_path,
-        nvidia_runtime_directory=(nvidia_runtime_directory),
+        runtime_initializer_factory=runtime_initializer_factory,
     )
 
-    portaudio_refresh = PortAudioRefreshCoordinator()
-
-    system_capture = create_system_audio_capture(
+    captures = capture_factory.create(
         queue_capacity=settings.audio.capture.queue_capacity,
         timeline=timeline,
-        portaudio_refresh=portaudio_refresh,
     )
-    microphone_capture = create_microphone_capture(
-        queue_capacity=settings.audio.capture.queue_capacity,
-        timeline=timeline,
-        portaudio_refresh=portaudio_refresh,
-    )
-
-    portaudio_refresh.register(system_capture)
-    portaudio_refresh.register(microphone_capture)
 
     system_pipeline = create_source_pipeline(
         source=AudioSource.SYSTEM_AUDIO,
-        capture=system_capture,
+        capture=captures.system_audio,
         settings=settings,
         transcription_executor=transcription_executor,
     )
 
     microphone_pipeline = create_source_pipeline(
         source=AudioSource.MICROPHONE,
-        capture=microphone_capture,
+        capture=captures.microphone,
         settings=settings,
         transcription_executor=transcription_executor,
     )
@@ -198,52 +174,6 @@ def create_source_pipeline(
     )
 
 
-def create_system_audio_capture(
-    *,
-    queue_capacity: int,
-    timeline: AudioTimeline,
-    portaudio_refresh: PortAudioRefreshCoordinator,
-) -> PyAudioCapture:
-    """Create Windows system-audio loopback capture."""
-
-    return PyAudioCapture(
-        audio_factory=PyAudioFactoryImpl(),
-        device_provider_factory=WasapiLoopbackDeviceProviderFactoryImpl(),
-        device_monitor=WindowsAudioDeviceMonitor(
-            flow="eRender",
-            role="eConsole",
-        ),
-        transport=QueuedAudioCapture(
-            max_queue_size=queue_capacity,
-        ),
-        portaudio_refresh=portaudio_refresh,
-        timeline=timeline,
-    )
-
-
-def create_microphone_capture(
-    *,
-    queue_capacity: int,
-    timeline: AudioTimeline,
-    portaudio_refresh: PortAudioRefreshCoordinator,
-) -> PyAudioCapture:
-    """Create Windows default-microphone capture."""
-
-    return PyAudioCapture(
-        audio_factory=PyAudioFactoryImpl(),
-        device_provider_factory=WasapiInputDeviceProviderFactoryImpl(),
-        device_monitor=WindowsAudioDeviceMonitor(
-            flow="eCapture",
-            role="eConsole",
-        ),
-        transport=QueuedAudioCapture(
-            max_queue_size=queue_capacity,
-        ),
-        portaudio_refresh=portaudio_refresh,
-        timeline=timeline,
-    )
-
-
 def create_vad(settings: Settings) -> AudioVad | None:
     """Create the configured voice activity detector."""
     if not settings.vad.enabled:
@@ -277,42 +207,16 @@ def create_normalizer(settings: AudioProcessingSettings) -> AudioNormalizer:
     )
 
 
-def create_faster_whisper_runtime_initializer(
-    runtime: WhisperRuntime,
-    *,
-    nvidia_runtime_directory: Path | None = None,
-) -> FasterWhisperRuntimeInitializer:
-    """Create the configured Faster-Whisper runtime initializer."""
-
-    match runtime:
-        case WhisperRuntime.DEFAULT:
-            return DefaultFasterWhisperRuntimeInitializer()
-
-        case WhisperRuntime.NVIDIA:
-            if nvidia_runtime_directory is None:
-                raise ValueError("NVIDIA runtime requires nvidia_runtime_directory")
-
-            return NvidiaFasterWhisperRuntimeInitializer(
-                runtime_directory=nvidia_runtime_directory,
-            )
-
-        case WhisperRuntime.THEROCK:
-            return TheRockFasterWhisperRuntimeInitializer()
-
-    assert_never(runtime)
-
-
 def create_whisper_model(
     settings: Settings,
     *,
     model_path: Path,
-    nvidia_runtime_directory: Path | None = None,
+    runtime_initializer_factory: FasterWhisperRuntimeInitializerFactory,
 ) -> WhisperModelProtocol:
     """Create the configured Faster-Whisper model."""
 
-    runtime_initializer = create_faster_whisper_runtime_initializer(
+    runtime_initializer = runtime_initializer_factory.create(
         settings.whisper.runtime,
-        nvidia_runtime_directory=nvidia_runtime_directory,
     )
 
     factory = FasterWhisperModelFactory(
@@ -390,7 +294,7 @@ def create_transcription_executor(
     database: sqlite3.Connection,
     settings: Settings,
     model_path: Path,
-    nvidia_runtime_directory: Path | None = None,
+    runtime_initializer_factory: FasterWhisperRuntimeInitializerFactory,
 ) -> TranscriptionExecutor:
     language_settings = settings.transcription.language
 
@@ -407,7 +311,7 @@ def create_transcription_executor(
     model = create_whisper_model(
         settings,
         model_path=model_path,
-        nvidia_runtime_directory=nvidia_runtime_directory,
+        runtime_initializer_factory=runtime_initializer_factory,
     )
 
     slow_inference_capture = SlowInferenceCapture(

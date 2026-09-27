@@ -6,12 +6,23 @@ import signal
 from collections.abc import Callable
 from pathlib import Path
 from types import FrameType
+from typing import Protocol
 
-from app.composition import create_application
+from app.application import Application
 from app.core.config.models import Settings
 from app.core.runtime_paths import RuntimePaths, create_development_runtime_paths
 
 logger = logging.getLogger(__name__)
+
+
+class ApplicationFactory(Protocol):
+    def __call__(
+        self,
+        runtime_paths: RuntimePaths,
+        *,
+        nvidia_runtime_directory: Path | None = None,
+    ) -> Application:
+        """Create the application for the active platform."""
 
 
 async def run_application(
@@ -19,13 +30,14 @@ async def run_application(
     shutdown_event: asyncio.Event | None = None,
     on_started: Callable[[Settings], None] | None = None,
     *,
+    application_factory: ApplicationFactory,
     nvidia_runtime_directory: Path | None = None,
 ) -> None:
     """Create, run, and gracefully stop the application."""
 
-    application = create_application(
+    application = application_factory(
         runtime_paths,
-        nvidia_runtime_directory=(nvidia_runtime_directory),
+        nvidia_runtime_directory=nvidia_runtime_directory,
     )
     event = shutdown_event or asyncio.Event()
 
@@ -111,9 +123,12 @@ async def _run_cli_application(
     )
 
     try:
+        from app.platforms.windows.composition import create_windows_application
+
         await run_application(
             runtime_paths,
             shutdown_event=shutdown_event,
+            application_factory=create_windows_application,
         )
     finally:
         signal.signal(

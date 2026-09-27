@@ -14,6 +14,7 @@ from app.composition import (
 )
 from app.core.config.loader import ConfigurationLoader
 from app.core.runtime_paths import create_development_runtime_paths
+from app.transcription.faster_whisper_runtime import DefaultFasterWhisperRuntimeInitializerFactory
 from tests.integration.constants import INTEGRATION_CONFIGURATION_PATH
 
 FIXTURE_PATH = Path(__file__).parents[2] / "fixtures" / "audio" / "english_speech.wav"
@@ -76,6 +77,8 @@ def test_real_faster_whisper_transcribes_audio_fixture() -> None:
         settings,
     )
 
+    runtime_initializer_factory = DefaultFasterWhisperRuntimeInitializerFactory()
+
     normalizer = AudioNormalizerImpl(
         settings=settings.audio.processing,
         resampler_factory=SoXRResamplerFactory(),
@@ -86,7 +89,9 @@ def test_real_faster_whisper_transcribes_audio_fixture() -> None:
 
     segment = _create_speech_segment(processing_frames)
 
-    model = create_whisper_model(settings, model_path=model_path)
+    model = create_whisper_model(
+        settings, model_path=model_path, runtime_initializer_factory=runtime_initializer_factory
+    )
     transcriber = create_transcriber(model)
 
     # Act

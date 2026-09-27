@@ -20,7 +20,6 @@ from app.controller.multiprocessing_runtime import (
     MultiprocessingRuntimeProcessSessionFactory,
 )
 from app.controller.runtime_process import RuntimeProcessHost
-from app.controller.shell import WindowsShellOpener
 from app.controller.support_bundle import (
     ConfigurationSupportArtifactPathResolver,
     DefaultSupportInfoCollector,
@@ -34,6 +33,7 @@ from app.core.runtime_paths import (
 )
 from app.models.whisper import LocalWhisperModelResolver
 from app.models.whisper_provisioner import HuggingFaceWhisperModelProvisioner
+from app.platforms.windows.shell import WindowsShellOpener
 
 logger = logging.getLogger(__name__)
 

@@ -6,12 +6,11 @@ import winsound
 import pytest
 
 from app.audio.capture import PyAudioCapture
-from app.audio.portaudio_refresh import PortAudioRefreshCoordinator
 from app.audio.timeline import MonotonicAudioTimeline
-from app.composition import create_system_audio_capture
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
 from app.core.runtime_paths import create_development_runtime_paths
+from app.platforms.windows.composition import WindowsConversationCaptureFactory
 
 CAPTURE_DURATION_SECONDS = 2.0
 
@@ -26,14 +25,14 @@ async def test_real_pyaudio_capture_receives_wasapi_loopback_frames() -> None:
             config_path=DEFAULT_CONFIGURATION_PATH,
         )
     ).load()
-    coordinator = PortAudioRefreshCoordinator()
     timeline = MonotonicAudioTimeline()
 
-    capture = create_system_audio_capture(
+    captures = WindowsConversationCaptureFactory().create(
         queue_capacity=settings.audio.capture.queue_capacity,
         timeline=timeline,
-        portaudio_refresh=coordinator,
     )
+
+    capture = captures.system_audio
 
     frames = []
 

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from app.controller.shell import WindowsShellOpener
+from app.platforms.windows.shell import WindowsShellOpener
 
 
 def test_open_directory_creates_missing_directory(

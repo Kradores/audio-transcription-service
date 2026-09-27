@@ -17,6 +17,9 @@ from app.composition import create_whisper_model, resolve_configured_whisper_mod
 from app.core.config.constants import DEFAULT_CONFIGURATION_PATH
 from app.core.config.loader import ConfigurationLoader
 from app.core.runtime_paths import create_development_runtime_paths
+from app.platforms.faster_whisper_runtime import (
+    create_platform_runtime_initializer_factory,
+)
 
 
 class CaptureMetadata(BaseModel):
@@ -311,6 +314,8 @@ def main() -> None:
         config_path=args.config,
     )
 
+    runtime_initializer_factory = create_platform_runtime_initializer_factory()
+
     settings = ConfigurationLoader(
         runtime_paths,
     ).load()
@@ -338,7 +343,9 @@ def main() -> None:
 
     model = cast(
         ReplayWhisperModel,
-        create_whisper_model(settings, model_path=model_path),
+        create_whisper_model(
+            settings, model_path=model_path, runtime_initializer_factory=runtime_initializer_factory
+        ),
     )
 
     timings: list[ReplayTiming] = []

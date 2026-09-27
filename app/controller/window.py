@@ -10,13 +10,13 @@ from app.controller.runtime_process import (
     RuntimeProcessSnapshot,
     RuntimeProcessState,
 )
-from app.controller.shell import ShellOpener
 from app.controller.support_bundle import SupportBundleCreator, SupportBundleError
 from app.core.runtime_paths import RuntimePaths
 from app.models.whisper import (
     WhisperModelProvisioningState,
     WhisperModelStatus,
 )
+from app.platforms.windows.shell import ShellOpener
 
 _REFRESH_INTERVAL_MS = 100
 

@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from typing import Protocol
 
 from app.audio.contracts import (
@@ -6,6 +7,7 @@ from app.audio.contracts import (
     Float32Audio,
     ProcessingAudioFrame,
 )
+from app.audio.timeline import AudioTimeline
 
 
 class AudioCapture(Protocol):
@@ -66,3 +68,19 @@ class AudioResamplerFactory(Protocol):
         channels: int,
     ) -> AudioResampler:
         """Create a streaming resampler for the requested rates."""
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationCaptures:
+    system_audio: AudioCapture
+    microphone: AudioCapture
+
+
+class ConversationCaptureFactory(Protocol):
+    def create(
+        self,
+        *,
+        queue_capacity: int,
+        timeline: AudioTimeline,
+    ) -> ConversationCaptures:
+        """Create the audio captures used by one conversation."""

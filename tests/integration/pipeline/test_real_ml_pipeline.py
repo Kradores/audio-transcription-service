@@ -22,6 +22,7 @@ from app.core.runtime_paths import create_development_runtime_paths
 from app.services.speech_pipeline import SpeechPipeline
 from app.transcription.aggregation import TranscriptionSegmentAggregatorImpl
 from app.transcription.contracts import AudioSource
+from app.transcription.faster_whisper_runtime import DefaultFasterWhisperRuntimeInitializerFactory
 from tests.integration.constants import INTEGRATION_CONFIGURATION_PATH
 from tests.integration.transcription.test_faster_whisper import (
     resolve_configured_whisper_model_path,
@@ -92,6 +93,8 @@ async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None
         settings,
     )
 
+    runtime_initializer_factory = DefaultFasterWhisperRuntimeInitializerFactory()
+
     frame = _read_wav(FIXTURE_PATH)
     capture = FixtureAudioCapture(frame)
 
@@ -122,6 +125,7 @@ async def test_real_ml_pipeline_transcribes_and_persists_audio_fixture() -> None
         database=database,
         settings=settings,
         model_path=model_path,
+        runtime_initializer_factory=runtime_initializer_factory,
     )
 
     pipeline = SpeechPipeline(

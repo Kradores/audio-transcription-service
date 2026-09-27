@@ -224,6 +224,7 @@ async def _run_runtime_process_async(
 
     # Keep heavy application/native imports inside the runtime child.
     from app.main import run_application
+    from app.platforms.windows.composition import create_windows_application
 
     shutdown_event = asyncio.Event()
 
@@ -285,7 +286,8 @@ async def _run_runtime_process_async(
             runtime_paths,
             shutdown_event=shutdown_event,
             on_started=notify_started,
-            nvidia_runtime_directory=(nvidia_runtime_directory),
+            application_factory=create_windows_application,
+            nvidia_runtime_directory=nvidia_runtime_directory,
         )
 
     finally:
