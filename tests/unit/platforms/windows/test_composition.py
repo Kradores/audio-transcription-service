@@ -1,4 +1,5 @@
-from unittest.mock import MagicMock, call, patch
+from pathlib import Path
+from unittest.mock import ANY, MagicMock, call, patch
 
 from app.application import Application
 from app.audio.capture import (
@@ -11,6 +12,9 @@ from app.core.runtime_paths import RuntimePaths
 from app.platforms.windows.composition import (
     WindowsConversationCaptureFactory,
     create_windows_application,
+)
+from app.platforms.windows.faster_whisper_runtime import (
+    WindowsFasterWhisperRuntimeInitializerFactory,
 )
 
 
@@ -101,7 +105,7 @@ def test_capture_factory_registers_both_captures(
 
 
 @patch("app.platforms.windows.composition.create_application")
-def test_create_windows_application_uses_windows_capture_factory(
+def test_create_windows_application_uses_windows_factories(
     create_application: MagicMock,
 ) -> None:
     runtime_paths = MagicMock(spec=RuntimePaths)
@@ -120,4 +124,38 @@ def test_create_windows_application_uses_windows_capture_factory(
         call_kwargs["capture_factory"],
         WindowsConversationCaptureFactory,
     )
-    assert call_kwargs["nvidia_runtime_directory"] is None
+    assert isinstance(
+        call_kwargs["runtime_initializer_factory"],
+        WindowsFasterWhisperRuntimeInitializerFactory,
+    )
+
+
+@patch("app.platforms.windows.composition.WindowsFasterWhisperRuntimeInitializerFactory")
+@patch("app.platforms.windows.composition.create_application")
+def test_create_windows_application_passes_nvidia_runtime_directory_to_factory(
+    create_application: MagicMock,
+    runtime_factory_type: MagicMock,
+    tmp_path: Path,
+) -> None:
+    runtime_paths = MagicMock(spec=RuntimePaths)
+    application = MagicMock(spec=Application)
+    create_application.return_value = application
+
+    runtime_factory = runtime_factory_type.return_value
+
+    result = create_windows_application(
+        runtime_paths,
+        nvidia_runtime_directory=tmp_path,
+    )
+
+    assert result is application
+
+    runtime_factory_type.assert_called_once_with(
+        nvidia_runtime_directory=tmp_path,
+    )
+
+    create_application.assert_called_once_with(
+        runtime_paths,
+        capture_factory=ANY,
+        runtime_initializer_factory=runtime_factory,
+    )
