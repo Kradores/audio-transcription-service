@@ -20,11 +20,15 @@ dependencies = [
     "faster-whisper>=1.2.1",
     "pycaw>=20251023; sys_platform == 'win32'",
     "huggingface-hub>=1.29.0,<2",
+    "ats-pipewire-native; sys_platform == 'linux'",
 ]
 
 [tool.uv.build-backend]
 module-name = "app"
 module-root = ""
+
+[tool.uv.sources]
+ats-pipewire-native = { path = "native/linux/pipewire", marker = "sys_platform == 'linux'" }
 
 [project.scripts]
 audio-transcription-service = "app:main"
